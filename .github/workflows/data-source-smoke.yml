@@ -1,0 +1,29 @@
+name: Stock market data smoke test
+on:
+  push:
+    branches: [main]
+    paths:
+      - "providers.py"
+      - ".github/workflows/data-source-smoke.yml"
+  workflow_dispatch:
+jobs:
+  test-foreign-institution-netbuy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pandas requests beautifulsoup4 pykrx
+      - name: Test Samsung Electronics Naver investor page
+        run: |
+          python - <<'PY'
+          from providers import _get_naver_flows
+          try:
+              data=_get_naver_flows("005930")
+              print("NAVER SUCCESS:", data)
+          except Exception as exc:
+              print("NAVER FAILURE:", type(exc).__name__, str(exc))
+              raise
+          PY
