@@ -1,0 +1,20 @@
+{
+  "success": true,
+  "KR": {
+    "price": 127.99151027113115,
+    "target1": 129.32441111246362,
+    "target2": null,
+    "integrated_target": 129.32441111246362,
+    "target_grade": "상승 여건 보통",
+    "target_signal_points": 60,
+    "target_inputs": "수급 포함"
+  },
+  "KR_flow_unavailable": {
+    "integrated_target": 129.32441111246362,
+    "target_inputs": "수급 제외"
+  },
+  "US": {
+    "integrated_target": 129.32441111246362,
+    "target_inputs": "수급 제외"
+  }
+}
