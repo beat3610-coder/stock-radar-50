@@ -469,8 +469,12 @@ with detail_tab:
                         key="risk_capital_"+mkt)
                     risk_percent=st.slider("한 거래에서 감수할 최대 손절 위험 (% 자금)",
                         min_value=0.5,max_value=5.0,value=1.0,step=0.5,key="risk_percent_"+mkt)
+                    trading_cost=st.number_input("왕복 비용·슬리피지 가정 (%)",
+                        min_value=0.0,max_value=5.0,value=0.35,step=0.05,
+                        key="risk_cost_"+mkt)
                     sizing=position_sizing(capital,r["price"],r["stop"],r["trade_target"],
-                                            risk_fraction=risk_percent/100)
+                        risk_fraction=risk_percent/100,
+                        round_trip_cost_fraction=trading_cost/100)
                     s1,s2,s3,s4=st.columns(4)
                     s1.metric("참고 매수수량",f'{sizing["shares"]:,}주')
                     s2.metric("예상 투자원금",f'{sizing["cost"]:,.2f} {unit}' if unit=="달러"
@@ -479,8 +483,8 @@ with detail_tab:
                               if sizing["planned_loss"] is not None else "산정 불가")
                     s4.metric("1차 익절 시 계획수익",f'+{sizing["planned_profit"]:,.0f} {unit}'
                               if sizing["planned_profit"] is not None else "산정 불가")
-                    st.caption("종가 진입·손절 참고가 체결을 가정한 계획 금액입니다. "
-                               "수수료·세금·호가 차이 및 갭 손실은 미반영이며 실제 손실액이 더 커질 수 있습니다.")
+                    st.caption("종가 진입·손절 참고가 체결 가정입니다. 왕복 비용·슬리피지를 가정치로 반영하며 "
+                               "세금·갭 하락·실제 체결·시장충격은 별개입니다. 손실이 계획보다 커질 수 있습니다.")
                 st.caption("과거 저항 참고: "+fmt(r["integrated_target"],mkt)+" / 종합 근거: "+(r["target_evidence"] or "분석 가능한 자료 없음"))
                 st.caption("과거 매물대 분석 방식: "+(r["volume_profile"] or "자료 부족")+
                            " | 외국인·기관: "+r["target_inputs"])
