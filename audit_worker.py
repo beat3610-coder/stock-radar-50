@@ -8,7 +8,24 @@ try:
     print("AUDIT60_TESTS exit="+str(check.returncode)+" "+(check.stderr+check.stdout)[-3500:],flush=True)
     if check.returncode: raise RuntimeError("risk and execution unit tests failed")
     from strategy_lab import run
-    report=run(per_market=20)
-    print("LAB_RESULT "+json.dumps(report,ensure_ascii=False,default=str),flush=True)
+    report=run(per_market=100)
+    import os
+    os.makedirs("/tmp",exist_ok=True)
+    with open("/tmp/strategy-lab-300.json","w",encoding="utf-8") as outfile:
+        json.dump(report,outfile,ensure_ascii=False,default=str)
+    brief={"created_utc":report["created_utc"],"train_end":report["train_end"],
+           "validation_end":report["validation_end"],"holdout_end":report["holdout_end"],
+           "markets":{}}
+    for m,r in report["markets"].items():
+        brief["markets"][m]={
+            "requested":r["requested"],"loaded":r["loaded"],"error_count":len(r["errors"]),
+            "errors":r["errors"][:5],
+            "train_selected":r["training_selected"],"selected":r["selected_for_diagnostic"],
+            "train":r["train"].get(r["training_selected"]),
+            "validation":r["validation"].get(r["training_selected"]),
+            "holdout":r["holdout_selected_metrics"],
+            "holdout_variants":r["holdout_all_variants_diagnostic_only"],
+            "portfolio":r["portfolio"],"stress_portfolio":r["stress_portfolio"]}
+    print("LAB300_SUMMARY "+json.dumps(brief,ensure_ascii=False,default=str),flush=True)
 except Exception:
     print("AUDIT60_FATAL "+traceback.format_exc(),flush=True)
