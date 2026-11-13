@@ -40,8 +40,20 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
                 "history_samples":int(len(starts)),"positive_rate_pct":None,
                 "downside_p75_pct":None,"stop_risk_pct":round(100*(p-stop)/p,2),
                 "basis":"완료된 과거 10거래일 경로 부족"}
-    favorable=np.array([highs[i+1:i+horizon+1].max()/close[i]-1 for i in starts])
-    adverse=np.array([1-lows[i+1:i+horizon+1].min()/close[i] for i in starts])
+    # Entry is NOT the decision-day close: it is the next day's actual open.
+    opens=x.Open.to_numpy(dtype=float)
+    entry_opens=opens[starts+1]
+    gap_ok=(entry_opens>0)&(np.abs(entry_opens/close[starts]-1)<=0.025)
+    starts=starts[gap_ok]
+    if len(starts)<min_samples:
+        return {"target":None,"target1":None,"target2":None,
+                "expected_upside_pct":None,"planned_rr":None,
+                "history_samples":int(len(starts)),"positive_rate_pct":None,
+                "downside_p75_pct":None,"stop_risk_pct":round(100*(p-stop)/p,2),
+                "basis":"다음날 시가 진입 및 갭 필터 적용 후 과거 표본 부족"}
+    entries=opens[starts+1]
+    favorable=np.array([highs[i+1:i+horizon+1].max()/opens[i+1]-1 for i in starts])
+    adverse=np.array([1-lows[i+1:i+horizon+1].min()/opens[i+1] for i in starts])
     # Median opportunity as primary reference; 75th quantile as optimistic case.
     q50=max(0,float(np.quantile(favorable,0.50)))
     q75=max(q50,float(np.quantile(favorable,0.75)))
@@ -49,8 +61,6 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
     # Vectorized stop-first historical executions, avoiding millions of .iloc
     # calls when the 300-symbol walk-forward test repeats this calculation.
     stop_fraction=risk/p
-    opens=x.Open.to_numpy(dtype=float)
-    entries=close[starts]
     stop_levels=entries*(1-stop_fraction)
     def historical_net(target_fraction):
         take_levels=entries*(1+target_fraction)
@@ -96,7 +106,7 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
             "historical_target_first_pct":hist_target_first_pct,
             "historical_second_first_pct":hist_second_first_pct,
             "historical_stop_first_pct":hist_stop_first_pct,
-            "basis":f"과거 완료된 {horizon}거래일 경로 {len(starts)}개 / 중앙값·75백분위 목표의 손절 우선·왕복비용 포함 손익 비교 (선택: {'75백분위' if use75 else '중앙값'}, 과거 평균 {net_expectancy:+.2f}%; 미래 수익 확률 아님)"}
+            "basis":f"다음 거래일 시가 진입·갭 2.5% 이내 과거 {horizon}거래일 경로 {len(starts)}개 / 중앙값·75백분위 목표의 손절 우선·왕복비용 포함 손익 비교 (선택: {'75백분위' if use75 else '중앙값'}, 과거 평균 {net_expectancy:+.2f}%; 미래 수익 확률 아님)"}
 
 def decide_trade(signal, plan, score=None, min_rr=1.2, min_upside=2.0,
                  max_risk_pct=12.0):
