@@ -21,6 +21,24 @@ jobs:
           python - <<'PY'
           import json, datetime
           from providers import _get_naver_flows
+          import requests
+          from bs4 import BeautifulSoup
+          r=requests.get("https://finance.naver.com/item/frgn.naver?code=005930&page=1",headers={"User-Agent":"Mozilla/5.0"},timeout=15)
+          r.encoding="euc-kr"
+          soup=BeautifulSoup(r.text,"html.parser")
+          tables=[]
+          for i,t in enumerate(soup.find_all("table")):
+              heads=" | ".join(th.get_text(" ",strip=True) for th in t.find_all("th"))
+              rows=t.find_all("tr")
+              example=[]
+              for tr in rows:
+                  cells=tr.find_all("td",recursive=False)
+                  if len(cells)>4:
+                      example=[c.get_text(" ",strip=True)[:40] for c in cells]
+                      break
+              if heads or example:
+                  tables.append({"index":i,"headers":heads[:260],"row_count":len(rows),"sample":example[:12]})
+          print("NAVER HTML DIAGNOSTICS:",json.dumps({"status":r.status_code,"url":r.url,"title":soup.title.get_text(" ",strip=True) if soup.title else "no title","num_tables":len(tables),"sample_tables":tables[:30]},ensure_ascii=False))
           result={"tested_at_utc":datetime.datetime.now(datetime.timezone.utc).isoformat(),"ticker":"005930","source":"Naver investor daily"}
           try:
               data=_get_naver_flows("005930")
