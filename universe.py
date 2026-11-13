@@ -59,6 +59,32 @@ def kospi_top100():
                         problems.append(f"KRX {day}: {str(exc)[:75]}")
             except Exception as exc:
                 problems.append(f"pykrx: {str(exc)[:90]}")
+            # KIND public corporation-list HTML is an HTTPS fallback when old
+            # KRX/FDR HTTP bootstrap endpoints return non-JSON or are blocked.
+            try:
+                import requests
+                from io import StringIO
+                url="https://kind.krx.co.kr/corpgeneral/corpList.do"
+                resp=requests.get(url,params={"method":"download","searchType":"13"},
+                                  headers={"User-Agent":"Mozilla/5.0"},timeout=12)
+                resp.raise_for_status()
+                resp.encoding=resp.apparent_encoding
+                tables=pd.read_html(StringIO(resp.text))
+                for kind_df in tables:
+                    kind_df.columns=[str(k).strip() for k in kind_df.columns]
+                    kk=next((k for k in kind_df if k in ("종목코드","종목 코드","단축코드")),None)
+                    sk=next((k for k in kind_df if k in ("업종","업종명")),None)
+                    if kk and sk:
+                        before=len(industry_lookup)
+                        for code,value in zip(kind_df[kk],kind_df[sk]):
+                            value=str(value).strip()
+                            if value.lower() not in ("","nan","none","-","0"):
+                                industry_lookup.setdefault(norm_code(code),value)
+                        if len(industry_lookup)>before:
+                            sources.append("KIND 상장법인 업종목록(HTTPS)")
+                        break
+            except Exception as exc:
+                problems.append(f"KIND: {str(exc)[:85]}")
             # FDR description lists use Sector; supplement missing codes only.
             for desc_market in ("KOSPI-DESC","KRX-DESC"):
                 if sum(norm_code(code) in industry_lookup for code in df.head(100)[ticker])==100:
