@@ -14,6 +14,7 @@ HOLD_DAYS = 10
 COST_PCT = 0.35  # assumed round trip including commission/slippage; taxes may differ
 WARMUP = 270
 STEP = 10
+FIXED_HOLDOUT_START = '2026-04-01'  # fixed in advance of strategy comparisons
 
 def simulate_exit(frame, signal_index, entry_price, stop, target, max_days=HOLD_DAYS,
                   cost_pct=COST_PCT):
@@ -130,12 +131,10 @@ def run(per_market=100):
             except Exception as exc:
                 result["errors"].append({"market":market,"ticker":ticker,
                                           "reason":str(exc)[:250]})
-        # Time-split by entry date with 70%/30% of observed calendar range.
-        # Not a survival-bias correction; no parameters are fitted on test period.
-        dates = sorted({r["entry_date"] for r in trades})
-        cut = dates[int(len(dates)*0.7)] if dates else None
-        train = [r for r in trades if r["entry_date"]<cut] if cut else []
-        test = [r for r in trades if r["entry_date"]>=cut] if cut else []
+        # The holdout boundary must NOT depend on which dates traded.
+        cut = FIXED_HOLDOUT_START
+        train = [r for r in trades if r["entry_date"]<cut]
+        test = [r for r in trades if r["entry_date"]>=cut]
         m = metrics(test)
         result["markets"][market] = {"requested":per_market,"listed":len(items),
              "loaded":successes,"date_split":cut,
