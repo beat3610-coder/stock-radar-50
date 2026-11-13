@@ -1,5 +1,6 @@
 {
   "success": true,
+  "chart_and_risk_panel": true,
   "screens": [
     {
       "market": "코스피",
