@@ -71,13 +71,43 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
     hist_target_first_pct=round(100*first_hit/len(starts),2)
     hist_second_first_pct=round(100*second_hit/len(starts),2)
     hist_stop_first_pct=round(100*stops_first/len(starts),2)
-    target=p*(1+q50)
+    # Important: maximum future high ignores stop-before-target sequencing.
+    # Compare actual realizable returns of the two historical exit barriers.
+    def historical_net(target_fraction):
+        result=[]
+        for i in starts:
+            entry=close[i]
+            s=entry*(1-stop_fraction)
+            take=entry*(1+target_fraction)
+            price=close[i+horizon]
+            for j in range(i+1,i+horizon+1):
+                if float(x.Open.iloc[j])<=s:
+                    price=float(x.Open.iloc[j]);break
+                if float(x.Open.iloc[j])>=take:
+                    price=float(x.Open.iloc[j]);break
+                if lows[j]<=s:
+                    price=s;break
+                if highs[j]>=take:
+                    price=take;break
+            result.append(100*(price/entry-1)-0.35)
+        return np.asarray(result,dtype=float)
+    net50=historical_net(q50)
+    net75=historical_net(q75)
+    # Wider take profit needs 0.25 percentage point historic net advantage
+    # over median target to avoid shifting exits on marginal differences.
+    use75=bool(net75.mean()>=net50.mean()+0.25)
+    net_expectancy=float(net75.mean() if use75 else net50.mean())
+    target=p*(1+(q75 if use75 else q50))
     second=p*(1+q75)
     t1=target if target>p else None
     t2=second if second>p else None
     return {"target":t1,"target1":t1,"target2":t2,
-            "expected_upside_pct":100*q50,
+            "expected_upside_pct":100*(q75 if use75 else q50),
             "planned_rr":(t1-p)/risk if t1 else None,
+            "historical_net_expectancy_pct":round(net_expectancy,3),
+            "historical_target_choice":"75th" if use75 else "50th",
+            "historical_net_50th_pct":round(float(net50.mean()),3),
+            "historical_net_75th_pct":round(float(net75.mean()),3),
             "history_samples":len(starts),
             "positive_rate_pct":round(100*np.mean(favorable>0),2),
             "downside_p75_pct":round(100*np.quantile(adverse,0.75),2),
@@ -85,7 +115,7 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
             "historical_target_first_pct":hist_target_first_pct,
             "historical_second_first_pct":hist_second_first_pct,
             "historical_stop_first_pct":hist_stop_first_pct,
-            "basis":f"과거 같은 추세의 완료된 {horizon}거래일 경로 {len(starts)}개 / 유리변동 중앙값·75백분위 (미래 수익 확률 아님)"}
+            "basis":f"과거 완료된 {horizon}거래일 경로 {len(starts)}개 / 중앙값·75백분위 목표의 손절 우선·왕복비용 포함 손익 비교 (선택: {'75백분위' if use75 else '중앙값'}, 과거 평균 {net_expectancy:+.2f}%; 미래 수익 확률 아님)"}
 
 def decide_trade(signal, plan, score=None, min_rr=1.2, min_upside=2.0,
                  max_risk_pct=12.0):
@@ -105,6 +135,9 @@ def decide_trade(signal, plan, score=None, min_rr=1.2, min_upside=2.0,
         reasons.append(f"과거 중앙 상승여력 {plan['expected_upside_pct']:.2f}% < {min_upside:.1f}%")
     if plan["planned_rr"]<min_rr:
         reasons.append(f"경험 기반 기대손익비 {plan['planned_rr']:.2f}R < {min_rr:.1f}R")
+    net=plan.get("historical_net_expectancy_pct")
+    if net is None or net<=0:
+        reasons.append("완료된 과거 경로의 손절 선행·왕복비용 반영 평균 손익이 0% 이하")
     if plan["stop_risk_pct"] is not None and plan["stop_risk_pct"]>max_risk_pct:
         reasons.append(f"손절폭 {plan['stop_risk_pct']:.2f}% > {max_risk_pct:.1f}%")
     if reasons:return hold," · ".join(reasons)
