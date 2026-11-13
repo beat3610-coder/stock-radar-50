@@ -45,11 +45,6 @@ def replay(trades, frames, *, start="2026-04-01", initial_cash=INITIAL_CASH,
     curve=[]
     executions=[]
     for date in dates:
-        # Latest available price, including across exchange holidays.
-        for ticker,s in close.items():
-            if date in s.index:
-                price=float(s.loc[date])
-                if np.isfinite(price) and price>0:last[ticker]=price
         # Only admit trades whose next-open entry is today. Use the signal
         # score for fixed deterministic priority, never future returns.
         todo=sorted(entries.get(date,[]),key=lambda t:(-float(t.get("score") or 0),str(t["ticker"])))
@@ -94,6 +89,13 @@ def replay(trades, frames, *, start="2026-04-01", initial_cash=INITIAL_CASH,
                                    "net_pct":round(100*(item["exit_price"]*(1-cost/2)/
                                                        (item["entry"]*(1+cost/2))-1),3)})
                 del holdings[ticker]
+        # Only NOW observe today's closing prices for equity marks; entry
+        # sizing above used prior-session information, not today's close.
+        # Latest available price, including across exchange holidays.
+        for ticker,s in close.items():
+            if date in s.index:
+                price=float(s.loc[date])
+                if np.isfinite(price) and price>0:last[ticker]=price
         value=cash+sum(item["shares"]*last.get(k,item["entry"]) for k,item in holdings.items())
         curve.append((str(date.date()),float(value)))
     vals=np.array([v for _,v in curve],dtype=float)
