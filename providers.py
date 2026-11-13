@@ -36,37 +36,56 @@ def _summarize_flow(data, ins, foreign, source):
     return {"date":str(pd.Timestamp(data.index[-1]).date()),
             "기관":stat(data[ins]),"외국인":stat(data[foreign]),"source":source}
 
-def _get_naver_flows(code):
-    """Public Naver Finance investor table, verified against visible 005930 layout.
-    Two pages (normally 20 entries/page), require 20 distinct valid trading dates.
-    """
-    import requests
+def _parse_naver_investor_rows(html):
+    """Parse the institution/foreign daily net-buy share volume table."""
+    import re
     from bs4 import BeautifulSoup
-    rows=[]
-    session=requests.Session()
-    session.headers.update({"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
-                            "Referer":"https://finance.naver.com/"})
-    for page in (1,2,3):
-        url=f"https://finance.naver.com/item/frgn.naver?code={code}&page={page}"
-        response=session.get(url,timeout=7)
-        response.raise_for_status()
-        response.encoding=response.apparent_encoding
-        soup=BeautifulSoup(response.text,"html.parser")
-        found=0
-        for tr in soup.select("table tr"):
+    soup=BeautifulSoup(html,"html.parser")
+    candidates=[]
+    for table in soup.find_all("table"):
+        headers=" ".join(th.get_text(" ",strip=True) for th in table.find_all("th"))
+        if not all(v in headers for v in ("기관","외국인","날짜")):
+            continue
+        rows=[]
+        for tr in table.find_all("tr"):
             cells=tr.find_all("td",recursive=False)
-            if len(cells)<8:continue
-            raw=[cell.get_text(" ",strip=True).replace(",","").replace(" ","") for cell in cells]
+            if len(cells)<7:continue
+            values=[cell.get_text(" ",strip=True).replace(",","").replace(" ","") for cell in cells]
+            if not re.fullmatch(r"20\d{2}\.\d{2}\.\d{2}",values[0]):continue
             try:
-                when=pd.to_datetime(raw[0],format="%Y.%m.%d",errors="raise")
-                ins=int(raw[5]);foreign=int(raw[6])
-                rows.append((when,ins,foreign));found+=1
-            except (ValueError,IndexError,TypeError):continue
-        if len({row[0] for row in rows})>=20:break
-        if found==0:raise ValueError(f"네이버 투자자 수급 표 파싱 실패(page {page}; HTML 구조 확인 필요)")
-    if not rows:raise ValueError("네이버 수급 데이터 없음")
+                date=pd.to_datetime(values[0],format="%Y.%m.%d")
+                # date/close/diff/change/volume/institution net/foreign net/foreign ownership
+                rows.append((date,int(values[5]),int(values[6])))
+            except (ValueError,TypeError,IndexError):continue
+        if rows:candidates.append(rows)
+    return max(candidates,key=len) if candidates else []
+
+def _get_naver_flows(code):
+    import requests
+    session=requests.Session()
+    session.headers.update({
+        "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36",
+        "Referer":"https://finance.naver.com/",
+        "Accept-Language":"ko-KR,ko;q=0.9,en-US;q=0.7"})
+    rows=[]
+    diagnostics=[]
+    for page in range(1,5):
+        try:
+            response=session.get("https://finance.naver.com/item/frgn.naver",
+                                 params={"code":code,"page":page},timeout=10)
+            response.raise_for_status()
+            response.encoding="euc-kr"
+            parsed=_parse_naver_investor_rows(response.text)
+            diagnostics.append(f"p{page}:{response.status_code}/{len(parsed)}일/{len(response.content)}B")
+            rows.extend(parsed)
+            if len({d for d,_,_ in rows})>=20:break
+        except requests.RequestException as exc:
+            diagnostics.append(f"p{page}:{type(exc).__name__} {str(exc)[:75]}")
+            break
+    if len({d for d,_,_ in rows})<20:
+        raise ValueError("네이버 20거래일 조회 실패 ["+"; ".join(diagnostics)+"]")
     frame=pd.DataFrame(rows,columns=["date","기관","외국인"]).drop_duplicates("date").set_index("date")
-    return _summarize_flow(frame,"기관","외국인","네이버 증권 투자자별 일별 순매매")
+    return _summarize_flow(frame,"기관","외국인","네이버 증권 일별 순매매 주수")
 
 def _get_krx_flows(code,end_date):
     from pykrx import stock
@@ -91,4 +110,7 @@ def get_flows(code,end_date):
             return result
         except Exception as exc:
             errors.append(f"{'네이버' if provider==_get_naver_flows else 'KRX'}: {str(exc)[:165]}")
+    import logging
+    logging.getLogger("stock_radar.flows").warning(
+        "Investor flow failed %s %s: %s",code,end_date," | ".join(errors))
     raise RuntimeError(" | ".join(errors))
