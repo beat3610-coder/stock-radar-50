@@ -139,18 +139,29 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v15_"+mkt
-    if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
+    key="results_v16_"+mkt
+    if key not in st.session_state:
+        st.session_state[key]={"rows":{},"errors":{},"batches":[]}
     state=st.session_state[key]
+    page_key="result_batch_page_v16_"+mkt
     left,right=st.columns([3,1])
-    if left.button("▶ 다음 50종목 실제 시세 분석",key="run"+mkt,type="primary"):
-        remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
-        with st.spinner(f"{min(50,len(remaining))}개 종목의 실제 OHLCV 조회 중"):
-            for item in remaining[:50]:
-                try:state["rows"][item[0]]=to_row(item,with_flow=with_flow,market_rank=market_rank.get(item[0]))
-                except Exception as e:state["errors"][item[0]]={"종목":item[1],"코드":item[0],"오류":str(e)[:260]}
+    remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
+    if left.button("▶ 다음 50종목 실제 시세 분석",key="run"+mkt,type="primary",
+                   disabled=not remaining):
+        batch=remaining[:50]
+        # Record each attempted ticker by batch even if a data provider fails.
+        # This prevents failures from shifting the following 50 onto the first page.
+        state["batches"].append([item[0] for item in batch])
+        st.session_state[page_key]=len(state["batches"])
+        with st.spinner(f"{len(batch)}개 종목의 실제 OHLCV 조회 중"):
+            for item in batch:
+                try:
+                    state["rows"][item[0]]=to_row(item,with_flow=with_flow,market_rank=market_rank.get(item[0]))
+                except Exception as e:
+                    state["errors"][item[0]]={"종목":item[1],"코드":item[0],"오류":str(e)[:260]}
     if right.button("이 시장 결과 초기화",key="reset"+mkt):
-        st.session_state[key]={"rows":{},"errors":{}}
+        st.session_state[key]={"rows":{},"errors":{},"batches":[]}
+        st.session_state.pop(page_key,None)
         st.rerun()
     success=len(state["rows"]); fail=len(state["errors"])
     st.progress((success+fail)/len(ordered),text=f"분석 진행: {success+fail}/{len(ordered)} (정상 {success} · 오류 {fail})")
@@ -158,18 +169,29 @@ def ranking_page(mkt):
         df=pd.DataFrame(list(state["rows"].values()))
         df["_market_order"]=df["코드"].map(order_index)
         df=df.sort_values("_market_order",ascending=True).drop(columns="_market_order")
-        # Display at most 50 analyzed rows at once; preserve full CSV download.
-        pages=max(1,(len(df)+49)//50)
-        page=st.selectbox("분석 결과 페이지 (50개씩)",list(range(1,pages+1)),key="result_page_"+mkt,
-                          format_func=lambda p:f"{p}페이지 / {pages}페이지")
+        # Display the exact batch that was just analyzed, not the first 50
+        # successful rows. The next-analysis button automatically selects it.
+        pages=len(state["batches"])
+        if pages==0:
+            # Graceful fallback for an old/stale Streamlit session.
+            state["batches"]=[list(state["rows"])+list(state["errors"])]
+            pages=1
+        if st.session_state.get(page_key) not in range(1,pages+1):
+            st.session_state[page_key]=pages
+        page=st.selectbox("분석 결과 묶음 (최대 50개씩)",
+                          list(range(1,pages+1)),key=page_key,
+                          format_func=lambda p:f"{p}번째 50종목 / 총 {pages}묶음")
         # Prioritize actionable prices and the trading decision in the horizontal table.
         primary_cols=("구분","종목","코드","업종","거래일","통화",
                       "매매 판단","종가","통합 목표가","손절 참고",
                       "52주 고점","52주 저점")
         first=[col for col in primary_cols if col in df.columns]
         df=df[first+[col for col in df.columns if col not in first]]
-        shown=df.iloc[(page-1)*50:page*50]
-        st.caption(f"분석 완료 {len(df)}종목 중 {len(shown)}종목 표시")
+        batch_codes=set(state["batches"][page-1])
+        shown=df[df["코드"].isin(batch_codes)]
+        batch_failed=sum(code in state["errors"] for code in batch_codes)
+        st.caption(f"{page}번째 분석 묶음: 정상 {len(shown)}개 · 조회 실패 {batch_failed}개 "
+                   f"| 누적 정상 {len(df)}개 · 누적 분석 {success+fail}/{len(ordered)}개")
         # Display thousands separators for every price/target/MA field,
         # without converting stored numeric values or changing CSV data.
         price_cols=("종가","20일선","60일선","120일선","200일선",
