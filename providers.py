@@ -6,7 +6,7 @@ def get_prices(code, market):
     import FinanceDataReader as fdr
     start=(dt.date.today()-dt.timedelta(days=850)).isoformat()
     failures=[]
-    candidates=[f"NAVER:{code}",code] if market=="KR" else [f"STOOQ:{code}",code]
+    candidates=[f"NAVER:{code}",code] if market in ("KR","KQ") else [f"STOOQ:{code}",code]
     for symbol in candidates:
         try:
             return normalize(fdr.DataReader(symbol,start)),f"FinanceDataReader {symbol}"
@@ -14,7 +14,7 @@ def get_prices(code, market):
             failures.append(f"{symbol}: {str(e)[:110]}")
     try:
         import yfinance as yf
-        suffix=".KQ" if code in ("247540","086520","035900") else ".KS"
+        suffix=".KQ" if market=="KQ" else ".KS"
         ticker=code if market=="US" else code+suffix
         data=yf.download(ticker,period="2y",interval="1d",auto_adjust=True,progress=False,threads=False,timeout=12)
         return normalize(data),f"Yahoo {ticker}"
