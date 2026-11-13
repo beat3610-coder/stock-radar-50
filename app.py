@@ -145,11 +145,11 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v18_"+mkt
+    key="results_v19_"+mkt+("_flow" if with_flow else "_tech")
     if key not in st.session_state:
         st.session_state[key]={"rows":{},"errors":{},"batches":[]}
     state=st.session_state[key]
-    page_key="result_batch_page_v18_"+mkt
+    page_key="result_batch_page_v19_"+mkt+("_flow" if with_flow else "_tech")
     left,right=st.columns([3,1])
     remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
     if left.button("▶ 다음 50종목 실제 시세 분석",key="run"+mkt,type="primary",
@@ -174,11 +174,16 @@ def ranking_page(mkt):
     if success:
         checked=list(state["rows"].values())
         approved=sum(x.get("매매 판단") in ("매수 검토","강한 매수 검토") for x in checked)
-        gated=sum(x.get("매매 판단")=="상승 신호·매수 유보" for x in checked)
-        st.caption(f"분석 완료 기준 신규 매수 검토 {approved}개 · 상승 신호지만 목표가·손익비로 유보 {gated}개 · 기타 {success-approved-gated}개")
-        if approved==0 and gated>0:
-            st.info("현재 결과에서 매수 검토가 없는 주요 원인 중 하나는 목표가 상승여력 3%·기대손익비 1.5R의 필터입니다. "
-                    "기술 판단(목표 검증 전) 및 매매 판단 근거 열을 함께 확인하세요. 이는 수익률이 검증된 예측모형이 아닙니다.")
+        technical_only=sum(x.get("매매 판단")=="기술매수 후보·수급 미확인" for x in checked)
+        gated=sum("매수 유보" in str(x.get("매매 판단","")) and
+                  str(x.get("기술 판단(목표 검증 전)","")).startswith(("매수 검토","강한 매수 검토","기술매수 후보"))
+                  for x in checked)
+        st.caption(f"분석 완료 기준 수급 확인 매수 검토 {approved}개 · 기술매수 후보(수급 미확인) {technical_only}개 "
+                   f"· 목표가·손익비로 유보 {gated}개 · 기타 {success-approved-technical_only-gated}개")
+        if approved==0:
+            st.info("매수 검토 0개는 매수할 주식이 없다는 뜻이 아닙니다. "
+                    "수급 미확인 시에는 기술적 매수 후보로만 분류하며, 목표가 3%·손익비 1.5R 필터로 추가 유보될 수 있습니다. "
+                    "기술 판단(목표 검증 전) 열과 매매 판단 근거를 확인하세요. 백테스트 검증 전 참고 신호입니다.")
     if success:
         df=pd.DataFrame(list(state["rows"].values()))
         df["_market_order"]=df["코드"].map(order_index)
@@ -275,7 +280,7 @@ with detail_tab:
                 st.write(r["reason"] or "강한 매수 조건 미충족")
                 if r["technical_signal_before_gate"]!=r["signal"]:
                     st.caption("목표가·손익비 적용 전 기술 판단: "+r["technical_signal_before_gate"])
-                if r["signal"]=="상승 신호·매수 유보":
+                if r["signal"] in ("상승 신호·매수 유보","기술상승·매수 유보(수급 미확인)"):
                     st.warning("매수 유보 사유: "+r["entry_reason"])
                 else:
                     st.caption("매수 목표 검증: "+r["entry_reason"])
@@ -379,6 +384,7 @@ with guide_tab:
 - **매물대 제한:** 거래량 집중 가격대는 일봉 대표가격에 하루 거래량을 배정한 **근사치**입니다. 실제 가격별 체결량·매물대 분석과 동일하지 않습니다.
 - **2R 손익비 목표:** ATR과 20일선을 참고해 정한 손절폭의 두 배를 현재가에 더한 값입니다. 통합 목표가와 별개입니다.
 - **신규 매수 검증:** 종합점수상 매수 검토 신호여도 (1) 통합 목표까지 상승 여력이 최소 3.0%, (2) 손절 참고가 대비 손익비가 최소 1.5R이어야 **매수 검토**를 유지합니다. 하나라도 부족하거나 목표가·손절가가 없으면 **상승 신호·매수 유보**로 표시합니다. 기존의 과열·하락 경고는 우선 유지합니다. 3%·1.5R은 백테스트 전 잠정 운영 기준입니다.
+- **수급 조회 실패:** 기술점수가 60점 이상이면 **기술매수 후보·수급 미확인**으로 별도 표시하고, 목표·손익비 미달은 **기술상승·매수 유보(수급 미확인)**으로 표기합니다. 이를 외국인·기관 매수가 확인된 실제 **매수 검토**와 혼동하지 마세요. 수급 조회 설정을 바꾸면 이전 분석 결과와 별개로 저장됩니다.
 - **ETF 주의:** SOXL의 3배 레버리지와 TIGER 커버드콜 ETF의 분배금·분배락은 저항 목표 산식에 반영되지 않습니다.
 
 **주의사항:** 이 점수는 백테스트로 수익률이 입증되지 않은 규칙 기반 분석입니다. 무료 호스팅과 외부 데이터 공급자의 사정으로 일부 종목 조회가 실패할 수 있으며, 실시간 시세/정시 자동 갱신/자동매매 기능은 없습니다.""")
