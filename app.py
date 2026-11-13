@@ -563,15 +563,30 @@ with guide_tab:
             audit100=json.loads(audit100_path.read_text(encoding="utf8"))
             intended=audit100.get("requested_tickers",7)
             verified=audit100.get("analysed_tickers")
-            with st.expander("📊 100종목 매매전략 백테스트 결과 — 정확성·수익성 미입증"):
-                if intended!=100:
-                    st.info("100종목 테스트가 아직 완료되지 않았습니다. 최신으로 저장된 이전 7종목 진단입니다.")
+            with st.expander("📊 코스피·코스닥·나스닥 각 100종목 (총 300종목) 백테스트"):
+                if intended!=300:
+                    st.info("300종목 검증 결과는 아직 저장되지 않았습니다. 아래 정보는 최신 완료된 이전 표본 자료입니다.")
                 else:
                     st.caption(f'검증 기준일(UTC) {audit100.get("time_utc","—")} '
                                f'| 요청 {intended}종목 · 분석 {verified}종목 · 실패 {audit100.get("failed_tickers")}종목 '
                                f'| 매매 신호 {audit100.get("total_trades",0)}건')
+                    aggregate=audit100.get("aggregate",{})
+                    c1,c2,c3=st.columns(3)
+                    c1.metric("총 매매 거래",f'{audit100.get("total_trades",0):,}건')
+                    c2.metric("매매 승률",f'{aggregate["win_rate_pct"]:.2f}%' if aggregate.get("win_rate_pct") is not None else "측정 불가")
+                    c3.metric("평균 거래 순수익률",f'{aggregate["mean_trade_net_pct"]:+.2f}%' if aggregate.get("mean_trade_net_pct") is not None else "측정 불가")
+                    st.caption(f'시점별 전체 판정 기록 {audit100.get("historical_decision_count","—")}회 · 왕복비용 {audit100.get("round_trip_cost_pct",0.35)}% 가정')
+                    directions=audit100.get("signal_direction_audit",{})
+                    if directions:
+                        st.markdown("**매매 판단별 실제 10거래일 후 방향 비교**")
+                        st.dataframe(pd.DataFrame([{"판정":signal,**values} for signal,values in directions.items()]),
+                                     hide_index=True,use_container_width=True)
                     for market,stats in audit100.get("per_market",{}).items():
                         st.caption(f'{market}: 종목 {stats.get("analysed")}/{stats.get("requested")} · 거래 {stats.get("trades")}')
+                        if stats.get("signal_direction_audit"):
+                            st.dataframe(pd.DataFrame([{"판정":signal,**values}
+                                                      for signal,values in stats["signal_direction_audit"].items()]),
+                                         hide_index=True,use_container_width=True)
                     outcomes=[{"시장·종목":k,"종목명":v.get("name",""),"거래 수":v.get("trades",0),
                                "평균 순수익률 %":v.get("mean_trade_net_pct"),
                                "승률 %":v.get("win_rate_pct"),
@@ -582,7 +597,7 @@ with guide_tab:
                                "과거 수급 부재·동시 보유·시장충격·지수 대비 초과성과 검증이 빠져 있습니다. "
                                "유료 판매의 정확성·성과 인증 결과로 사용할 수 없습니다.")
         except Exception as e:
-            st.warning("100종목 백테스트 결과 조회 오류: "+str(e)[:120])
+            st.warning("300종목 백테스트 결과 조회 오류: "+str(e)[:120])
     with st.expander("🧪 시세 교차확인·과거신호 검증 결과 (제한된 표본)"):
         audit_path=Path("data/accuracy-audit.json")
         if audit_path.exists():
