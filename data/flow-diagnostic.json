@@ -1,5 +1,5 @@
 {
-  "tested_at_utc": "2026-11-13T10:01:42.613021+00:00",
+  "tested_at_utc": "2026-11-13T10:02:59.892971+00:00",
   "ticker": "005930",
   "source": "Naver investor daily",
   "html_diagnostic": {
@@ -15,5 +15,28 @@
     "url": "https://stock.naver.com/api/domestic/detail/005930/trend?tradeType=KRX&startIdx=0&pageSize=20",
     "content_type": "application/json; charset=utf-8",
     "body": "{\"message\":\"Route GET:/api/domestic/detail/005930/trend?tradeType=KRX&startIdx=0&pageSize=20 not found\",\"error\":\"Not Found\",\"statusCode\":404}"
+  },
+  "alternative_data_sources": {
+    "github_aggregates": {
+      "status": 200,
+      "url": "https://raw.githubusercontent.com/james-brand/korea-market-data/main/data/foreign-flows-aggregates.csv",
+      "bytes": 230439,
+      "content_type": "text/plain; charset=utf-8",
+      "sample": "# K-Export Stars Foreign Flow aggregates · as of 2026-11-12 · CC BY 4.0 · kexportstars.com/foreign-flow-watch/\nticker,name_en,market,last_close,f_1d_sh,f_5d_sh,f_5d_val,f_20d_sh,f_20d_val,i_1d_sh,i_5d_sh,i_20d_sh\r\n005930,SamsungElectronics,KOSPI,206500,3611532,5191714,1089701832600,-297829,24912629600,-1283117,176969,2536715\r\n402340,SKSQUARE,KOSPI,773000,173595,284235,219275691000,-164195,-1888198"
+    },
+    "naver_mobile_front": {
+      "status": 400,
+      "url": "https://m.stock.naver.com/front-api/stock/domestic/integration?code=005930",
+      "bytes": 307,
+      "content_type": "application/json; charset=utf-8",
+      "sample": "{'detailCode': 'invalid_value', 'message': '{\"formErrors\":[],\"fieldErrors\":{\"endType\":[\"Invalid option: expected one of \\\\\"stock\\\\\"|\\\\\"index\\\\\"|\\\\\"futures\\\\\"|\\\\\"etf\\\\\"|\\\\\"marketindexForeign\\\\\"|\\\\\"marketindexDomestic\\\\\"|\\\\\"konex\\\\\"|\\\\\"etn\\\\\"|\\\\\"crypto\\\\\"|\\\\\"ipo\\\\\"|\\\\\"fund\\\\\"\"]}}'}"
+    },
+    "naver_mobile_legacy": {
+      "status": 200,
+      "url": "https://m.stock.naver.com/api/stock/005930/integration",
+      "bytes": 9236,
+      "content_type": "application/json;charset=UTF-8",
+      "sample": "{'stockEndType': 'stock', 'itemCode': '005930', 'reutersCode': '005930', 'stockName': '삼성전자', 'totalInfos': [{'code': 'lastClosePrice', 'key': '전일', 'value': '208,000'}, {'code': 'openPrice', 'key': '시가', 'value': '209,500', 'compareToPreviousPrice': {'code': '2', 'text': '상승', 'name': 'RISING'}}, {'code': 'highPrice', 'key': '고가', 'value': '216,000', 'compareToPreviousPrice': {'code': '2', 'text': '상승', 'name': 'RISING'}}, {'code': 'lowPrice', 'key': '저가', 'value': '205,000', 'compareToPreviousPrice': {'code': '5', 'text': '하락', 'name': 'FALLING'}}, {'code': 'accumulatedTradingVolume', 'key': '거래량', 'value': '20,425,233'}, {'code': 'accumulatedTradingValue', 'key': '대금', 'value': '4조 2,879억'}, {'code': 'marketValue', 'key': '시총', 'value': '1,210조 1,797억'}, {'code': 'foreignRate', 'key': '외인소진율', 'value': '46.07%'}, {'code': 'highPriceOf52Weeks', 'key': '52주 최고', 'value': '380,000'}, {'code': 'lowPriceOf52Weeks', 'key': '52주 최저', 'value"
+    }
   }
 }
