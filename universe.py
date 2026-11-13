@@ -69,11 +69,36 @@ def nasdaq_top100():
         rows=[(code,code,"Nasdaq-100") for code in NASDAQ_SNAPSHOT]
         return rows,f"2026-11-13 기준 Nasdaq-100 저장 목록 (구성 자동갱신 실패: {str(e)[:90]})"
 
+
+def sort_nasdaq_by_market_cap(rows):
+    """Sort Nasdaq-100 company universe by observed NASDAQ stock market caps."""
+    import FinanceDataReader as fdr
+    df=fdr.StockListing("NASDAQ")
+    df.columns=[str(k).strip() for k in df.columns]
+    symbol=next((k for k in df if k.lower() in ("symbol","code","ticker")),None)
+    cap=next((k for k in df if k.lower().replace(" ","").replace("_","") in ("marcap","marketcap","marketcapitalization")),None)
+    if not symbol or not cap:
+        raise ValueError(f"NASDAQ 시가총액 열 누락: {list(df.columns)}")
+    df[symbol]=df[symbol].astype(str).str.upper().str.strip().str.replace(".","-",regex=False)
+    df[cap]=pd.to_numeric(df[cap].astype(str).str.replace(",","",regex=False).str.replace("$","",regex=False),errors="coerce")
+    caps=df.loc[df[cap].gt(0)].groupby(symbol)[cap].max()
+    known=sum(ticker in caps.index for ticker,_,_ in rows)
+    if known<80:raise ValueError(f"시총 데이터는 {known}/{len(rows)}개만 확인됩니다")
+    ranked=sorted(rows,key=lambda x:(-float(caps.get(x[0],0)),x[0]))
+    return ranked,f"NASDAQ 시총순 {known}/{len(rows)}개 확인 / 조회일 {dt.date.today().isoformat()} (미확인 종목 후순위)"
+
 def get_universe():
     kr_error=None
     try: kr,kr_source=kospi_top100()
     except Exception as e: kr=[];kr_source="시총 상위 100종목 조회 실패";kr_error=str(e)
     us,us_source=nasdaq_top100()
+    try:
+        us,cap_source=sort_nasdaq_by_market_cap(us)
+        us_source=us_source+" | "+cap_source
+        us_cap_sorted=True
+    except Exception as e:
+        us_source=us_source+" | 시총순 확인 불가: "+str(e)[:135]
+        us_cap_sorted=False
     kr_codes={code for code,_,_ in kr}
     us_codes={code for code,_,_ in us}
     # In the event a mandatory instrument qualifies for the index, do not duplicate.
@@ -83,5 +108,6 @@ def get_universe():
       "KR":[(c,n,"KR",s) for c,n,s in kr],
       "US":[(c,n,"US",s) for c,n,s in us],
       "KR_source":kr_source,"US_source":us_source,"KR_error":kr_error,
-      "KR_index_count":len(kr_codes),"US_index_count":len(us_codes)
+      "KR_index_count":len(kr_codes),"US_index_count":len(us_codes),
+      "US_cap_sorted":us_cap_sorted
     }
