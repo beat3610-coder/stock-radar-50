@@ -102,6 +102,8 @@ def to_row(item,with_flow=True,market_rank=None):
       "2차 익절 참고":round(r["trade_target2"],2) if r["trade_target2"] is not None else None,
       "과거 저항 참고":round(r["integrated_target"],2) if r["integrated_target"] is not None else None,
       "과거 경로 표본":r["historical_samples"],
+      "과거 비용 반영 손익 %":r["historical_net_expectancy_pct"],
+      "선택 익절 기준":r["historical_target_choice"],
       "과거 1차 익절 우선 %":r["historical_target_first_pct"],
       "과거 2차 익절 우선 %":r["historical_second_first_pct"],
       "과거 손절 우선 %":r["historical_stop_first_pct"],
@@ -193,11 +195,11 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v24_"+mkt+("_flow" if with_flow else "_tech")
+    key="results_v25_"+mkt+("_flow" if with_flow else "_tech")
     if key not in st.session_state:
         st.session_state[key]={"rows":{},"errors":{},"batches":[]}
     state=st.session_state[key]
-    page_key="result_batch_page_v24_"+mkt+("_flow" if with_flow else "_tech")
+    page_key="result_batch_page_v25_"+mkt+("_flow" if with_flow else "_tech")
     left,right=st.columns([3,1])
     remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
     if left.button("▶ 다음 50종목 실제 시세 분석",key="run"+mkt,type="primary",
@@ -271,7 +273,7 @@ def ranking_page(mkt):
         # Prioritize actionable prices and the trading decision in the horizontal table.
         primary_cols=("구분","종목","코드","업종","거래일","통화",
                       "매매 판단","종가","통합 목표가","손절 참고",
-                      "목표 상승여력 %","손절폭 %","기대손익비(R)",
+                      "목표 상승여력 %","손절폭 %","기대손익비(R)","과거 비용 반영 손익 %",
                       "2차 익절 참고","52주 고점","52주 저점")
         first=[col for col in primary_cols if col in df.columns]
         df=df[first+[col for col in df.columns if col not in first]]
@@ -308,6 +310,8 @@ def ranking_page(mkt):
             number_formats["목표 상승여력 %"]="{:.2f}"
         if "손절폭 %" in shown.columns:
             number_formats["손절폭 %"]="{:.2f}"
+        if "과거 비용 반영 손익 %" in shown.columns:
+            number_formats["과거 비용 반영 손익 %"]="{:+.2f}"
         for col in ("과거 1차 익절 우선 %","과거 2차 익절 우선 %",
                     "과거 손절 우선 %"):
             if col in shown.columns:number_formats[col]="{:.1f}"
@@ -334,7 +338,7 @@ with ranking_tab:ranking_page(active)
 with candidate_tab:
     st.subheader("투자 후보 탐색 — "+MARKET_LABELS[active])
     st.caption("실제 분석된 종목만 표시합니다. 기술 상승 신호·수급·종가 검증을 별도로 구분해 비교합니다.")
-    result_key="results_v24_"+active+("_flow" if with_flow else "_tech")
+    result_key="results_v25_"+active+("_flow" if with_flow else "_tech")
     result_state=st.session_state.get(result_key,{"rows":{}})
     if not result_state.get("rows"):
         st.info("선택 시장 분석 탭에서 먼저 50종목 실제 분석을 실행하세요.")
@@ -362,13 +366,14 @@ with candidate_tab:
         candidates=candidates.sort_values(sort_col,ascending=False,na_position="last")
         columns=["구분","종목","코드","매매 판단","기술 판단(목표 검증 전)",
                  "종가","통합 목표가","손절 참고","목표 상승여력 %","손절폭 %",
-                 "기대손익비(R)","과거 1차 익절 우선 %","과거 경로 표본",
+                 "기대손익비(R)","과거 비용 반영 손익 %",
+                 "과거 1차 익절 우선 %","과거 경로 표본",
                  "점수","종가 교차검증","매매 판단 근거","거래일"]
         columns=[col for col in columns if col in candidates]
         st.caption(f"조건에 해당하는 종목 {len(candidates)}개")
         if len(candidates):
             fmt_cols={col:("{:,.2f}" if active=="US" and col!="점수" else "{:,.0f}") for col in ("종가","통합 목표가","손절 참고","점수") if col in columns}
-            fmt_cols.update({col:"{:.2f}" for col in ("목표 상승여력 %","손절폭 %","기대손익비(R)","과거 1차 익절 우선 %") if col in columns})
+            fmt_cols.update({col:"{:.2f}" for col in ("목표 상승여력 %","손절폭 %","기대손익비(R)","과거 1차 익절 우선 %","과거 비용 반영 손익 %") if col in columns})
             st.dataframe(candidates[columns].style.format(fmt_cols,na_rep="—"),
                          hide_index=True,use_container_width=True,height=520)
             st.download_button("📥 조건별 후보 CSV",candidates.to_csv(index=False).encode("utf-8-sig"),
@@ -456,6 +461,10 @@ with detail_tab:
                 p3.metric("손절폭",f'{r["stop_risk_pct"]:.2f}%' if r["stop_risk_pct"] is not None else "—")
                 p4.metric("익절·손절 손익비",f'{r["entry_rr"]:.2f}R' if r["entry_rr"] is not None else "—")
                 st.caption("익절 산정: "+r["trade_plan_basis"])
+                if r["historical_net_expectancy_pct"] is not None:
+                    st.caption(f'과거 동일 규칙 손절·익절 후 평균 순손익: '
+                               f'{r["historical_net_expectancy_pct"]:+.2f}% '
+                               f'(왕복비용 0.35% 가정, 향후 수익률 예측 아님)')
                 if r["historical_target_first_pct"] is not None:
                     st.caption(f'과거 경로에서 1차 익절이 손절보다 먼저 관측된 비율 '
                                f'{r["historical_target_first_pct"]:.1f}% · 2차 {r["historical_second_first_pct"]:.1f}%'
