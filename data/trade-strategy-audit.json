@@ -1,0 +1,51 @@
+{
+  "time_utc": "2026-11-13T12:52:17.019835+00:00",
+  "status": "limited_diagnostic_not_proven",
+  "horizon_sessions": 10,
+  "round_trip_cost_pct": 0.35,
+  "assumptions": [
+    "7 currently chosen tickers; survivorship bias",
+    "missing historical investor flow",
+    "next-session open entry, 5% maximum opening gap",
+    "stop touched first if same bar hits both thresholds",
+    "actual daily open fill if gapped through stop",
+    "separate trades 10 trading sessions apart",
+    "no price impact, benchmark or corporate actions validation"
+  ],
+  "tickers": {
+    "KR:005930": {
+      "trades": 6,
+      "mean_trade_net_pct": 3.126,
+      "win_rate_pct": 66.67,
+      "mean_same_entry_10d_hold_pct": 10.849,
+      "worst_trade_pct": -7.285,
+      "stop_or_gap_count": 1,
+      "take_count": 3
+    },
+    "KR:000660": {
+      "trades": 0,
+      "reason": "유효한 매수 검토 신호가 없음"
+    },
+    "KQ:196170": {
+      "trades": 0,
+      "reason": "유효한 매수 검토 신호가 없음"
+    },
+    "KQ:086520": {
+      "trades": 0,
+      "reason": "유효한 매수 검토 신호가 없음"
+    },
+    "US:NVDA": {
+      "trades": 0,
+      "reason": "유효한 매수 검토 신호가 없음"
+    },
+    "US:MSFT": {
+      "trades": 0,
+      "reason": "유효한 매수 검토 신호가 없음"
+    },
+    "US:SOXL": {
+      "trades": 0,
+      "reason": "유효한 매수 검토 신호가 없음"
+    }
+  },
+  "total_trades": 6
+}
