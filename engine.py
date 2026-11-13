@@ -70,14 +70,6 @@ def evaluate(x):
     # Missing/unusable volume must not be conflated with a failed buy signal.
     volume_available=bool(ok("VOL20") and r.VOL20>0 and ok("Volume") and r.Volume>0)
     vol_ratio=float(r.Volume/r.VOL20) if volume_available else None
-    rsi_rising=bool(rsi_delta is not None and rsi_delta>=3)
-    volume_increasing=bool(vol_ratio is not None and vol_ratio>=1.2)
-    price_rising=bool(p>prev.Close)
-    volume_signal=("데이터 부족" if vol_ratio is None else
-                   "RSI·거래량 동시 증가" if rsi_rising and volume_increasing else
-                   "RSI만 상승" if rsi_rising else
-                   "거래량만 증가" if volume_increasing else
-                   "동시 증가 아님")
     # Independent groups: trend 30, momentum 25, strength 20, volume 25.
     scores={"추세":0,"모멘텀":0,"추세 강도":0,"수급·거래량":0}
     details=[]
@@ -94,7 +86,7 @@ def evaluate(x):
     award("추세 강도",ok("ADX") and r.ADX>=25 and ok("PDI") and ok("MDI") and r.PDI>r.MDI,20,"ADX 25 이상 상승 우세")
     award("추세 강도",ok("ADX") and 20<=r.ADX<25 and ok("PDI") and ok("MDI") and r.PDI>r.MDI,10,"ADX 20 이상 추세 형성")
     award("수급·거래량",vol_ratio is not None and vol_ratio>=1.5 and p>prev.Close,10,"상승과 거래량 1.5배 동반")
-    award("수급·거래량",ok("OBV20") and r.OBV>r.OBV20 and r.OBV>x.OBV.iloc[-6] if len(x)>=6 else False,10,"OBV 매수세 강화")
+    award("수급·거래량",volume_available and len(x)>=6 and ok("OBV20") and r.OBV>r.OBV20 and r.OBV>x.OBV.iloc[-6],10,"OBV 매수세 강화")
     award("수급·거래량",ok("RES") and p>r.RES,5,"20일 고점 돌파")
     penalty=0
     if ok("RSI") and r.RSI>75: penalty+=10;details.append("RSI 과열 경고")
@@ -103,7 +95,7 @@ def evaluate(x):
     if ok("ADX") and r.ADX>=25 and ok("PDI") and ok("MDI") and r.MDI>r.PDI:penalty+=15;details.append("ADX 하락세 강함")
     score=max(0,min(100,sum(scores.values())-penalty))
     # No ranking from 200-day signals where full history is unavailable.
-    ready=len(x)>=200 and ok("MA200") and ok("MACDH") and ok("ADX") and ok("OBV20")
+    ready=len(x)>=200 and ok("MA200") and ok("MACDH") and ok("ADX") and ok("OBV20") and volume_available
     signal="데이터 부족" if not ready else ("강한 매수 검토" if score>=80 else "매수 검토" if score>=60 else "관찰")
     if ready and ok("RSI") and r.RSI>75:signal="과열·추격 주의"
     if ready and ok("MA20") and p<r.MA20 and ok("MACDH") and r.MACDH<0:signal="축소·매도 검토"
@@ -119,13 +111,10 @@ def evaluate(x):
         "scores":scores,"penalty":penalty,
         "rsi":num(r.RSI),"rsi_delta5":rsi_delta,
         "rsi_direction":("상승" if rsi_delta>=3 else "하락" if rsi_delta<=-3 else "횡보") if rsi_delta is not None else "데이터 부족",
-        "rsi_volume_confirmed":bool(rsi_rising and volume_increasing and price_rising),
-        "rsi_volume_status":volume_signal,
-        "rsi_rising":rsi_rising,"volume_increasing":volume_increasing,
         "volume_available":volume_available,"volume_now":int(r.Volume) if volume_available else None,
         "volume_avg20":float(r.VOL20) if volume_available else None,
         "adx":num(r.ADX),"pdi":num(r.PDI),"mdi":num(r.MDI),
-        "obv_up":bool(ok("OBV20") and r.OBV>r.OBV20),
+        "obv_up":bool(volume_available and ok("OBV20") and r.OBV>r.OBV20),
         "bb_upper":num(r.BBUP),"bb_lower":num(r.BBLOW),
         "hi52":num(r.H52),"lo52":num(r.L52),"ma20":num(r.MA20),
         "ma60":num(r.MA60),"ma200":num(r.MA200),"volratio":vol_ratio,
