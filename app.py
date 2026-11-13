@@ -34,14 +34,12 @@ def scan():
                 "RSI":round(r["rsi"],1) if r["rsi"] is not None else None,
                 "RSI 5일 변화":round(r["rsi_delta5"],1) if r["rsi_delta5"] is not None else None,
                 "RSI 방향":r["rsi_direction"],
-                "RSI·거래량 상태":r["rsi_volume_status"],
-                "주가 상승 동반":"예" if r["change"]>0 else "아니오",
                 "ADX":round(r["adx"],1) if r["adx"] is not None else None,
                 "OBV": "매수 우세" if r["obv_up"] else "확인 필요",
                 "추세 점수":r["scores"]["추세"],
                 "모멘텀 점수":r["scores"]["모멘텀"],
                 "ADX 점수":r["scores"]["추세 강도"],
-                "거래량 점수":r["scores"]["수급·거래량"],
+                "거래량 점수":r["scores"]["수급·거래량"] if r["volume_available"] else None,
                 "52주 고점":round(r["hi52"],2),"52주 저점":round(r["lo52"],2),
                 "거래량 배율":round(r["volratio"],2) if r["volratio"] else None,
                 "손절 참고":round(r["stop"],2) if r["stop"] else None,
@@ -107,9 +105,8 @@ with chart:
             x1.metric("최근 종가",f(r["price"]),f'{r["change"]:+.2f}%')
             x2.metric("점수",str(r["score"]) if r["score"] is not None else "데이터 부족")
             x3.metric("RSI14",f(r["rsi"]),f'{r["rsi_delta5"]:+.1f}p / 5거래일' if r["rsi_delta5"] is not None else None)
-            st.caption(f'RSI 최근 5거래일: {r["rsi_direction"]} | RSI·거래량 상태: {r["rsi_volume_status"]} | 거래량/20일 평균: {f(r["volratio"])}배')
-            st.caption('RSI 5일 +3p 이상 + 거래량 20일 평균의 1.2배 이상이 동시 충족이면 동시 증가로 표시합니다. 매수 가점은 당일 주가 상승 여부도 확인합니다.')
-            if not r["volume_available"]:st.warning("거래량 자료가 0이거나 부족하여 거래량 판단을 할 수 없습니다.")
+            st.caption(f'RSI 최근 5거래일: {r["rsi_direction"]} | 거래량/20일 평균: {f(r["volratio"])}배' if r["volume_available"] else f'RSI 최근 5거래일: {r["rsi_direction"]} | 거래량 자료 없음')
+            if not r["volume_available"]:st.warning("거래량 자료가 없어 거래량·OBV 신호를 평가하지 않으며 종합 점수를 유보합니다.")
             x4.metric("52주 고점",f(r["hi52"]))
             x5.metric("52주 저점",f(r["lo52"]))
             st.subheader(f'판정: {r["signal"]}')
@@ -117,10 +114,10 @@ with chart:
             st.caption("새로운 종합판단: 추세 30점 · 모멘텀(RSI+MACD) 25점 · ADX 20점 · 거래량+OBV 25점 | 과열·하락 위험 감점")
             metrics=st.columns(4)
             for col,(label,points) in zip(metrics,r["scores"].items()):
-                col.metric(label,points)
+                col.metric(label,points if (label!="수급·거래량" or r["volume_available"]) else "자료 없음")
             xadx,xobv,xbb=st.columns(3)
             xadx.metric("ADX14",f(r["adx"]))
-            xobv.metric("OBV 수급 방향","매수 우세" if r["obv_up"] else "미확인")
+            xobv.metric("OBV 수급 방향","매수 우세" if r["obv_up"] else "매수 우세 아님" if r["volume_available"] else "자료 없음")
             xbb.metric("볼린저 상단",f(r["bb_upper"]))
             if r["penalty"]>0: st.warning(f'위험 감점 {r["penalty"]}점 반영')
             if r["score"] is None:st.warning("장기 데이터가 200거래일 미만이므로 점수를 계산하지 않습니다.")
@@ -197,7 +194,7 @@ with guide:
 - **모멘텀 25점:** MACD 히스토그램 양수(10), RSI 45~68(8), 최근 5거래일 RSI 3p 이상 상승(7)
 - **추세 강도 ADX 20점:** ADX 25 이상이며 +DI가 −DI보다 높으면 20점. ADX 20~25면 10점
 - **거래량·OBV 25점:** 상승하며 거래량 20일 평균 1.5배 이상(10), OBV가 20일선·5거래일 전보다 높음(10), 20일 고점 돌파(5)
-- **RSI·거래량 상태:** RSI 5거래일 +3p 이상 및 거래량 20일 평균의 1.2배 이상이면 'RSI·거래량 동시 증가'. 한쪽만 만족하면 'RSI만 상승' 또는 '거래량만 증가'. 둘 다 아니면 '동시 증가 아님'. 거래량 자료가 없으면 '데이터 부족'. 기존 매매 점수에 추가 중복 가점은 부여하지 않음
+- **거래량 데이터 부재:** 거래량·OBV 관련 신호는 평가하지 않으며 100점 종합 점수도 유보. RSI 분석은 독립적으로 표시
 - **위험 감점:** RSI 75 초과 −10점, RSI 5거래일 5p 이상 하락 −5점, 볼린저밴드 상단 돌파 −5점, ADX 하락세 강함 −15점
 - **보조지표:** 볼린저밴드(20, 2표준편차)는 과열 참고, ATR14는 손절·목표 참고가격 계산
 - RSI의 상승·하락은 확정된 일봉에 기반한 규칙일 뿐, 반등·추세 전환을 보장하지 않음
