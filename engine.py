@@ -67,7 +67,17 @@ def evaluate(x):
     def ok(k):return finite(r[k])
     rsi_prev=x.RSI.iloc[-6] if len(x)>=6 else np.nan
     rsi_delta=float(r.RSI-rsi_prev) if ok("RSI") and finite(rsi_prev) else None
-    vol_ratio=float(r.Volume/r.VOL20) if ok("VOL20") and r.VOL20>0 else None
+    # Missing/unusable volume must not be conflated with a failed buy signal.
+    volume_available=bool(ok("VOL20") and r.VOL20>0 and ok("Volume") and r.Volume>0)
+    vol_ratio=float(r.Volume/r.VOL20) if volume_available else None
+    rsi_rising=bool(rsi_delta is not None and rsi_delta>=3)
+    volume_increasing=bool(vol_ratio is not None and vol_ratio>=1.2)
+    price_rising=bool(p>prev.Close)
+    volume_signal=("데이터 부족" if vol_ratio is None else
+                   "RSI·거래량 동시 증가" if rsi_rising and volume_increasing else
+                   "RSI만 상승" if rsi_rising else
+                   "거래량만 증가" if volume_increasing else
+                   "동시 증가 아님")
     # Independent groups: trend 30, momentum 25, strength 20, volume 25.
     scores={"추세":0,"모멘텀":0,"추세 강도":0,"수급·거래량":0}
     details=[]
@@ -109,7 +119,11 @@ def evaluate(x):
         "scores":scores,"penalty":penalty,
         "rsi":num(r.RSI),"rsi_delta5":rsi_delta,
         "rsi_direction":("상승" if rsi_delta>=3 else "하락" if rsi_delta<=-3 else "횡보") if rsi_delta is not None else "데이터 부족",
-        "rsi_volume_confirmed":bool(rsi_delta is not None and rsi_delta>=3 and vol_ratio is not None and vol_ratio>=1.2 and p>prev.Close),
+        "rsi_volume_confirmed":bool(rsi_rising and volume_increasing and price_rising),
+        "rsi_volume_status":volume_signal,
+        "rsi_rising":rsi_rising,"volume_increasing":volume_increasing,
+        "volume_available":volume_available,"volume_now":int(r.Volume) if volume_available else None,
+        "volume_avg20":float(r.VOL20) if volume_available else None,
         "adx":num(r.ADX),"pdi":num(r.PDI),"mdi":num(r.MDI),
         "obv_up":bool(ok("OBV20") and r.OBV>r.OBV20),
         "bb_upper":num(r.BBUP),"bb_lower":num(r.BBLOW),
