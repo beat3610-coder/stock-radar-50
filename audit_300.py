@@ -9,7 +9,7 @@ from engine import compute, evaluate
 from providers import get_prices
 from universe import get_universe
 
-BUY = {"연구용 매수 후보·실거래 미승인"}
+BUY = {"연구용 매수 후보·실거래 미승인", "연구용 후보·위험조건 미충족"}
 HOLD_DAYS = 10
 COST_PCT = 0.35  # assumed round trip including commission/slippage; taxes may differ
 WARMUP = 270
