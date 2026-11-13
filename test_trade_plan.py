@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 from engine import compute, evaluate
-from trade_plan import scenario_from_history, decide_trade
+from trade_plan import scenario_from_history, decide_trade, position_sizing
 
 ix=pd.bdate_range("2024-01-01",periods=350)
 p=100+np.arange(350)*0.07+np.sin(np.arange(350)/8)*5
@@ -31,3 +31,10 @@ assert actual["trade_target"]==scenario_from_history(x,actual["stop"])["target"]
 assert actual["upside_pct"]==scenario_from_history(x,actual["stop"])["expected_upside_pct"]
 assert actual["entry_rr"]==scenario_from_history(x,actual["stop"])["planned_rr"]
 print("trade plan: no lookahead, profit levels, stops, and risk filter PASS")
+
+sizing=position_sizing(10_000_000,100_000,95_000,115_000,0.01)
+assert sizing["shares"]==20 and sizing["cost"]==2_000_000
+assert sizing["planned_loss"]==100_000 and sizing["planned_profit"]==300_000
+assert position_sizing(100_000,100_000,95_000,115_000,0.01)["shares"]==0
+assert position_sizing(10_000_000,100_000,105_000,115_000,0.01)["shares"]==0
+print("position sizing tests PASS")
