@@ -151,7 +151,9 @@ def run(per_market=100):
                      and m["mean_net_pct"]>0 and m["profit_factor"] is not None
                      and m["profit_factor"]>=1.3) else "FAIL_OR_INSUFFICIENT"}
         result["trades"].extend(trades)
-        portfolio=replay(test,frames,start=cut)
+        portfolio=replay(test,frames,start=cut,
+                         initial_cash=10_000_000.0 if market in ("KR","KQ") else 100_000.0)
+        portfolio["currency"]="KRW" if market in ("KR","KQ") else "USD"
         # Detail lives in the audit JSON. Summary never substitutes for broker fills.
         result["portfolios"][market]=portfolio
     result["status"] = ("PASS_WITH_LIMITATIONS"
