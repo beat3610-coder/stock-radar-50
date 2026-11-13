@@ -136,7 +136,7 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v7_"+mkt
+    key="results_v8_"+mkt
     if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
     state=st.session_state[key]
     left,right=st.columns([3,1])
@@ -161,7 +161,14 @@ def ranking_page(mkt):
                           format_func=lambda p:f"{p}페이지 / {pages}페이지")
         shown=df.iloc[(page-1)*50:page*50]
         st.caption(f"분석 완료 {len(df)}종목 중 {len(shown)}종목 표시")
-        st.dataframe(shown,hide_index=True,use_container_width=True,height=510)
+        # Display thousands separators for every price/target/MA field,
+        # without converting stored numeric values or changing CSV data.
+        price_cols=("종가","20일선","60일선","120일선","200일선",
+                    "52주 고점","52주 저점","손절 참고","통합 목표가",
+                    "1차 저항 목표","2차 저항 목표","2R 손익비 목표")
+        number_formats={col:"{:,.2f}" for col in price_cols if col in shown.columns}
+        styled=shown.style.format(number_formats,na_rep="—")
+        st.dataframe(styled,hide_index=True,use_container_width=True,height=510)
         st.download_button("📥 분석 결과 CSV 저장",df.to_csv(index=False).encode("utf-8-sig"),f"STOCK_RADAR200_{mkt}.csv","text/csv",key="csv"+mkt)
     else:
         st.info("위 버튼을 눌러 종목별 시세 분석을 시작하세요. 항목을 추측해서 채우지 않습니다.")
