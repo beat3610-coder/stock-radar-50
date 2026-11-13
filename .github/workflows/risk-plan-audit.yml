@@ -8,6 +8,9 @@ on:
       - "test_trade_plan.py"
       - ".github/workflows/risk-plan-audit.yml"
   workflow_dispatch:
+concurrency:
+  group: trade-audit-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: write
 jobs:
@@ -22,7 +25,7 @@ jobs:
       - run: pip install pandas numpy finance-datareader yfinance lxml requests beautifulsoup4 html5lib pykrx
       - name: Test risk-first profit and stop engine
         run: python test_trade_plan.py
-      - name: Run 100-ticker historical trade audit
+      - name: Run 300-ticker historical trade audit
         run: python trade_strategy_audit.py
       - name: Save verification report
         if: always()
