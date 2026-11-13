@@ -34,30 +34,40 @@ def kospi_top100():
             df=df[~df[name].astype(str).str.contains("스팩|SPAC|ETF|ETN|우선주",case=False,na=False)]
             df=df[~df[name].astype(str).str.contains(r"우$|우B$|우C$|우\\d|우선",regex=True,na=False)]
             df=df.sort_values(cap,ascending=False).drop_duplicates(ticker)
-            # Industry must come from listing metadata, never from the index-selection description.
-            industry=next((key for key in df.columns if key.lower() in
-                           ("sector","industry","업종","업종명","sectorname","industryname")),None)
+            # The market-cap endpoint has price/rank but typically NO industry.
+            # FDR documents the *-DESC endpoints as company description listings.
             industry_lookup={}
-            if industry is None:
+            industry_source=None
+            for desc_market in ("KOSPI-DESC","KRX-DESC"):
                 try:
-                    meta=fdr.StockListing("KRX")
+                    meta=fdr.StockListing(desc_market)
                     meta.columns=[str(key).strip() for key in meta.columns]
-                    mk=next((key for key in meta if key.lower() in ("code","symbol","ticker")),None)
-                    sk=next((key for key in meta if key.lower() in
-                             ("sector","industry","업종","업종명","sectorname","industryname")),None)
-                    if mk and sk:
-                        industry_lookup=dict(zip(meta[mk].astype(str).str.strip().str.zfill(6),
-                                                 meta[sk].fillna("").astype(str)))
+                    code_col=next((key for key in meta if key.lower() in ("code","symbol","ticker","종목코드","단축코드")),None)
+                    sector_col=next((key for key in meta if key.lower() in ("sector","industry","업종","업종명","업종분류","sectorname","industryname")),None)
+                    if code_col is None or sector_col is None:
+                        raise ValueError(f"{desc_market}: 업종 열 없음 {list(meta.columns)}")
+                    codes=meta[code_col].astype(str).str.replace(r"\\.0$","",regex=True).str.strip().str.zfill(6)
+                    sectors=meta[sector_col].fillna("").astype(str).str.strip()
+                    found=dict(zip(codes,sectors))
+                    industry_lookup.update({key:value for key,value in found.items() if value and value.lower() not in ("nan","none","-")})
+                    industry_source=desc_market
+                    if sum(str(code) in industry_lookup for code in df.head(100)[ticker])>=95:
+                        break
                 except Exception:
-                    pass
+                    continue
+            # A market-cap table may itself carry Sector; use it if description listing does not.
+            industry=next((key for key in df if key.lower() in ("sector","industry","업종","업종명")),None)
             def industry_for(row):
-                value=row[industry] if industry else industry_lookup.get(str(row[ticker]),"")
+                value=industry_lookup.get(str(row[ticker]),"")
+                if not value and industry:
+                    value=row[industry]
                 if pd.isna(value) or str(value).strip().lower() in ("","nan","none","-"):
                     return "업종 미확인"
                 return str(value).strip()
             rows=[(str(row[ticker]),str(row[name]),industry_for(row)) for _,row in df.head(100).iterrows()]
             if len(rows)!=100:raise ValueError(f"코스피 종목 부족: {len(rows)}/100")
-            return rows,f"FinanceDataReader {market} 시총순 정렬 / 조회일 {dt.date.today().isoformat()}"
+            covered=sum(s!="업종 미확인" for _,_,s in rows)
+            return rows,f"FinanceDataReader {market} 시총순 / 업종 {industry_source or '원본 목록'} {covered}/100 확인 / {dt.date.today().isoformat()}"
         except Exception as e:attempts.append(f"{market}: {str(e)[:170]}")
     raise RuntimeError("코스피 100종목 구성을 가져오지 못했습니다. "+" | ".join(attempts))
 
