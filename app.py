@@ -584,8 +584,11 @@ with guide_tab:
                     if not gate:
                         st.warning("실전 판매용 독립 검증은 아직 완료되지 않았습니다. 과거 구간 재검증만으로 합격을 선언하지 않습니다.")
                     if gate:
-                        if gate.get("status")=="PASS":
-                            st.success("현재 익절·손절 기준이 설정된 홀드아웃 수익성 검사 조건을 통과했습니다. 외부 독립 검증과 시세 라이선스는 별개입니다.")
+                        if gate.get("status")=="EXPLORATORY_PASS_NOT_INDEPENDENT":
+                            st.warning("과거 구간을 다시 사용한 탐색적 수익 기준은 충족했지만, 이미 살펴본 기간이므로 "
+                                       "독립 검증 합격이나 실제 판매 승인으로 인정하지 않습니다.")
+                        elif gate.get("status")=="PASS" and gate.get("independent_validation_passed"):
+                            st.success("독립 검증 수익 기준 통과. 규제·데이터 사용권과 실제 운영 검사는 별도입니다.")
                         else:
                             st.error("투자전략 성과 검증: 미통과 — 실제 운용/유료 판매를 위한 기준에 미달합니다. "
                                      f"검증 구간 매매 건수 {gate.get('holdout_trades','—')}건 "
