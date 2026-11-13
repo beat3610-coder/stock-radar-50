@@ -83,3 +83,17 @@ def decide_trade(signal, plan, score=None, min_rr=1.2, min_upside=2.0,
     return signal,("과거 중앙 상승여력 "
                    f"{plan['expected_upside_pct']:.2f}%, 손익비 {plan['planned_rr']:.2f}R "
                    f"(표본 {plan['history_samples']}; 미래 예측 아님)")
+
+def position_sizing(capital, entry, stop, take, risk_fraction=0.01):
+    """Whole-share position size with max loss at proposed stop (no gaps/fees)."""
+    valid=(all(np.isfinite(x) for x in (capital,entry,stop,risk_fraction))
+           and capital>0 and entry>0 and 0<stop<entry
+           and 0<risk_fraction<=0.05)
+    if not valid:
+        return {"shares":0,"cost":0,"planned_loss":None,"planned_profit":None}
+    shares=min(int(capital//entry),int((capital*risk_fraction)//(entry-stop)))
+    shares=max(0,shares)
+    return {"shares":shares,"cost":shares*entry,
+            "planned_loss":shares*(entry-stop),
+            "planned_profit":shares*(take-entry) if take is not None and np.isfinite(take)
+                 and take>entry else None}
