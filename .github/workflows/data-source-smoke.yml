@@ -39,7 +39,7 @@ jobs:
               if heads or example:
                   tables.append({"index":i,"headers":heads[:260],"row_count":len(rows),"sample":example[:12]})
           print("NAVER HTML DIAGNOSTICS:",json.dumps({"status":r.status_code,"url":r.url,"title":soup.title.get_text(" ",strip=True) if soup.title else "no title","num_tables":len(tables),"sample_tables":tables[:30]},ensure_ascii=False))
-          result={"tested_at_utc":datetime.datetime.now(datetime.timezone.utc).isoformat(),"ticker":"005930","source":"Naver investor daily"}
+          result={"tested_at_utc":datetime.datetime.now(datetime.timezone.utc).isoformat(),"ticker":"005930","source":"Naver investor daily","html_diagnostic":{"status":r.status_code,"url":r.url,"title":soup.title.get_text(" ",strip=True) if soup.title else "no title","sample_tables":tables[:30]}}
           try:
               data=_get_naver_flows("005930")
               result["success"]=True
