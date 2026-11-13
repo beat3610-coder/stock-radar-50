@@ -83,6 +83,7 @@ def to_row(item,with_flow=True,market_rank=None):
       "목표 상승여력 %":round(r["upside_pct"],2) if r["upside_pct"] is not None else None,
       "기대손익비(R)":round(r["entry_rr"],2) if r["entry_rr"] is not None else None,
       "매매 판단 근거":r["entry_reason"],
+      "중장기 상승추세":("확인" if r["medium_long_trend_rising"] else "미확인"),
       "외국인 5일 순매수(주)":foreign.get("5일"),"외국인 20일 순매수(주)":foreign.get("20일"),
       "기관 5일 순매수(주)":institution.get("5일"),"기관 20일 순매수(주)":institution.get("20일"),
       "RSI":round(r["rsi"],1) if r["rsi"] is not None else None,
@@ -195,11 +196,11 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v25_"+mkt+("_flow" if with_flow else "_tech")
+    key="results_v26_"+mkt+("_flow" if with_flow else "_tech")
     if key not in st.session_state:
         st.session_state[key]={"rows":{},"errors":{},"batches":[]}
     state=st.session_state[key]
-    page_key="result_batch_page_v25_"+mkt+("_flow" if with_flow else "_tech")
+    page_key="result_batch_page_v26_"+mkt+("_flow" if with_flow else "_tech")
     left,right=st.columns([3,1])
     remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
     if left.button("▶ 다음 50종목 실제 시세 분석",key="run"+mkt,type="primary",
@@ -272,7 +273,7 @@ def ranking_page(mkt):
                           format_func=lambda p:f"{p}번째 50종목 / 총 {pages}묶음")
         # Prioritize actionable prices and the trading decision in the horizontal table.
         primary_cols=("구분","종목","코드","업종","거래일","통화",
-                      "매매 판단","종가","통합 목표가","손절 참고",
+                      "매매 판단","종가","통합 목표가","손절 참고","중장기 상승추세",
                       "목표 상승여력 %","손절폭 %","기대손익비(R)","과거 비용 반영 손익 %",
                       "2차 익절 참고","52주 고점","52주 저점")
         first=[col for col in primary_cols if col in df.columns]
@@ -338,7 +339,7 @@ with ranking_tab:ranking_page(active)
 with candidate_tab:
     st.subheader("투자 후보 탐색 — "+MARKET_LABELS[active])
     st.caption("실제 분석된 종목만 표시합니다. 기술 상승 신호·수급·종가 검증을 별도로 구분해 비교합니다.")
-    result_key="results_v25_"+active+("_flow" if with_flow else "_tech")
+    result_key="results_v26_"+active+("_flow" if with_flow else "_tech")
     result_state=st.session_state.get(result_key,{"rows":{}})
     if not result_state.get("rows"):
         st.info("선택 시장 분석 탭에서 먼저 50종목 실제 분석을 실행하세요.")
@@ -581,7 +582,7 @@ with guide_tab:
                                f'| 매매 신호 {audit100.get("total_trades",0)}건')
                     gate=audit100.get("release_gate",{})
                     if not gate:
-                        st.warning("독립 검증구간의 합격 판정은 아직 완료되지 않았습니다. 기존 전체 구간 결과만 표시합니다.")
+                        st.warning("실전 판매용 독립 검증은 아직 완료되지 않았습니다. 과거 구간 재검증만으로 합격을 선언하지 않습니다.")
                     if gate:
                         if gate.get("status")=="PASS":
                             st.success("현재 익절·손절 기준이 설정된 홀드아웃 수익성 검사 조건을 통과했습니다. 외부 독립 검증과 시세 라이선스는 별개입니다.")
