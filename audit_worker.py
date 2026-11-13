@@ -4,9 +4,15 @@ print("AUDIT60_WORKER_START",flush=True)
 time.sleep(18)  # let Streamlit bind its service port first
 try:
     import subprocess
-    check=subprocess.run([sys.executable,"-m","unittest","-v","test_risk_guard.py","test_audit_300.py","test_portfolio_audit.py","test_strategy_lab.py"],capture_output=True,text=True,timeout=120)
+    check=subprocess.run([sys.executable,"-m","unittest","-v","test_risk_guard.py","test_audit_300.py","test_portfolio_audit.py","test_strategy_lab.py","test_signal_playbook.py"],capture_output=True,text=True,timeout=120)
     print("AUDIT60_TESTS exit="+str(check.returncode)+" "+(check.stderr+check.stdout)[-3500:],flush=True)
     if check.returncode: raise RuntimeError("risk and execution unit tests failed")
+    compiled=subprocess.run([sys.executable,"-m","py_compile","app.py","strategy_lab.py",
+                             "signal_playbook.py","portfolio_audit.py"],
+                            capture_output=True,text=True,timeout=45)
+    print("APP_COMPILE_CHECK exit="+str(compiled.returncode)+
+          " "+compiled.stderr[-600:],flush=True)
+    if compiled.returncode:raise RuntimeError("app/module source compilation failed")
     from strategy_lab import run
     report=run(per_market=100)
     import os
