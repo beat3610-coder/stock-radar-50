@@ -101,6 +101,12 @@ def to_row(item,with_flow=True,market_rank=None):
     f=flow_data or {}
     foreign=f.get("외국인",{})
     institution=f.get("기관",{})
+    try:
+        ideas=playbook(data,market,capital=(10_000_000.0 if market in ("KR","KQ") else 100_000.0))["setups"]
+    except Exception:
+        ideas=[]
+    best_idea=max(ideas,key=lambda z:z["target_upside_pct"]) if ideas else None
+    labels={"trend_breakout":"고점 돌파","trend_pullback":"눌림목 반등","momentum_reentry":"MACD 재상승"}
     return {
       "구분":(f"코스피 {market_rank}위" if market_rank is not None else "국내 ETF") if market=="KR" else (f"코스닥 {market_rank}위" if market_rank is not None else "코스닥") if market=="KQ" else (f"나스닥 {market_rank}위" if market_rank is not None else "미국 ETF"),
       "종목":name,"코드":code,"업종":sector,
@@ -108,6 +114,9 @@ def to_row(item,with_flow=True,market_rank=None):
       "종가":round(r["price"],2),"전일대비 %":round(r["change"],2),
       "점수":r["score"],"점수 기준":r["score_basis"],"기술점수":r["technical_score"],"기술만점":r["technical_max"],
       "매매 판단":r["signal"],
+      "전략 진입 조건":" / ".join(labels.get(z["strategy"],z["strategy"]) for z in ideas) if ideas else "해당 없음",
+      "전략 연구 목표상승 %":best_idea["target_upside_pct"] if best_idea else None,
+      "전략 연구 손절폭 %":best_idea["stop_risk_pct"] if best_idea else None,
       "시장 위험국면":r.get("risk_regime","미확인"),
       "실전 전략 승인":"미승인" if not r.get("live_strategy_approved") else "승인",
       "기술 판단(목표 검증 전)":r["technical_signal_before_gate"],
@@ -381,11 +390,14 @@ with candidate_tab:
             "전체":"전체",
             "연구용 후보(경고 포함)":"연구용 후보(경고 포함)",
             "기술적 상승 신호":"기술적 상승 신호",
+            "전략 진입 조건 충족":"전략 진입 조건 충족",
             "종가 확인 필요":"종가 확인 필요",
             "매수 유보·관찰":"매수 유보·관찰"}
         filter_choice=st.selectbox("후보 필터",list(groups),key="candidate_filter_"+active)
         if filter_choice=="연구용 후보(경고 포함)":
             candidates=candidates[candidates["매매 판단"].isin(("연구용 매수 후보·실거래 미승인","연구용 후보·위험조건 미충족"))]
+        elif filter_choice=="전략 진입 조건 충족":
+            candidates=candidates[candidates["전략 진입 조건"]!="해당 없음"]
         elif filter_choice=="기술적 상승 신호":
             candidates=candidates[candidates["기술 판단(목표 검증 전)"].isin(
                 ("매수 검토","강한 매수 검토","기술매수 후보·수급 미확인"))]
@@ -393,10 +405,10 @@ with candidate_tab:
             candidates=candidates[candidates["종가 교차검증"]!="보조 시세 일치(공식값 미검증)"]
         elif filter_choice=="매수 유보·관찰":
             candidates=candidates[~candidates["매매 판단"].isin(("연구용 매수 후보·실거래 미승인","연구용 후보·위험조건 미충족"))]
-        sort_col=st.selectbox("정렬 기준",["점수","목표 상승여력 %","기대손익비(R)"],
+        sort_col=st.selectbox("정렬 기준",["점수","목표 상승여력 %","기대손익비(R)","전략 연구 목표상승 %"],
                               key="candidate_sort_"+active)
         candidates=candidates.sort_values(sort_col,ascending=False,na_position="last")
-        columns=["구분","종목","코드","매매 판단","기술 판단(목표 검증 전)",
+        columns=["구분","종목","코드","전략 진입 조건","전략 연구 목표상승 %","전략 연구 손절폭 %","매매 판단","기술 판단(목표 검증 전)",
                  "시장 위험국면","실전 전략 승인","종가","통합 목표가","손절 참고","목표 상승여력 %","손절폭 %",
                  "기대손익비(R)","과거 비용 반영 손익 %",
                  "과거 1차 익절 우선 %","과거 경로 표본",
@@ -405,7 +417,7 @@ with candidate_tab:
         st.caption(f"조건에 해당하는 종목 {len(candidates)}개")
         if len(candidates):
             fmt_cols={col:("{:,.2f}" if active=="US" and col!="점수" else "{:,.0f}") for col in ("종가","통합 목표가","손절 참고","점수") if col in columns}
-            fmt_cols.update({col:"{:.2f}" for col in ("목표 상승여력 %","손절폭 %","기대손익비(R)","과거 1차 익절 우선 %","과거 비용 반영 손익 %") if col in columns})
+            fmt_cols.update({col:"{:.2f}" for col in ("목표 상승여력 %","손절폭 %","기대손익비(R)","과거 1차 익절 우선 %","과거 비용 반영 손익 %","전략 연구 목표상승 %","전략 연구 손절폭 %") if col in columns})
             st.dataframe(candidates[columns].style.format(fmt_cols,na_rep="—"),
                          hide_index=True,use_container_width=True,height=520)
             st.download_button("📥 조건별 후보 CSV",candidates.to_csv(index=False).encode("utf-8-sig"),
