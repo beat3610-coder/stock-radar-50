@@ -273,6 +273,26 @@ def run():
             "results":summary_by_split}
     else:report["variant_holdout_audit"]={"error":"no trades"}
     report["verification_complete"]=(report["analysed_tickers"]==300)
+    # Non-negotiable commercial readiness gate. Evaluate ONLY the held-out dates;
+    # no selection or tuning is allowed based on their observed returns.
+    held=report.get("variant_holdout_audit",{}).get("results",{}).get("holdout",{})
+    current=held.get("TAKE_STOP",{})
+    benchmark=held.get("HOLD_10",{})
+    n=current.get("n",0)
+    current_mean=current.get("mean_net_return_pct")
+    benchmark_mean=benchmark.get("mean_net_return_pct")
+    acceptable=(report["verification_complete"] and n>=50 and
+                current_mean is not None and benchmark_mean is not None and
+                current_mean>0 and current_mean>benchmark_mean)
+    report["release_gate"]={
+        "status":"PASS" if acceptable else "FAIL",
+        "holdout_trades":n,"minimum_holdout_trades":50,
+        "holdout_strategy_mean_net_pct":current_mean,
+        "holdout_identical_entry_hold_mean_net_pct":benchmark_mean,
+        "requirements":["300/300 ticker analyses","at least 50 untouched holdout trades",
+                        "positive held-out strategy mean net return",
+                        "strategy return better than same-entry 10-session hold"],
+        "warning":"PASS would still not validate commercial fitness: survivorship bias, missing flows and correlated samples remain"}
     return report
 
 if __name__=="__main__":
