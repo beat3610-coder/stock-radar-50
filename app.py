@@ -576,6 +576,26 @@ with guide_tab:
                     c2.metric("매매 승률",f'{aggregate["win_rate_pct"]:.2f}%' if aggregate.get("win_rate_pct") is not None else "측정 불가")
                     c3.metric("평균 거래 순수익률",f'{aggregate["mean_trade_net_pct"]:+.2f}%' if aggregate.get("mean_trade_net_pct") is not None else "측정 불가")
                     st.caption(f'시점별 전체 판정 기록 {audit100.get("historical_decision_count","—")}회 · 왕복비용 {audit100.get("round_trip_cost_pct",0.35)}% 가정')
+                    walk=audit100.get("variant_holdout_audit",{})
+                    if walk.get("results"):
+                        st.markdown("**손절·익절 전략 비교 (과거/검증 구간을 날짜로 분리)**")
+                        st.caption(f'분리 기준일: {walk.get("split_date")} | 이전 구간에서 검토하고 이후 구간은 별도로 공개')
+                        versions={"TAKE_STOP":"현행 익절·손절",
+                                  "HOLD_10":"10거래일 보유",
+                                  "STOP_10":"고정 손절 + 10일 보유",
+                                  "HALF_TRAIL":"절반 익절 + 나머지 추적손절"}
+                        table=[]
+                        for variant,label in versions.items():
+                            dev=walk["results"].get("development",{}).get(variant,{})
+                            hold=walk["results"].get("holdout",{}).get(variant,{})
+                            table.append({"전략":label,"과거 건수":dev.get("n"),
+                                          "과거 평균 순수익 %":dev.get("mean_net_return_pct"),
+                                          "검증 건수":hold.get("n"),
+                                          "검증 평균 순수익 %":hold.get("mean_net_return_pct"),
+                                          "검증 승률 %":hold.get("win_rate_pct")})
+                        st.dataframe(pd.DataFrame(table),hide_index=True,use_container_width=True)
+                        st.caption("검증 구간이 단순 보유보다 좋지 않다면 매매전략을 합격 처리하지 않습니다. "
+                                   "종목 구성 생존편향과 같은 종목의 반복 거래 등 한계는 그대로 남습니다.")
                     directions=audit100.get("signal_direction_audit",{})
                     if directions:
                         st.markdown("**매매 판단별 실제 10거래일 후 방향 비교**")
