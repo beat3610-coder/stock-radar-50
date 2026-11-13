@@ -24,6 +24,49 @@ def get_prices(code, market):
         failures.append(f"Yahoo: {str(e)[:110]}")
     raise RuntimeError(" | ".join(failures))
 
+def verify_recent_close(code, market, primary_date, primary_price, primary_source,
+                        tolerance_pct=0.5):
+    """Compare latest closing *date and price* against Yahoo as a secondary feed.
+
+    Agreement is never official KRX verification. Same-source comparisons are
+    explicitly classified as unverified rather than artificially corroborated.
+    """
+    note={"status":"unverified","secondary_source":"Yahoo Finance",
+          "reason":"다른 공급처 확정 종가와 아직 대조되지 않음",
+          "tolerance_pct":tolerance_pct,"secondary_close":None,"difference_pct":None}
+    if primary_source.startswith("Yahoo"):
+        note["reason"]="주 시세와 보조 시세가 같은 Yahoo 원천"
+        return note
+    if market=="US" and "STOOQ:" not in primary_source.upper():
+        note["reason"]="미국 주 시세와 Yahoo의 데이터 원천 독립성이 확인되지 않음"
+        return note
+    try:
+        import yfinance as yf
+        ticker=code if market=="US" else code+(".KQ" if market=="KQ" else ".KS")
+        result=yf.download(ticker,period="10d",interval="1d",
+                           auto_adjust=False,progress=False,
+                           threads=False,timeout=12)
+        candles=normalize(result)
+        date=pd.Timestamp(candles.index[-1]).date()
+        expected=pd.Timestamp(primary_date).date()
+        if date!=expected:
+            note["reason"]=f"기준 거래일 불일치: 주 {expected}, 보조 {date}"
+            return note
+        other=float(candles.Close.iloc[-1])
+        expected_price=float(primary_price)
+        if not 0<other or not 0<expected_price:
+            note["reason"]="비정상적 보조 종가"
+            return note
+        diff=100*abs(expected_price/other-1)
+        note.update(status=("agree" if diff<=tolerance_pct else "mismatch"),
+                    reason=("동일 거래일 보조 종가 일치(거래소 공식 검증 아님)" if diff<=tolerance_pct
+                            else "동일 거래일 종가 불일치 — 매매 판단 이용 금지"),
+                    secondary_close=other,difference_pct=round(diff,4))
+    except Exception as exc:
+        note["reason"]=f"보조 시세 조회 불가: {str(exc)[:90]}"
+    return note
+
+
 def _summarize_flow(data, ins, foreign, source):
     data=data.sort_index()
     data=data[[ins,foreign]].apply(pd.to_numeric,errors="coerce").dropna()
