@@ -148,12 +148,22 @@ def evaluate(x, market="US", flow=None):
     technical_net=max(0,technical-penalty)
     ready=len(x)>=200 and all(ok(k) for k in ("MA200","MA120","MACDH","ADX","OBV20")) and volume_available
     full_ready=ready and (not domestic or scores["외국인·기관"] is not None)
-    score=max(0,min(100,technical+int(scores.get("외국인·기관") or 0)-penalty)) if full_ready else None
     technical_score=min(tech_max,technical_net) if ready else None
+    # When investor flow is unavailable, show a clearly labelled 100-point
+    # normalized TECHNICAL score, never silently count missing flows as zero.
+    if full_ready:
+        score=max(0,min(100,technical+int(scores.get("외국인·기관") or 0)-penalty))
+        score_basis="종합 100점 (기술+수급)" if domestic else "미국 기술 100점"
+    elif ready and domestic:
+        score=round(100*technical_score/80)
+        score_basis="기술환산 100점 (수급 제외)"
+    else:
+        score=None
+        score_basis="시세/거래량 부족"
     if not ready:
         signal="데이터 부족"
     elif domestic and not full_ready:
-        signal="수급 미확인·기술 분석만"
+        signal="기술점수만·수급 미반영"
     else:
         signal="강한 매수 검토" if score>=80 else "매수 검토" if score>=60 else "관찰"
     if ready and ok("RSI") and r.RSI>75:signal="과열·추격 주의"
@@ -168,7 +178,7 @@ def evaluate(x, market="US", flow=None):
         if stop<p:target=p+2*(p-stop)
     return {"date":str(pd.Timestamp(x.index[-1]).date()),"price":p,
         "change":(p/float(prev.Close)-1)*100,"score":score,"technical_score":technical_score,
-        "technical_max":tech_max,"signal":signal,"reason":" · ".join(details),
+        "technical_max":tech_max,"score_basis":score_basis,"signal":signal,"reason":" · ".join(details),
         "scores":scores,"penalty":penalty,"flow_status":flow_status,"flow_date":flow_date,
         "rsi":num(r.RSI),"rsi_delta5":rsi_delta,
         "rsi_direction":("상승" if rsi_delta>=3 else "하락" if rsi_delta<=-3 else "횡보") if rsi_delta is not None else "데이터 부족",
