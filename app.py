@@ -182,11 +182,11 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v21_"+mkt+("_flow" if with_flow else "_tech")
+    key="results_v22_"+mkt+("_flow" if with_flow else "_tech")
     if key not in st.session_state:
         st.session_state[key]={"rows":{},"errors":{},"batches":[]}
     state=st.session_state[key]
-    page_key="result_batch_page_v21_"+mkt+("_flow" if with_flow else "_tech")
+    page_key="result_batch_page_v22_"+mkt+("_flow" if with_flow else "_tech")
     left,right=st.columns([3,1])
     remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
     if left.button("▶ 다음 50종목 실제 시세 분석",key="run"+mkt,type="primary",
@@ -196,16 +196,31 @@ def ranking_page(mkt):
         # This prevents failures from shifting the following 50 onto the first page.
         state["batches"].append([item[0] for item in batch])
         st.session_state[page_key]=len(state["batches"])
-        with st.spinner(f"{len(batch)}개 종목의 실제 OHLCV 조회 중"):
-            for item in batch:
-                try:
-                    state["rows"][item[0]]=to_row(item,with_flow=with_flow,market_rank=market_rank.get(item[0]))
-                except Exception as e:
-                    state["errors"][item[0]]={"종목":item[1],"코드":item[0],"오류":str(e)[:260]}
+        progress=st.progress(0,text=f"새 분석 0/{len(batch)}")
+        for idx,item in enumerate(batch,1):
+            try:
+                state["rows"][item[0]]=to_row(item,with_flow=with_flow,market_rank=market_rank.get(item[0]))
+            except Exception as e:
+                state["errors"][item[0]]={"종목":item[1],"코드":item[0],"오류":str(e)[:260]}
+            progress.progress(idx/len(batch),text=f"새 분석 {idx}/{len(batch)} — {item[1]}")
+        progress.empty()
     if right.button("이 시장 결과 초기화",key="reset"+mkt):
         st.session_state[key]={"rows":{},"errors":{},"batches":[]}
         st.session_state.pop(page_key,None)
         st.rerun()
+    if state["errors"] and st.button(f"↻ 조회 실패 {len(state['errors'])}개만 재시도",key="retry_"+mkt):
+        lookup={t[0]:t for t in ordered}
+        failed_codes=list(state["errors"])
+        progress=st.progress(0,text="오류 종목 재조회")
+        for idx,code in enumerate(failed_codes,1):
+            if code in lookup:
+                try:
+                    state["rows"][code]=to_row(lookup[code],with_flow=with_flow,market_rank=market_rank.get(code))
+                    state["errors"].pop(code,None)
+                except Exception as e:
+                    state["errors"][code]["오류"]=str(e)[:260]
+            progress.progress(idx/len(failed_codes),text=f"오류 재시도 {idx}/{len(failed_codes)}")
+        progress.empty()
     success=len(state["rows"]); fail=len(state["errors"])
     st.progress((success+fail)/len(ordered),text=f"분석 진행: {success+fail}/{len(ordered)} (정상 {success} · 오류 {fail})")
     if success:
@@ -301,7 +316,7 @@ with ranking_tab:ranking_page(active)
 with candidate_tab:
     st.subheader("투자 후보 탐색 — "+MARKET_LABELS[active])
     st.caption("실제 분석된 종목만 표시합니다. 기술 상승 신호·수급·종가 검증을 별도로 구분해 비교합니다.")
-    result_key="results_v21_"+active+("_flow" if with_flow else "_tech")
+    result_key="results_v22_"+active+("_flow" if with_flow else "_tech")
     result_state=st.session_state.get(result_key,{"rows":{}})
     if not result_state.get("rows"):
         st.info("선택 시장 분석 탭에서 먼저 50종목 실제 분석을 실행하세요.")
