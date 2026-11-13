@@ -6,10 +6,29 @@ Do not treat this as a production-quality investment backtest.
 import json
 from datetime import datetime,timezone
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 from engine import compute,evaluate
 from providers import get_prices
-from accuracy_audit import SAMPLES
+from universe import get_universe
+
+# The 100 candidates are selected *before* any trade outcomes are computed.
+SAMPLE_ALLOCATION={"KR":34,"KQ":33,"US":33}
+MAX_WORKERS=4
+
+def pick_100():
+    universe=get_universe()
+    selected=[]
+    for market,n in SAMPLE_ALLOCATION.items():
+        # Exclude the optional leveraged ETFs; sample ordinary companies only.
+        stocks=[(market,code,name) for code,name,_,sector in universe[market]
+                if code not in ("472150","0262B0","SOXL")]
+        if len(stocks)<n:
+            raise RuntimeError(f"{market}: 필요 {n}종목, 조회된 종목 {len(stocks)}종목")
+        selected.extend(stocks[:n])
+    assert len(selected)==100 and len({(m,c) for m,c,_ in selected})==100
+    return selected,universe
+
 
 HORIZON=10
 TRADING_COST_PCT=0.35
@@ -74,25 +93,62 @@ def test_ticker(market, code):
             "take_count":sum(s["exit"] in ("take","gap_take") for s in samples)}
 
 def run():
+    samples,universe=pick_100()
     report={"time_utc":datetime.now(timezone.utc).isoformat(),
-            "status":"limited_diagnostic_not_proven","horizon_sessions":HORIZON,
-            "round_trip_cost_pct":TRADING_COST_PCT,
-            "assumptions":["7 currently chosen tickers; survivorship bias",
-                           "missing historical investor flow",
+            "status":"100_ticker_exploratory_diagnostic_not_validated",
+            "requested_tickers":100,
+            "sample_allocation":SAMPLE_ALLOCATION,
+            "sampling":"top-cap-ranked available current companies; no ETFs; not historical membership",
+            "universe_sources":{m:universe[m+"_source"] for m in SAMPLE_ALLOCATION},
+            "horizon_sessions":HORIZON,"round_trip_cost_pct":TRADING_COST_PCT,
+            "assumptions":["100 currently selected cap-ranked stocks; strong survivorship bias",
+                           "missing historical investor flow and true historical constituent lists",
                            "next-session open entry, 5% maximum opening gap",
                            "stop touched first if same bar hits both thresholds",
                            "actual daily open fill if gapped through stop",
-                           "separate trades 10 trading sessions apart",
+                           "trades spaced 10 sessions per ticker, correlated across tickers",
                            "no price impact, benchmark or corporate actions validation"],
             "tickers":{}}
-    for market,code in SAMPLES:
-        try:report["tickers"][market+":"+code]=test_ticker(market,code)
-        except Exception as e:report["tickers"][market+":"+code]={"error":str(e)[:250]}
+    def worker(ticker):
+        market,code,name=ticker
+        try:
+            v=test_ticker(market,code)
+        except Exception as exc:
+            v={"error":str(exc)[:250]}
+        return market,code,name,v
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures=[pool.submit(worker,t) for t in samples]
+        for idx,future in enumerate(as_completed(futures),1):
+            market,code,name,v=future.result()
+            report["tickers"][market+":"+code]={"name":name,**v}
+            if idx%10==0:print(f"Completed {idx}/100: {market}:{code}",flush=True)
+    # Present order exactly as originally ranked, not completion order.
+    report["tickers"]={
+        market+":"+code:report["tickers"][market+":"+code] for market,code,_ in samples
+    }
+    report["analysed_tickers"]=sum("error" not in v for v in report["tickers"].values())
+    report["failed_tickers"]=100-report["analysed_tickers"]
+    report["tickers_with_trades"]=sum(v.get("trades",0)>0 for v in report["tickers"].values())
     report["total_trades"]=sum(v.get("trades",0) for v in report["tickers"].values())
+    buckets={}
+    for key,v in report["tickers"].items():
+        market=key.split(":",1)[0]
+        buckets.setdefault(market,{"requested":0,"analysed":0,"failed":0,"trades":0})
+        buckets[market]["requested"]+=1
+        buckets[market]["analysed"]+=int("error" not in v)
+        buckets[market]["failed"]+=int("error" in v)
+        buckets[market]["trades"]+=v.get("trades",0)
+    report["per_market"]=buckets
+    report["verification_complete"]=(report["analysed_tickers"]==100)
     return report
 
 if __name__=="__main__":
     v=run()
     Path("data").mkdir(exist_ok=True)
-    Path("data/trade-strategy-audit.json").write_text(json.dumps(v,ensure_ascii=False,indent=2),encoding="utf8")
-    print(json.dumps(v,ensure_ascii=False,indent=2))
+    Path("data/trade-strategy-audit.json").write_text(
+        json.dumps(v,ensure_ascii=False,indent=2),encoding="utf8")
+    print(json.dumps({k:v[k] for k in ("requested_tickers","analysed_tickers",
+                     "failed_tickers","tickers_with_trades","total_trades",
+                     "per_market","verification_complete")},ensure_ascii=False,indent=2))
+    if not v["verification_complete"]:
+        raise SystemExit(f"100종목 전수 분석 미완료: {v['failed_tickers']}개 조회 실패")
