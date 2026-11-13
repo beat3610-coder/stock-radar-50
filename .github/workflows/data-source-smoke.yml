@@ -81,6 +81,13 @@ jobs:
                   result["alternative_data_sources"][key]=record
               except Exception as ex:
                   result["alternative_data_sources"][key]={"error":str(ex)[:220]}
+          try:
+              from providers import _get_public_aggregated_flows, get_flows
+              fresh=_get_public_aggregated_flows("005930")
+              full=get_flows("005930",fresh["date"])
+              result["verified_primary_source"]={"success":True,"sample":full}
+          except Exception as exc:
+              result["verified_primary_source"]={"success":False,"error":str(exc)[:450]}
           print(json.dumps(result,ensure_ascii=False,indent=2))
           import os
           os.makedirs("data",exist_ok=True)
