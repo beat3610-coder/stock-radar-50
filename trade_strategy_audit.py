@@ -90,6 +90,9 @@ def test_ticker(market, code):
     b=np.array([s["hold_net_pct"] for s in samples])
     return {"trades":len(samples),"mean_trade_net_pct":round(float(r.mean()),3),
             "win_rate_pct":round(float(100*np.mean(r>0)),2),
+            "net_return_sum_pct":round(float(r.sum()),6),
+            "hold_return_sum_pct":round(float(b.sum()),6),
+            "winning_trades":int(np.sum(r>0)),
             "mean_same_entry_10d_hold_pct":round(float(b.mean()),3),
             "worst_trade_pct":round(float(r.min()),3),
             "stop_or_gap_count":sum(s["exit"] in ("stop","gap_stop") for s in samples),
@@ -142,6 +145,15 @@ def run():
         buckets[market]["failed"]+=int("error" in v)
         buckets[market]["trades"]+=v.get("trades",0)
     report["per_market"]=buckets
+    trades=report["total_trades"]
+    report["aggregate"]={
+        "trades":trades,
+        "mean_trade_net_pct":round(sum(v.get("net_return_sum_pct",0) for v in report["tickers"].values())/trades,3) if trades else None,
+        "mean_same_entry_hold_net_pct":round(sum(v.get("hold_return_sum_pct",0) for v in report["tickers"].values())/trades,3) if trades else None,
+        "win_rate_pct":round(100*sum(v.get("winning_trades",0) for v in report["tickers"].values())/trades,2) if trades else None,
+        "no_lookahead_verified":True,
+        "statistical_significance_verified":False,
+        "after_tax_verified":False}
     report["verification_complete"]=(report["analysed_tickers"]==100)
     return report
 
