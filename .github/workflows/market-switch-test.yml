@@ -2,7 +2,7 @@ name: Market selector regression smoke
 on:
   push:
     branches: [main]
-    paths: ["app.py", "test_market_switch.py", ".github/workflows/market-switch-test.yml"]
+    paths: ["app.py", "access_control.py", "test_access_control.py", "test_market_switch.py", ".github/workflows/market-switch-test.yml"]
   workflow_dispatch:
 permissions:
   contents: write
@@ -16,6 +16,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install streamlit plotly pandas numpy
+      - name: Verify customer access-policy edge cases
+        run: python test_access_control.py
       - name: Verify KR to KQ to US to KR switching
         run: python test_market_switch.py
       - name: Save results
