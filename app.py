@@ -83,6 +83,13 @@ st.caption("매매 계획 중심: 1차·2차 익절 참고, 손절 참고, 위�
 @st.cache_data(ttl=86400,show_spinner=False)
 def universe():return get_universe()
 
+@st.cache_data(ttl=3600,show_spinner=False)
+def strategy_status():
+    p=Path("data/strategy-lab-latest.json")
+    if not p.exists():return {}
+    try:return json.loads(p.read_text(encoding="utf-8")).get("markets",{})
+    except Exception:return {}
+
 @st.cache_data(ttl=21600,show_spinner=False)
 def priced(code,market):
     d,source=get_prices(code,market)
@@ -130,6 +137,10 @@ def to_row(item,with_flow=True,market_rank=None):
         ideas=playbook(data,market,capital=(10_000_000.0 if market in ("KR","KQ") else 100_000.0))["setups"]
     except Exception:
         ideas=[]
+    research_market=strategy_status().get(market,{})
+    qualifying_ideas=[z for z in ideas
+       if research_market.get("research_eligible") and
+          z["strategy"]==research_market.get("selected_for_diagnostic")]
     best_idea=max(ideas,key=lambda z:z["target_upside_pct"]) if ideas else None
     labels={"trend_breakout":"고점 돌파","trend_pullback":"눌림목 반등","momentum_reentry":"MACD 재상승"}
     return {
@@ -140,6 +151,7 @@ def to_row(item,with_flow=True,market_rank=None):
       "점수":r["score"],"점수 기준":r["score_basis"],"기술점수":r["technical_score"],"기술만점":r["technical_max"],
       "매매 판단":r["signal"],
       "전략 진입 조건":" / ".join(labels.get(z["strategy"],z["strategy"]) for z in ideas) if ideas else "해당 없음",
+      "전략 검증 통과 후보":("예·실전 승인 아님" if qualifying_ideas else "아니오"),
       "전략 연구 목표상승 %":best_idea["target_upside_pct"] if best_idea else None,
       "전략 연구 손절폭 %":best_idea["stop_risk_pct"] if best_idea else None,
       "시장 위험국면":r.get("risk_regime","미확인"),
@@ -422,7 +434,7 @@ with candidate_tab:
         if filter_choice=="연구용 후보(경고 포함)":
             candidates=candidates[candidates["매매 판단"].isin(("연구용 매수 후보·실거래 미승인","연구용 후보·위험조건 미충족"))]
         elif filter_choice=="전략 진입 조건 충족":
-            candidates=candidates[candidates["전략 진입 조건"]!="해당 없음"]
+            candidates=candidates[candidates["전략 검증 통과 후보"]=="예·실전 승인 아님"]
         elif filter_choice=="기술적 상승 신호":
             candidates=candidates[candidates["기술 판단(목표 검증 전)"].isin(
                 ("매수 검토","강한 매수 검토","기술매수 후보·수급 미확인"))]
@@ -433,7 +445,7 @@ with candidate_tab:
         sort_col=st.selectbox("정렬 기준",["점수","목표 상승여력 %","기대손익비(R)","전략 연구 목표상승 %"],
                               key="candidate_sort_"+active)
         candidates=candidates.sort_values(sort_col,ascending=False,na_position="last")
-        columns=["구분","종목","코드","전략 진입 조건","전략 연구 목표상승 %","전략 연구 손절폭 %","매매 판단","기술 판단(목표 검증 전)",
+        columns=["구분","종목","코드","전략 검증 통과 후보","전략 진입 조건","전략 연구 목표상승 %","전략 연구 손절폭 %","매매 판단","기술 판단(목표 검증 전)",
                  "시장 위험국면","실전 전략 승인","종가","통합 목표가","손절 참고","목표 상승여력 %","손절폭 %",
                  "기대손익비(R)","과거 비용 반영 손익 %",
                  "과거 1차 익절 우선 %","과거 경로 표본",
@@ -480,10 +492,13 @@ with detail_tab:
                 st.subheader("🧭 전략형 매매계획 · 가격·손절·익절")
                 lab_file=Path("data/strategy-lab-latest.json")
                 adopted=None
+                holdout_eligible=False
                 if lab_file.exists():
                     try:
                         lab_data=json.loads(lab_file.read_text(encoding="utf-8"))
-                        adopted=lab_data.get("markets",{}).get(mkt,{}).get("selected_for_diagnostic")
+                        market_lab=lab_data.get("markets",{}).get(mkt,{})
+                        adopted=market_lab.get("selected_for_diagnostic")
+                        holdout_eligible=bool(market_lab.get("research_eligible"))
                     except Exception:
                         adopted=None
                 capital_for_plan=10_000_000.0 if mkt in ("KR","KQ") else 100_000.0
@@ -497,7 +512,7 @@ with detail_tab:
                                   "trend_pullback":"상승추세 눌림목 반등",
                                   "momentum_reentry":"MACD 재상승 진입"}
                     for idea in draft["setups"]:
-                        label=("개발·검증 확인 연구후보" if adopted==idea["strategy"] else "검증 미채택 · 참고만")
+                        label=("과거 추가 연구 통과·실전 미승인" if holdout_eligible and adopted==idea["strategy"] else "과거 검증 미달·매수 보류")
                         idea_rows.append({"전략":korean_names.get(idea["strategy"],idea["strategy"]),
                            "검증 구분":label,"기준 종가":idea["signal_price"],
                            "익일 허용 매수가 하한":idea["entry_min"],
