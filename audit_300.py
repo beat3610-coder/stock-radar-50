@@ -85,6 +85,9 @@ def audit_symbol(frame, market, ticker):
     return rows
 
 def metrics(trades):
+    # Stable historical ordering is necessary even for a diagnostic trade sequence.
+    # Overlapping positions still make this different from a capital-weighted portfolio.
+    trades = sorted(trades, key=lambda r:(str(r.get("entry_date","")), str(r.get("ticker",""))))
     pnl = np.array([r["net_pct"] for r in trades], dtype=float)
     if not len(pnl):
         return {"trades":0,"win_rate_pct":None,"mean_net_pct":None,
