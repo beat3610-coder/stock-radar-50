@@ -18,6 +18,8 @@ try:
         "markets":result["markets"],
         "portfolios":{m:{k:v for k,v in p.items() if k not in ("daily_equity","executions")}
                       for m,p in result["portfolios"].items()},
+        "stress_portfolios":{m:{k:v for k,v in p.items() if k not in ("daily_equity","executions")}
+                             for m,p in result["stress_portfolios"].items()},
         "certification":result["certification"],
         "error_count":len(result["errors"]),
         "errors":result["errors"][:12],
