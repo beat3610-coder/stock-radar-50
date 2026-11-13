@@ -80,7 +80,11 @@ jobs:
           for obj in (a,b,u):
               if obj['signal'] in ("매수 검토","강한 매수 검토"):
                   assert obj['upside_pct']>=3.0 and obj['entry_rr']>=1.5
-          results={'success':True,'entry_guard_passed':True,'KR':{k:a[k] for k in ('price','target1','target2','integrated_target','target_grade','target_signal_points','target_inputs')},
+          shorter=evaluate(x.iloc[-210:],market='US',flow=None)
+          assert shorter['hi52'] is None and shorter['lo52'] is None
+          results={'success':True,'entry_guard_passed':True,
+                   'review_v2':{'technical_only_gate':True,'future_dated_flow_rejected':True,'full_52wk_only':True},
+                   'KR':{k:a[k] for k in ('price','target1','target2','integrated_target','target_grade','target_signal_points','target_inputs')},
                    'KR_flow_unavailable':{'integrated_target':b['integrated_target'],'target_inputs':b['target_inputs']},
                    'US':{'integrated_target':u['integrated_target'],'target_inputs':u['target_inputs']}}
           with open('data/target-test-result.json','w') as fh:json.dump(results,fh,ensure_ascii=False,indent=2)
