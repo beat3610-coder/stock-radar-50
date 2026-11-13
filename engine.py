@@ -377,11 +377,13 @@ def evaluate(x, market="US", flow=None):
     target2_basis=target_eval["target2_basis"]
     target1_r=target_eval["target1_r"]
     target2_r=target_eval["target2_r"]
+    technical_signal_before_gate=signal
     signal,upside_pct,entry_rr,entry_reason=apply_target_risk_gate(
         signal,p,stop,target_eval["integrated_target"])
     return {"date":str(pd.Timestamp(x.index[-1]).date()),"price":p,
         "change":(p/float(prev.Close)-1)*100,"score":score,"technical_score":technical_score,
         "technical_max":tech_max,"score_basis":score_basis,"signal":signal,
+        "technical_signal_before_gate":technical_signal_before_gate,
         "reason":" · ".join(details),"entry_reason":entry_reason,
         "upside_pct":upside_pct,"entry_rr":entry_rr,
         "scores":scores,"penalty":penalty,"flow_status":flow_status,"flow_date":flow_date,
