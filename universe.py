@@ -124,6 +124,58 @@ def kospi_top100():
         except Exception as e:attempts.append(f"{market}: {str(e)[:170]}")
     raise RuntimeError("코스피 100종목 구성을 가져오지 못했습니다. "+" | ".join(attempts))
 
+def kosdaq_top100():
+    """KOSDAQ common shares ranked by observed market capitalization; fail closed."""
+    import FinanceDataReader as fdr
+    errors=[]
+    for market in ("KOSDAQ","KRX"):
+        try:
+            df=fdr.StockListing(market).copy()
+            df.columns=[str(v).strip() for v in df.columns]
+            def column(names):
+                return next((v for v in df if v.lower().replace("_","") in names),None)
+            code=column(("code","symbol","ticker"))
+            name=column(("name","company"))
+            cap=column(("marcap","marketcap","marketcapitalization"))
+            if not all((code,name,cap)):
+                raise ValueError("시총/종목코드/종목명 열 누락: "+str(list(df.columns)))
+            if market=="KRX":
+                market_col=column(("market","marketid"))
+                if market_col is None:raise ValueError("시장 구분 열 누락")
+                df=df[df[market_col].astype(str).str.upper().isin(("KOSDAQ","KSQ"))]
+            df[code]=df[code].astype(str).str.strip().str.zfill(6)
+            df[cap]=pd.to_numeric(df[cap].astype(str).str.replace(",","",regex=False),errors="coerce")
+            df=df[df[code].str.fullmatch(r"\\d{6}") & df[cap].gt(0)]
+            names=df[name].astype(str)
+            df=df[~names.str.contains(r"스팩|SPAC|ETF|ETN|우선주|우$",case=False,regex=True,na=False)]
+            df=df[~df[code].str.endswith(("1","5","7","9"))]
+            df=df.sort_values(cap,ascending=False).drop_duplicates(code)
+            sector_col=column(("sector","industry","업종","업종명"))
+            sectors={}
+            # KRX sector classifications first, with FDR sector labels as fallback.
+            try:
+                from pykrx import stock as krx
+                for back in (0,1,3,5,8):
+                    day=(dt.date.today()-dt.timedelta(days=back)).strftime("%Y%m%d")
+                    meta=krx.get_market_sector_classifications(day,"KOSDAQ")
+                    if meta is not None and not meta.empty and "업종명" in meta:
+                        sectors={str(k).zfill(6):str(v) for k,v in meta["업종명"].items() if pd.notna(v)}
+                        if sectors:break
+            except Exception:
+                pass
+            rows=[]
+            for _,r in df.head(100).iterrows():
+                symbol=str(r[code])
+                sector=sectors.get(symbol,str(r[sector_col]) if sector_col else "")
+                if sector.strip().lower() in ("","nan","none","-"):sector="업종 확인 불가"
+                rows.append((symbol,str(r[name]),sector))
+            if len(rows)!=100:raise ValueError(f"종목 수 부족: {len(rows)}")
+            return rows,f"FinanceDataReader {market} 코스닥 시총순 / {dt.date.today().isoformat()} (업종 KRX/FDR)"
+        except Exception as exc:
+            errors.append(f"{market}: {str(exc)[:140]}")
+    raise RuntimeError("코스닥 상위 100개 조회 실패: "+" | ".join(errors))
+
+
 def nasdaq_top100():
     # Use independently dated index list rather than top 100 Nasdaq exchange shares.
     try:
@@ -175,6 +227,10 @@ def get_universe():
     kr_error=None
     try: kr,kr_source=kospi_top100()
     except Exception as e: kr=[];kr_source="시총 상위 100종목 조회 실패";kr_error=str(e)
+    kq_error=None
+    try: kq,kq_source=kosdaq_top100()
+    except Exception as e:
+        kq=[];kq_source="코스닥 상위 100종목 시총순 조회 실패";kq_error=str(e)
     us,us_source=nasdaq_top100()
     try:
         us,cap_source=sort_nasdaq_by_market_cap(us)
@@ -190,8 +246,10 @@ def get_universe():
     us.extend([x for x in MANDATORY_US if x[0] not in us_codes])
     return {
       "KR":[(c,n,"KR",s) for c,n,s in kr],
+      "KQ":[(c,n,"KQ",s) for c,n,s in kq],
       "US":[(c,n,"US",s) for c,n,s in us],
-      "KR_source":kr_source,"US_source":us_source,"KR_error":kr_error,
-      "KR_index_count":len(kr_codes),"US_index_count":len(us_codes),
+      "KR_source":kr_source,"KQ_source":kq_source,"US_source":us_source,
+      "KR_error":kr_error,"KQ_error":kq_error,
+      "KR_index_count":len(kr_codes),"KQ_index_count":len(kq),"US_index_count":len(us_codes),
       "US_cap_sorted":us_cap_sorted
     }
