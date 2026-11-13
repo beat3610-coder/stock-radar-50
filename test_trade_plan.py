@@ -37,8 +37,9 @@ assert actual["entry_rr"]==scenario_from_history(x,actual["stop"])["planned_rr"]
 print("trade plan: no lookahead, profit levels, stops, and risk filter PASS")
 
 sizing=position_sizing(10_000_000,100_000,95_000,115_000,0.01)
-assert sizing["shares"]==20 and sizing["cost"]==2_000_000
-assert sizing["planned_loss"]==100_000 and sizing["planned_profit"]==300_000
+assert sizing["shares"]==18 and sizing["cost"]==1_800_000
+assert abs(sizing["planned_loss"]-96_300)<0.01
+assert abs(sizing["planned_profit"]-263_700)<0.01
 assert position_sizing(100_000,100_000,95_000,115_000,0.01)["shares"]==0
 assert position_sizing(10_000_000,100_000,105_000,115_000,0.01)["shares"]==0
 print("position sizing tests PASS")
