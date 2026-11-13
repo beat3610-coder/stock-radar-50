@@ -159,7 +159,7 @@ summaryB.metric("코스닥 상위 기업 수",listing["KQ_index_count"])
 summaryC.metric("나스닥100 기업 수",listing["US_index_count"])
 summaryD.metric("필수 별도 상품",3)
 
-ranking_tab,detail_tab,flow_tab,guide_tab=st.tabs(["📋 선택 시장 분석","📊 상세 차트","🏦 국내 수급","ℹ️ 분석 기준"])
+ranking_tab,candidate_tab,detail_tab,flow_tab,guide_tab=st.tabs(["📋 선택 시장 분석","🔎 투자 후보 탐색","📊 상세 차트","🏦 국내 수급","ℹ️ 분석 기준"])
 
 def ranking_page(mkt):
     items=listing[mkt]
@@ -297,6 +297,50 @@ def ranking_page(mkt):
         st.dataframe(pd.DataFrame([{"구분":(f"코스피 {market_rank[c]}위" if mkt=="KR" else f"코스닥 {market_rank[c]}위" if mkt=="KQ" else f"나스닥 {market_rank[c]}위") if c in market_rank else ("국내 ETF" if mkt=="KR" else "미국 ETF"),"코드":c,"종목":n,"업종":s} for c,n,_,s in page_items]),use_container_width=True,hide_index=True,height=360)
 
 with ranking_tab:ranking_page(active)
+
+with candidate_tab:
+    st.subheader("투자 후보 탐색 — "+MARKET_LABELS[active])
+    st.caption("실제 분석된 종목만 표시합니다. 기술 상승 신호·수급·종가 검증을 별도로 구분해 비교합니다.")
+    result_key="results_v21_"+active+("_flow" if with_flow else "_tech")
+    result_state=st.session_state.get(result_key,{"rows":{}})
+    if not result_state.get("rows"):
+        st.info("선택 시장 분석 탭에서 먼저 50종목 실제 분석을 실행하세요.")
+    else:
+        candidates=pd.DataFrame(list(result_state["rows"].values()))
+        st.caption(f'현재 분석 자료 {len(candidates)}개 — 전체 {len(listing[active])}개 종목 중 조회된 결과')
+        groups={
+            "전체":"전체",
+            "매수 검토":"매수 검토",
+            "기술적 상승 신호":"기술적 상승 신호",
+            "종가 확인 필요":"종가 확인 필요",
+            "매수 유보·관찰":"매수 유보·관찰"}
+        filter_choice=st.selectbox("후보 필터",list(groups),key="candidate_filter_"+active)
+        if filter_choice=="매수 검토":
+            candidates=candidates[candidates["매매 판단"].isin(("매수 검토","강한 매수 검토"))]
+        elif filter_choice=="기술적 상승 신호":
+            candidates=candidates[candidates["기술 판단(목표 검증 전)"].isin(
+                ("매수 검토","강한 매수 검토","기술매수 후보·수급 미확인"))]
+        elif filter_choice=="종가 확인 필요":
+            candidates=candidates[candidates["종가 교차검증"]!="보조 시세 일치(공식값 미검증)"]
+        elif filter_choice=="매수 유보·관찰":
+            candidates=candidates[~candidates["매매 판단"].isin(("매수 검토","강한 매수 검토"))]
+        sort_col=st.selectbox("정렬 기준",["점수","목표 상승여력 %","기대손익비(R)"],
+                              key="candidate_sort_"+active)
+        candidates=candidates.sort_values(sort_col,ascending=False,na_position="last")
+        columns=["구분","종목","코드","매매 판단","기술 판단(목표 검증 전)",
+                 "종가","통합 목표가","손절 참고","목표 상승여력 %",
+                 "기대손익비(R)","점수","종가 교차검증","매매 판단 근거","거래일"]
+        columns=[col for col in columns if col in candidates]
+        st.caption(f"조건에 해당하는 종목 {len(candidates)}개")
+        if len(candidates):
+            fmt_cols={col:"{:,.0f}" for col in ("종가","통합 목표가","손절 참고","점수") if col in columns}
+            fmt_cols.update({col:"{:.2f}" for col in ("목표 상승여력 %","기대손익비(R)") if col in columns})
+            st.dataframe(candidates[columns].style.format(fmt_cols,na_rep="—"),
+                         hide_index=True,use_container_width=True,height=520)
+            st.download_button("📥 조건별 후보 CSV",candidates.to_csv(index=False).encode("utf-8-sig"),
+                               f"STOCK_RADAR_candidates_{active}.csv","text/csv",key="candidate_csv_"+active)
+        else:
+            st.info("선택 조건에 해당하는 후보가 없습니다. 기술 신호나 종가 검증 상태를 확인하세요.")
 
 with detail_tab:
     st.subheader("종목별 기술적 분석")
