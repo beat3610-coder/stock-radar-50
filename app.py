@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from access_control import enforce_access, access_mode
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
@@ -8,9 +9,18 @@ from universe import get_universe
 from engine import compute,evaluate
 from providers import get_prices,get_flows,verify_recent_close
 
-st.set_page_config(page_title="STOCK RADAR 200",page_icon="📈",layout="wide")
+st.set_page_config(page_title="STOCK RADAR | 투자분석",page_icon="📈",layout="wide")
+# Gate before loading universe or any third-party data for private customers.
+enforce_access(st)
 st.markdown("<style>.block-container{padding-top:1.4rem;max-width:1560px}.stMetric{padding:12px;border:1px solid #64748b44;border-radius:12px}</style>",unsafe_allow_html=True)
-st.title("📈 STOCK RADAR 200")
+st.title("📈 STOCK RADAR")
+if access_mode()!="private":
+    st.caption("공개 베타 · 비상업용 평가 버전 | 공식 시세 라이선스·결제·회원 운영 미연결")
+else:
+    st.caption("접근 인증 적용 · 초대 회원 전용 | 결제 상태는 외부 운영자가 별도로 관리")
+    with st.sidebar:
+        st.caption("로그인 계정: "+str(st.user.get("email") or "—"))
+        st.button("로그아웃",on_click=st.logout,key="logout")
 st.caption("🇰🇷 코스피 시총 100 + TIGER ETF 2개 | 🇰🇷 코스닥 시총 100 | 🇺🇸 Nasdaq-100 기업 100 + SOXL | 종가 기준 분석")
 st.warning("시세 교차검증 주의: 2026-11-13 공개 자료 대조에서 무료 시세 공급처 간 종가 불일치가 확인됐습니다. "
            "현재는 공식 확정 종가와 자동 교차검증하지 않습니다. 실제 주문 전 증권사 시세와 거래일을 반드시 대조하세요. "
