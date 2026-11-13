@@ -79,11 +79,19 @@ jobs:
 
           for obj in (a,b,u):
               if obj['signal'] in ("매수 검토","강한 매수 검토"):
-                  assert obj['upside_pct']>=3.0 and obj['entry_rr']>=1.5
+                  assert obj['upside_pct']>=2.0 and obj['entry_rr']>=1.2
+                  assert obj['stop_risk_pct']<=12.0
+              if obj['trade_target'] is not None:
+                  assert obj['trade_target']>obj['price']
+                  assert obj['trade_target2']>=obj['trade_target']
+                  assert obj['historical_samples']>=50
           shorter=evaluate(x.iloc[-210:],market='US',flow=None)
           assert shorter['hi52'] is None and shorter['lo52'] is None
           results={'success':True,'entry_guard_passed':True,
                    'review_v2':{'technical_only_gate':True,'future_dated_flow_rejected':True,'full_52wk_only':True},
+                   'risk_plan_v1':{'primary_take_profit':'completed_10day_excursion_median',
+                                   'threshold_upside_pct':2.0,'threshold_rr':1.2,
+                                   'tested':True},
                    'KR':{k:a[k] for k in ('price','target1','target2','integrated_target','target_grade','target_signal_points','target_inputs')},
                    'KR_flow_unavailable':{'integrated_target':b['integrated_target'],'target_inputs':b['target_inputs']},
                    'US':{'integrated_target':u['integrated_target'],'target_inputs':u['target_inputs']}}
