@@ -25,7 +25,10 @@ def pick_100():
                 if code not in ("472150","0262B0","SOXL")]
         if len(stocks)<n:
             raise RuntimeError(f"{market}: 필요 {n}종목, 조회된 종목 {len(stocks)}종목")
-        selected.extend(stocks[:n])
+        # Spread ranks evenly across each market's top 100 rather than taking
+        # only the mega-caps. Choice is deterministic and independent of returns.
+        positions=np.linspace(0,min(99,len(stocks)-1),num=n,dtype=int)
+        selected.extend(stocks[int(i)] for i in positions)
     assert len(selected)==100 and len({(m,c) for m,c,_ in selected})==100
     return selected,universe
 
@@ -98,7 +101,7 @@ def run():
             "status":"100_ticker_exploratory_diagnostic_not_validated",
             "requested_tickers":100,
             "sample_allocation":SAMPLE_ALLOCATION,
-            "sampling":"top-cap-ranked available current companies; no ETFs; not historical membership",
+            "sampling":"rank-stratified across present-day top 100 in each market; no ETFs; not historical membership",
             "universe_sources":{m:universe[m+"_source"] for m in SAMPLE_ALLOCATION},
             "horizon_sessions":HORIZON,"round_trip_cost_pct":TRADING_COST_PCT,
             "assumptions":["100 currently selected cap-ranked stocks; strong survivorship bias",
