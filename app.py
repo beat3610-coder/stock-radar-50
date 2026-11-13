@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from access_control import enforce_access, access_mode
+from trade_plan import position_sizing
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
@@ -441,6 +442,25 @@ with detail_tab:
                 p3.metric("손절폭",f'{r["stop_risk_pct"]:.2f}%' if r["stop_risk_pct"] is not None else "—")
                 p4.metric("익절·손절 손익비",f'{r["entry_rr"]:.2f}R' if r["entry_rr"] is not None else "—")
                 st.caption("익절 산정: "+r["trade_plan_basis"])
+                with st.expander("💰 실제 투입금액 대비 손절·익절 예상 금액",expanded=True):
+                    unit="원" if mkt in ("KR","KQ") else "달러"
+                    default_capital=10000000.0 if unit=="원" else 10000.0
+                    capital=st.number_input("투입 가능한 최대 자금 ("+unit+")",min_value=1.0,
+                        value=default_capital,step=100000.0 if unit=="원" else 100.0,
+                        key="risk_capital_"+mkt)
+                    risk_percent=st.slider("한 거래에서 감수할 최대 손절 위험 (% 자금)",
+                        min_value=0.5,max_value=5.0,value=1.0,step=0.5,key="risk_percent_"+mkt)
+                    sizing=position_sizing(capital,r["price"],r["stop"],r["trade_target"],
+                                            risk_fraction=risk_percent/100)
+                    s1,s2,s3,s4=st.columns(4)
+                    s1.metric("참고 매수수량",f'{sizing["shares"]:,}주')
+                    s2.metric("예상 투자원금",f'{sizing["cost"]:,.0f} {unit}')
+                    s3.metric("손절 시 계획손실",f'-{sizing["planned_loss"]:,.0f} {unit}'
+                              if sizing["planned_loss"] is not None else "산정 불가")
+                    s4.metric("1차 익절 시 계획수익",f'+{sizing["planned_profit"]:,.0f} {unit}'
+                              if sizing["planned_profit"] is not None else "산정 불가")
+                    st.caption("종가 진입·손절 참고가 체결을 가정한 계획 금액입니다. "
+                               "수수료·세금·호가 차이 및 갭 손실은 미반영이며 실제 손실액이 더 커질 수 있습니다.")
                 st.caption("과거 저항 참고: "+fmt(r["integrated_target"])+" / 종합 근거: "+(r["target_evidence"] or "분석 가능한 자료 없음"))
                 st.caption("과거 매물대 분석 방식: "+(r["volume_profile"] or "자료 부족")+
                            " | 외국인·기관: "+r["target_inputs"])
