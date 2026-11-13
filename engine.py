@@ -18,7 +18,7 @@ def normalize(data):
 def compute(data):
     x=normalize(data)
     c=x.Close
-    for n in (5,20,60,200): x[f"MA{n}"]=c.rolling(n).mean()
+    for n in (5,20,60,120,200): x[f"MA{n}"]=c.rolling(n).mean()
     d=c.diff()
     g=d.clip(lower=0).ewm(alpha=1/14,adjust=False,min_periods=14).mean()
     l=(-d.clip(upper=0)).ewm(alpha=1/14,adjust=False,min_periods=14).mean()
@@ -61,61 +61,123 @@ def compute(data):
 
 def finite(v): return pd.notna(v) and bool(np.isfinite(v))
 
-def evaluate(x):
-    r=x.iloc[-1]; prev=x.iloc[-2]; p=float(r.Close)
+def evaluate(x, market="US", flow=None):
+    """Rules-based daily signal. KR: 80 technical + 20 investor flow.
+    US: 100 technical only. Missing KR flow never implies zero purchases.
+    """
+    r=x.iloc[-1]
+    prev=x.iloc[-2]
+    p=float(r.Close)
     def num(v):return float(v) if finite(v) else None
     def ok(k):return finite(r[k])
     rsi_prev=x.RSI.iloc[-6] if len(x)>=6 else np.nan
     rsi_delta=float(r.RSI-rsi_prev) if ok("RSI") and finite(rsi_prev) else None
-    # Missing/unusable volume must not be conflated with a failed buy signal.
     volume_available=bool(ok("VOL20") and r.VOL20>0 and ok("Volume") and r.Volume>0)
-    vol_ratio=float(r.Volume/r.VOL20) if volume_available else None
-    # Independent groups: trend 30, momentum 25, strength 20, volume 25.
-    scores={"추세":0,"모멘텀":0,"추세 강도":0,"수급·거래량":0}
+    volratio=float(r.Volume/r.VOL20) if volume_available else None
+    domestic=market=="KR"
+    scores={"추세":0,"모멘텀":0,"추세 강도":0,"거래량·OBV":0}
+    if domestic:scores["외국인·기관"]=None
     details=[]
-    def award(group,condition,points,label):
-        if condition:
+    def award(group, cond, points, name):
+        if cond:
             scores[group]+=points
-            details.append(label)
-    award("추세",ok("MA20") and p>r.MA20,10,"20일선 상회")
-    award("추세",ok("MA60") and r.MA20>r.MA60,10,"20일선 > 60일선")
-    award("추세",ok("MA200") and r.MA60>r.MA200 and p>r.MA200,10,"장기 정배열")
-    award("모멘텀",ok("MACDH") and r.MACDH>0,10,"MACD 히스토그램 양수")
-    award("모멘텀",ok("RSI") and 45<=r.RSI<=68,8,"RSI 건전 상승 구간")
+            details.append(name)
+
+    # Both markets: 20/60/120/200-day averages, total 25.
+    award("추세",ok("MA20") and p>r.MA20,5,"20일선 위")
+    award("추세",ok("MA60") and r.MA20>r.MA60,7,"20일선 > 60일선")
+    award("추세",ok("MA120") and r.MA60>r.MA120,7,"60일선 > 120일선")
+    award("추세",ok("MA200") and r.MA120>r.MA200 and p>r.MA200,6,"120일선 > 200일선")
+
+    # Momentum: 25, same for each market.
+    award("모멘텀",ok("MACDH") and r.MACDH>0,10,"MACD 양수")
+    award("모멘텀",ok("RSI") and 45<=r.RSI<=68,8,"RSI 45~68")
     award("모멘텀",rsi_delta is not None and rsi_delta>=3 and r.RSI<=70,7,"RSI 5거래일 상승")
-    award("추세 강도",ok("ADX") and r.ADX>=25 and ok("PDI") and ok("MDI") and r.PDI>r.MDI,20,"ADX 25 이상 상승 우세")
-    award("추세 강도",ok("ADX") and 20<=r.ADX<25 and ok("PDI") and ok("MDI") and r.PDI>r.MDI,10,"ADX 20 이상 추세 형성")
-    award("수급·거래량",vol_ratio is not None and vol_ratio>=1.5 and p>prev.Close,10,"상승과 거래량 1.5배 동반")
-    award("수급·거래량",volume_available and len(x)>=6 and ok("OBV20") and r.OBV>r.OBV20 and r.OBV>x.OBV.iloc[-6],10,"OBV 매수세 강화")
-    award("수급·거래량",ok("RES") and p>r.RES,5,"20일 고점 돌파")
+
+    # Strength: KR 15, US 20.
+    strength_hi=15 if domestic else 20
+    strength_mid=8 if domestic else 10
+    award("추세 강도",ok("ADX") and r.ADX>=25 and ok("PDI") and ok("MDI") and r.PDI>r.MDI,
+          strength_hi,"ADX 25 이상 상승 우세")
+    award("추세 강도",ok("ADX") and 20<=r.ADX<25 and ok("PDI") and ok("MDI") and r.PDI>r.MDI,
+          strength_mid,"ADX 20 이상 상승 우세")
+
+    # Trading activity: KR 15, US 30. No data -> total score withheld.
+    vol_high=5 if domestic else 12
+    obv_high=7 if domestic else 12
+    breakout=3 if domestic else 6
+    award("거래량·OBV",volratio is not None and volratio>=1.5 and p>prev.Close,
+          vol_high,"상승과 거래량 증가")
+    award("거래량·OBV",volume_available and len(x)>=6 and ok("OBV20") and
+          r.OBV>r.OBV20 and finite(x.OBV.iloc[-6]) and r.OBV>x.OBV.iloc[-6],
+          obv_high,"OBV 상승")
+    award("거래량·OBV",ok("RES") and p>r.RES,breakout,"20일 고점 돌파")
+
+    flow_date=None
+    flow_status="미적용(미국 시장)"
+    if domestic:
+        if isinstance(flow,dict) and all(k in flow for k in ("기관","외국인")):
+            try:
+                f=flow["외국인"]; i=flow["기관"]
+                # Check valid numeric 5-/20-session sums, including legitimate zero.
+                vals=[float(f["5일"]),float(f["20일"]),float(i["5일"]),float(i["20일"])]
+                if not all(np.isfinite(v) for v in vals):raise ValueError("non-finite")
+                flow_date=flow.get("date")
+                if flow_date is None or abs((pd.Timestamp(x.index[-1]).normalize()-pd.Timestamp(flow_date).normalize()).days)>7:
+                    raise ValueError("stale flow")
+                scores["외국인·기관"]=0
+                award("외국인·기관",vals[0]>0,5,"외국인 5일 순매수")
+                award("외국인·기관",vals[1]>0,5,"외국인 20일 누적 순매수")
+                award("외국인·기관",vals[2]>0,5,"기관 5일 순매수")
+                award("외국인·기관",vals[3]>0,5,"기관 20일 누적 순매수")
+                flow_status="정상"
+            except (TypeError,ValueError,KeyError):
+                flow_status="자료 확인 불가"
+        else:
+            flow_status="자료 확인 불가"
+
     penalty=0
-    if ok("RSI") and r.RSI>75: penalty+=10;details.append("RSI 과열 경고")
+    if ok("RSI") and r.RSI>75:penalty+=10;details.append("RSI 과열")
     if rsi_delta is not None and rsi_delta<=-5:penalty+=5;details.append("RSI 둔화")
-    if ok("BBUP") and p>r.BBUP:penalty+=5;details.append("볼린저 상단 이탈·추격 주의")
-    if ok("ADX") and r.ADX>=25 and ok("PDI") and ok("MDI") and r.MDI>r.PDI:penalty+=15;details.append("ADX 하락세 강함")
-    score=max(0,min(100,sum(scores.values())-penalty))
-    # No ranking from 200-day signals where full history is unavailable.
-    ready=len(x)>=200 and ok("MA200") and ok("MACDH") and ok("ADX") and ok("OBV20") and volume_available
-    signal="데이터 부족" if not ready else ("강한 매수 검토" if score>=80 else "매수 검토" if score>=60 else "관찰")
+    if ok("BBUP") and p>r.BBUP:penalty+=5;details.append("볼린저 상단 추격 주의")
+    if ok("ADX") and r.ADX>=25 and ok("PDI") and ok("MDI") and r.MDI>r.PDI:
+        penalty+=15;details.append("ADX 강한 하락 추세")
+
+    technical=sum(value for key,value in scores.items() if key!="외국인·기관" and value is not None)
+    tech_max=80 if domestic else 100
+    technical_net=max(0,technical-penalty)
+    ready=len(x)>=200 and all(ok(k) for k in ("MA200","MA120","MACDH","ADX","OBV20")) and volume_available
+    full_ready=ready and (not domestic or scores["외국인·기관"] is not None)
+    score=max(0,min(100,technical+int(scores.get("외국인·기관") or 0)-penalty)) if full_ready else None
+    technical_score=min(tech_max,technical_net) if ready else None
+    if not ready:
+        signal="데이터 부족"
+    elif domestic and not full_ready:
+        signal="수급 미확인·기술 분석만"
+    else:
+        signal="강한 매수 검토" if score>=80 else "매수 검토" if score>=60 else "관찰"
     if ready and ok("RSI") and r.RSI>75:signal="과열·추격 주의"
     if ready and ok("MA20") and p<r.MA20 and ok("MACDH") and r.MACDH<0:signal="축소·매도 검토"
     if ready and ok("MA200") and p<r.MA200 and r.MA20<r.MA60:signal="매수 보류"
     if ready and ok("ADX") and r.ADX>=25 and ok("PDI") and ok("MDI") and r.MDI>r.PDI and p<r.MA20:
         signal="하락 추세·매수 보류"
+
     stop=target=None
     if ok("ATR") and r.ATR>0:
         stop=max(0.01,min(float(r.MA20),p-2*r.ATR) if ok("MA20") and p>r.MA20 else p-2*r.ATR)
         if stop<p:target=p+2*(p-stop)
-    return {"date":str(pd.Timestamp(x.index[-1]).date()),"price":p,"change":(p/float(prev.Close)-1)*100,
-        "score":score if ready else None,"signal":signal,"reason":" · ".join(details),
-        "scores":scores,"penalty":penalty,
+    return {"date":str(pd.Timestamp(x.index[-1]).date()),"price":p,
+        "change":(p/float(prev.Close)-1)*100,"score":score,"technical_score":technical_score,
+        "technical_max":tech_max,"signal":signal,"reason":" · ".join(details),
+        "scores":scores,"penalty":penalty,"flow_status":flow_status,"flow_date":flow_date,
         "rsi":num(r.RSI),"rsi_delta5":rsi_delta,
         "rsi_direction":("상승" if rsi_delta>=3 else "하락" if rsi_delta<=-3 else "횡보") if rsi_delta is not None else "데이터 부족",
         "volume_available":volume_available,"volume_now":int(r.Volume) if volume_available else None,
-        "volume_avg20":float(r.VOL20) if volume_available else None,
+        "volume_avg20":num(r.VOL20) if volume_available else None,
         "adx":num(r.ADX),"pdi":num(r.PDI),"mdi":num(r.MDI),
         "obv_up":bool(volume_available and ok("OBV20") and r.OBV>r.OBV20),
         "bb_upper":num(r.BBUP),"bb_lower":num(r.BBLOW),
         "hi52":num(r.H52),"lo52":num(r.L52),"ma20":num(r.MA20),
-        "ma60":num(r.MA60),"ma200":num(r.MA200),"volratio":vol_ratio,
-        "support":num(r.SUP),"resistance":num(r.RES),"stop":stop,"target":target,"days":len(x)}
+        "ma60":num(r.MA60),"ma120":num(r.MA120),"ma200":num(r.MA200),
+        "volratio":volratio,"support":num(r.SUP),"resistance":num(r.RES),
+        "stop":stop,"target":target,"days":len(x)}
