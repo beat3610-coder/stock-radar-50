@@ -97,6 +97,10 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
     # over median target to avoid shifting exits on marginal differences.
     use75=bool(net75.mean()>=net50.mean()+0.25)
     net_expectancy=float(net75.mean() if use75 else net50.mean())
+    # If 75th-percentile take is chosen, first-take rate refers to that
+    # same exit barrier, not the unused 50th-percentile barrier.
+    if use75:
+        hist_target_first_pct=hist_second_first_pct
     target=p*(1+(q75 if use75 else q50))
     second=p*(1+q75)
     t1=target if target>p else None
