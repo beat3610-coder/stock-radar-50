@@ -84,7 +84,7 @@ def to_row(item,with_flow=True,market_rank=None):
       "매물대 분석":r["volume_profile"],
       "시세 출처":src}
 
-def fmt(v):return "—" if v is None else f"{v:,.2f}"
+def fmt(v):return "—" if v is None else f"{v:,.0f}"
 
 with st.sidebar:
     st.header("조회 설정")
@@ -136,7 +136,7 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v8_"+mkt
+    key="results_v9_"+mkt
     if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
     state=st.session_state[key]
     left,right=st.columns([3,1])
@@ -166,7 +166,7 @@ def ranking_page(mkt):
         price_cols=("종가","20일선","60일선","120일선","200일선",
                     "52주 고점","52주 저점","손절 참고","통합 목표가",
                     "1차 저항 목표","2차 저항 목표","2R 손익비 목표")
-        number_formats={col:"{:,.2f}" for col in price_cols if col in shown.columns}
+        number_formats={col:"{:,.0f}" for col in price_cols if col in shown.columns}
         styled=shown.style.format(number_formats,na_rep="—")
         st.dataframe(styled,hide_index=True,use_container_width=True,height=510)
         st.download_button("📥 분석 결과 CSV 저장",df.to_csv(index=False).encode("utf-8-sig"),f"STOCK_RADAR200_{mkt}.csv","text/csv",key="csv"+mkt)
