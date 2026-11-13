@@ -1,0 +1,31 @@
+name: Independent quote accuracy and walk-forward audit
+on:
+  push:
+    branches: [main]
+    paths:
+      - "accuracy_audit.py"
+      - ".github/workflows/accuracy-audit.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  accuracy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas finance-datareader yfinance requests beautifulsoup4 lxml pykrx
+      - name: Compare closes and historical signals without future-price leakage
+        run: python accuracy_audit.py
+      - name: Save diagnostic report
+        if: always()
+        run: |
+          if [ -f data/accuracy-audit.json ]; then
+            git config user.name "stock-radar-diagnostics"
+            git config user.email "stock-radar-diagnostics@users.noreply.github.com"
+            git add data/accuracy-audit.json
+            git diff --cached --quiet || (git commit -m "Record independent quote and walk-forward audit [skip ci]" && git push)
+          fi
