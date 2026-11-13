@@ -570,6 +570,14 @@ with guide_tab:
                     st.caption(f'검증 기준일(UTC) {audit100.get("time_utc","—")} '
                                f'| 요청 {intended}종목 · 분석 {verified}종목 · 실패 {audit100.get("failed_tickers")}종목 '
                                f'| 매매 신호 {audit100.get("total_trades",0)}건')
+                    gate=audit100.get("release_gate",{})
+                    if gate:
+                        if gate.get("status")=="PASS":
+                            st.success("현재 익절·손절 기준이 설정된 홀드아웃 수익성 검사 조건을 통과했습니다. 외부 독립 검증과 시세 라이선스는 별개입니다.")
+                        else:
+                            st.error("투자전략 성과 검증: 미통과 — 실제 운용/유료 판매를 위한 기준에 미달합니다. "
+                                     f"검증 구간 매매 건수 {gate.get('holdout_trades','—')}건 "
+                                     f"(최소 {gate.get('minimum_holdout_trades',50)}건).")
                     aggregate=audit100.get("aggregate",{})
                     c1,c2,c3=st.columns(3)
                     c1.metric("총 매매 거래",f'{audit100.get("total_trades",0):,}건')
