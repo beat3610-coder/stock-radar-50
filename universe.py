@@ -148,7 +148,7 @@ def kosdaq_top100():
             df=df[df[code].str.fullmatch(r"\d{6}") & df[cap].gt(0)]
             names=df[name].astype(str)
             df=df[~names.str.contains(r"스팩|SPAC|ETF|ETN|우선주|우$",case=False,regex=True,na=False)]
-            df=df[~df[code].str.endswith(("1","5","7","9"))]
+            # Do not infer share class from ticker last digit: ordinary KOSDAQ tickers may end in 1/5/7/9.
             df=df.sort_values(cap,ascending=False).drop_duplicates(code)
             sector_col=column(("sector","industry","업종","업종명"))
             sectors={}
