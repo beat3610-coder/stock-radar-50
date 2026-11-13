@@ -27,18 +27,40 @@ except Exception as e:
     st.error(f"종목 목록 초기화 실패: {e}")
     st.stop()
 
-def to_row(item):
+def analyze_item(item,with_flow=True):
     code,name,market,sector=item
     data,src=priced(code,market)
-    r=evaluate(data)
+    flow_data=None
+    flow_error=None
+    if market=="KR" and with_flow:
+        try:
+            flow_data=flows(code,str(data.index[-1].date()))
+        except Exception as exc:
+            flow_error=str(exc)[:160]
+    r=evaluate(data,market=market,flow=flow_data)
+    return data,src,r,flow_data,flow_error
+
+def to_row(item,with_flow=True):
+    code,name,market,sector=item
+    data,src,r,flow_data,flow_error=analyze_item(item,with_flow=with_flow)
+    f=flow_data or {}
+    foreign=f.get("외국인",{})
+    institution=f.get("기관",{})
     return {
       "구분":"코스피" if market=="KR" else "나스닥","종목":name,"코드":code,"업종":sector,
       "거래일":r["date"],"통화":"KRW" if market=="KR" else "USD",
       "종가":round(r["price"],2),"전일대비 %":round(r["change"],2),
-      "점수":r["score"],"매매 판단":r["signal"],
+      "점수":r["score"],"기술점수":r["technical_score"],"기술만점":r["technical_max"],
+      "매매 판단":r["signal"],"수급 상태":r["flow_status"] if market=="KR" else "미국은 수급 점수 미적용",
+      "외국인 5일 순매수(주)":foreign.get("5일"),"외국인 20일 순매수(주)":foreign.get("20일"),
+      "기관 5일 순매수(주)":institution.get("5일"),"기관 20일 순매수(주)":institution.get("20일"),
       "RSI":round(r["rsi"],1) if r["rsi"] is not None else None,
       "RSI 5일 변화":round(r["rsi_delta5"],1) if r["rsi_delta5"] is not None else None,
       "ADX":round(r["adx"],1) if r["adx"] is not None else None,
+      "20일선":round(r["ma20"],2) if r["ma20"] is not None else None,
+      "60일선":round(r["ma60"],2) if r["ma60"] is not None else None,
+      "120일선":round(r["ma120"],2) if r["ma120"] is not None else None,
+      "200일선":round(r["ma200"],2) if r["ma200"] is not None else None,
       "거래량/20일 평균":round(r["volratio"],2) if r["volratio"] is not None else None,
       "OBV":"매수 우세" if r["obv_up"] else "우세 아님" if r["volume_available"] else "자료 없음",
       "52주 고점":round(r["hi52"],2) if r["hi52"] else None,
@@ -56,8 +78,11 @@ with st.sidebar:
     active="KR" if "코스피" in market else "US"
     if st.button("🔄 종목·시세 갱신",use_container_width=True):
         st.cache_data.clear()
-        st.session_state.pop("results",None)
+        for k in list(st.session_state):
+            if k.startswith("results_v2_"):st.session_state.pop(k,None)
         st.rerun()
+    with_flow=st.checkbox("국내 외국인·기관 순매수 포함(조회가 느릴 수 있음)",value=True)
+    st.caption("수급 조회 실패는 0점 처리하지 않으며 국내 종합점수를 유보합니다.")
     st.caption("서버 데이터 캐시: 시세 6시간, 종목 구성 24시간. 원격 무료 서버 첫 접속은 느릴 수 있습니다.")
     st.warning("자동매매 없음 · 점수는 사전 검증되지 않은 참고 규칙입니다.")
 
@@ -88,7 +113,7 @@ def ranking_page(mkt):
     if mkt=="US" and not listing.get("US_cap_sorted",False):
         st.warning("나스닥 시가총액 자료 조회가 실패하여 현재 표시 순서는 정확한 시총순이 아닙니다. 시총 확인 시에만 시총순으로 표시합니다.")
     st.caption(f"현재 목록 {len(ordered)}개: "+", ".join(t[1] for t in ordered if t[0] in mandatories))
-    key="results_"+mkt
+    key="results_v2_"+mkt
     if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
     state=st.session_state[key]
     left,right=st.columns([3,1])
@@ -96,7 +121,7 @@ def ranking_page(mkt):
         remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
         with st.spinner(f"{min(50,len(remaining))}개 종목의 실제 OHLCV 조회 중"):
             for item in remaining[:50]:
-                try:state["rows"][item[0]]=to_row(item)
+                try:state["rows"][item[0]]=to_row(item,with_flow=with_flow)
                 except Exception as e:state["errors"][item[0]]={"종목":item[1],"코드":item[0],"오류":str(e)[:260]}
     if right.button("이 시장 결과 초기화",key="reset"+mkt):
         st.session_state[key]={"rows":{},"errors":{}}
@@ -141,26 +166,35 @@ with detail_tab:
             st.session_state["detail_ticker"]=selected
         if st.session_state.get("detail_ticker")==selected:
             try:
-                data,src=priced(code,mkt)
-                r=evaluate(data)
+                data,src,r,flow_data,flow_error=analyze_item((code,name,mkt,""),with_flow=with_flow)
                 st.caption(f'가격 기준일: {r["date"]} | 공급처: {src} | 통화: {"KRW" if mkt=="KR" else "USD"}')
                 a,b,c,d,e=st.columns(5)
                 a.metric("종가",fmt(r["price"]),f'{r["change"]:+.2f}%')
-                b.metric("종합 점수",r["score"] if r["score"] is not None else "자료 부족")
+                b.metric("종합 점수",r["score"] if r["score"] is not None else "수급/자료 부족")
                 c.metric("RSI14",fmt(r["rsi"]),f'{r["rsi_delta5"]:+.1f}p/5일' if r["rsi_delta5"] is not None else None)
                 d.metric("ADX14",fmt(r["adx"]))
                 e.metric("52주 고점",fmt(r["hi52"]))
                 st.subheader("종합 판단: "+r["signal"])
                 st.write(r["reason"] or "강한 매수 조건 미충족")
-                if r["score"] is None:st.warning("분석에 필요한 200일 가격 또는 거래량이 충분하지 않아 종합 점수는 유보합니다.")
-                metrics=st.columns(4)
+                if r["score"] is None:
+                    st.warning("종합점수 유보: 200일 가격·거래량 또는 국내 기관/외국인 수급 자료가 부족합니다. 자료를 0점으로 처리하지 않습니다.")
+                st.caption(f'기술점수: {r["technical_score"] if r["technical_score"] is not None else "—"}/{r["technical_max"]}점 | 국내 수급 상태: {r["flow_status"]}')
+                if mkt=="KR":
+                    if flow_data:
+                        fstats=flow_data["외국인"]; istats=flow_data["기관"]
+                        st.dataframe(pd.DataFrame([
+                            {"투자자":"외국인","5거래일 순매수(주)":fstats["5일"],"20거래일 순매수(주)":fstats["20일"]},
+                            {"투자자":"기관","5거래일 순매수(주)":istats["5일"],"20거래일 순매수(주)":istats["20일"]}
+                        ]),hide_index=True,use_container_width=True)
+                    elif flow_error:st.caption("수급 조회 불가: "+flow_error)
+                metrics=st.columns(len(r["scores"]))
                 for col,(label,points) in zip(metrics,r["scores"].items()):
-                    col.metric(label,points if (label!="수급·거래량" or r["volume_available"]) else "자료 없음")
-                st.caption("추세 30 + 모멘텀 25 + ADX 20 + 거래량·OBV 25, 과열 위험 감점")
+                    col.metric(label,points if points is not None and (label!="거래량·OBV" or r["volume_available"]) else "자료 없음")
+                st.caption("국내: 추세 25 + 모멘텀 25 + ADX 15 + 거래량·OBV 15 + 외국인·기관 20 | 미국: 추세 25 + 모멘텀 25 + ADX 20 + 거래량·OBV 30")
                 v=data.tail(252)
                 fig=make_subplots(rows=4,cols=1,shared_xaxes=True,row_heights=[.53,.15,.16,.16],vertical_spacing=.025)
                 fig.add_trace(go.Candlestick(x=v.index,open=v.Open,high=v.High,low=v.Low,close=v.Close,name="주가"),row=1,col=1)
-                for n,color in [(20,"#e9ae54"),(60,"#4d9cdf"),(200,"#b683df")]:
+                for n,color in [(20,"#e9ae54"),(60,"#4d9cdf"),(120,"#21c7af"),(200,"#b683df")]:
                     fig.add_trace(go.Scatter(x=v.index,y=v[f"MA{n}"],name=f"{n}일선",line=dict(color=color,width=1.6)),row=1,col=1)
                 fig.add_trace(go.Bar(x=v.index,y=v.Volume,name="거래량"),row=2,col=1)
                 fig.add_trace(go.Scatter(x=v.index,y=v.RSI,name="RSI"),row=3,col=1)
@@ -201,10 +235,10 @@ with guide_tab:
 - 예외 상품: TIGER 배당커버드콜액티브(472150), TIGER 200커버드콜액티브(0262B0), SOXL을 항상 따로 포함합니다.
 
 **종합 점수**
-- 추세 30점: 이동평균선 20·60·200일
-- 모멘텀 25점: RSI14, MACD
-- 추세강도 20점: ADX14, +DI, -DI
-- 매수세 25점: 실제 거래량·OBV·20일 고점 돌파
-- 변동성 보조: 볼린저밴드, ATR. 200일 미만이거나 필요한 거래량 자료가 없는 경우 점수를 유보합니다.
+- **국내 100점:** 20·60·120·200일선 추세 25점, RSI/MACD 25점, ADX/DI 15점, 거래량·OBV 15점, 외국인·기관 5·20거래일 누적 순매수 20점
+- **미국 100점:** 20·60·120·200일선 추세 25점, RSI/MACD 25점, ADX/DI 20점, 거래량·OBV 30점. 국내식 외국인·기관 수급은 적용하지 않습니다.
+- **국내 수급 가점:** 외국인 5일·20일 누적, 기관 5일·20일 누적 순매수가 각각 양수이면 5점씩(총 20점). 음수와 실제 0은 0점, 자료 누락은 평가 불가
+- 자료 누락 시 국내 종합 100점 점수는 유보하며, **기술점수(80점 만점)**는 별도로 제공합니다.
+- 변동성 보조: 볼린저밴드, ATR. 200일 가격·거래량 자료 부족 시 기술점수도 유보합니다.
 
 **주의사항:** 이 점수는 백테스트로 수익률이 입증되지 않은 규칙 기반 분석입니다. 무료 호스팅과 외부 데이터 공급자의 사정으로 일부 종목 조회가 실패할 수 있으며, 실시간 시세/정시 자동 갱신/자동매매 기능은 없습니다.""")
