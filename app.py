@@ -136,7 +136,7 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v10_"+mkt
+    key="results_v11_"+mkt
     if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
     state=st.session_state[key]
     left,right=st.columns([3,1])
@@ -170,6 +170,19 @@ def ranking_page(mkt):
         for col in ("점수","기술점수","기술만점","목표 분석점수"):
             if col in shown.columns:
                 number_formats[col]="{:.0f}"
+        # Net-buy figures are share counts: group thousands, no fractional shares.
+        for col in ("외국인 5일 순매수(주)","외국인 20일 순매수(주)",
+                    "기관 5일 순매수(주)","기관 20일 순매수(주)"):
+            if col in shown.columns:
+                number_formats[col]="{:,.0f}"
+        # Keep meaningful indicator precision, hide insignificant trailing zeros.
+        for col in ("RSI","RSI 5일 변화","ADX"):
+            if col in shown.columns:
+                number_formats[col]=lambda v: f"{v:.1f}".rstrip("0").rstrip(".")
+        for col in ("거래량/20일 평균","1차 기대손익비(R)",
+                    "2차 기대손익비(R)","통합목표 손익비(R)"):
+            if col in shown.columns:
+                number_formats[col]=lambda v: f"{v:.2f}".rstrip("0").rstrip(".")
         if "전일대비 %" in shown.columns:
             number_formats["전일대비 %"]="{:.2f}"
         styled=shown.style.format(number_formats,na_rep="—")
@@ -223,7 +236,7 @@ with detail_tab:
                         st.dataframe(pd.DataFrame([
                             {"투자자":"외국인","5거래일 순매수(주)":fstats["5일"],"20거래일 순매수(주)":fstats["20일"]},
                             {"투자자":"기관","5거래일 순매수(주)":istats["5일"],"20거래일 순매수(주)":istats["20일"]}
-                        ]),hide_index=True,use_container_width=True)
+                        ]).style.format({"5거래일 순매수(주)":"{:,.0f}","20거래일 순매수(주)":"{:,.0f}"}),hide_index=True,use_container_width=True)
                     elif flow_error:st.caption("수급 조회 불가: "+flow_error)
                 metrics=st.columns(len(r["scores"]))
                 for col,(label,points) in zip(metrics,r["scores"].items()):
@@ -280,7 +293,9 @@ with flow_tab:
                 data,src=priced(code,"KR")
                 result=flows(code,str(data.index[-1].date()))
                 st.caption("KRX 수급 기준일 "+result["date"])
-                st.dataframe(pd.DataFrame([{"구분":investor,**stats} for investor,stats in result.items() if investor in ("기관","외국인")]),hide_index=True,use_container_width=True)
+                flow_df=pd.DataFrame([{"구분":investor,**stats} for investor,stats in result.items() if investor in ("기관","외국인")])
+                flow_cols={col:"{:,.0f}" for col in ("1일","5일","20일","연속 순매수일") if col in flow_df.columns}
+                st.dataframe(flow_df.style.format(flow_cols,na_rep="—"),hide_index=True,use_container_width=True)
             except Exception as e:st.error(f"공개 수급 자료 조회 불가: {e}")
     else:st.warning("코스피 구성 조회 실패. 다음에 새로고침해 주세요.")
 
