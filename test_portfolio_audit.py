@@ -36,6 +36,16 @@ class PortfolioAuditTests(unittest.TestCase):
         r=replay([t],{"X":f})
         self.assertEqual(r["trades_executed"],1)
         self.assertLess(r["total_return_pct"],0)
+    def test_intraday_sale_proceeds_cannot_fund_same_morning_open(self):
+        f=history()
+        d0=str(f.index[0].date()); d1=str(f.index[1].date()); d2=str(f.index[2].date())
+        prev={"ticker":"X","entry_date":d0,"exit_date":d1,
+              "entry":100.,"exit_price":105.,"stop":95.,"take":110.,"score":80}
+        next_trade={"ticker":"Y","entry_date":d1,"exit_date":d2,
+                    "entry":100.,"exit_price":105.,"stop":95.,"take":110.,"score":80}
+        r=replay([prev,next_trade],{"X":f,"Y":f},max_positions=1)
+        self.assertEqual(r["trades_executed"],1)
+        self.assertEqual(r["executions"][0]["ticker"],"X")
     def test_no_data_fails(self):
         self.assertFalse(replay([],{})["valid"])
     def test_certification_cannot_approve_unobserved_paper(self):
