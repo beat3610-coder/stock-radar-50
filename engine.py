@@ -186,9 +186,9 @@ def integrated_targets(x, market, flow, stop):
         if isinstance(flow,dict):
             try:
                 f=flow["외국인"];ins=flow["기관"]
-                gap_days=abs((pd.Timestamp(x.index[-1]).normalize()-pd.Timestamp(flow["date"]).normalize()).days)
+                gap_days=(pd.Timestamp(x.index[-1]).normalize()-pd.Timestamp(flow["date"]).normalize()).days
                 vals=[float(f["5일"]),float(f["20일"]),float(ins["5일"]),float(ins["20일"])]
-                if gap_days<=7 and all(np.isfinite(z) for z in vals):
+                if 0<=gap_days<=7 and all(np.isfinite(z) for z in vals):
                     flow_covered=True
                     possible+=15
                     points+=sum(z>0 for z in vals)*3.75
@@ -237,17 +237,21 @@ def apply_target_risk_gate(signal, price, stop, target, min_upside_pct=3.0, min_
     rr=(target-price)/(price-stop) if (
         upside is not None and stop is not None and np.isfinite(stop) and 0<stop<price
     ) else None
-    if signal not in ("강한 매수 검토","매수 검토"):
+    buy_candidates=("강한 매수 검토","매수 검토","기술매수 후보·수급 미확인")
+    if signal not in buy_candidates:
         return signal,upside,rr,"기존 기술적 위험 판단 유지"
+    # Technical-only candidates are not full buy recommendations when flows are missing.
+    hold_label=("기술상승·매수 유보(수급 미확인)" if signal=="기술매수 후보·수급 미확인"
+                else "상승 신호·매수 유보")
     if upside is None or rr is None:
-        return "상승 신호·매수 유보",upside,rr,"목표가 또는 손절가 불확실"
+        return hold_label,upside,rr,"목표가 또는 손절가 불확실"
     reasons=[]
     if upside<min_upside_pct:
         reasons.append(f"목표 상승여력 {upside:.2f}% < 기준 {min_upside_pct:.1f}%")
     if rr<min_rr:
         reasons.append(f"목표 손익비 {rr:.2f}R < 기준 {min_rr:.1f}R")
     if reasons:
-        return "상승 신호·매수 유보",upside,rr," · ".join(reasons)
+        return hold_label,upside,rr," · ".join(reasons)
     return signal,upside,rr,f"목표 상승여력 {upside:.2f}% · 기대손익비 {rr:.2f}R"
 
 
@@ -313,7 +317,7 @@ def evaluate(x, market="US", flow=None):
                 vals=[float(f["5일"]),float(f["20일"]),float(i["5일"]),float(i["20일"])]
                 if not all(np.isfinite(v) for v in vals):raise ValueError("non-finite")
                 flow_date=flow.get("date")
-                if flow_date is None or abs((pd.Timestamp(x.index[-1]).normalize()-pd.Timestamp(flow_date).normalize()).days)>7:
+                if flow_date is None or not 0 <= (pd.Timestamp(x.index[-1]).normalize()-pd.Timestamp(flow_date).normalize()).days <= 7:
                     raise ValueError("stale flow")
                 scores["외국인·기관"]=0
                 award("외국인·기관",vals[0]>0,5,"외국인 5일 순매수")
@@ -353,7 +357,7 @@ def evaluate(x, market="US", flow=None):
     if not ready:
         signal="데이터 부족"
     elif domestic and not full_ready:
-        signal="기술점수만·수급 미반영"
+        signal=("기술매수 후보·수급 미확인" if score>=60 else "관찰·수급 미확인")
     else:
         signal="강한 매수 검토" if score>=80 else "매수 검토" if score>=60 else "관찰"
     if ready and ok("RSI") and r.RSI>75:signal="과열·추격 주의"
