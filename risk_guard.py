@@ -8,6 +8,7 @@ import math
 
 CANDIDATES = frozenset(("강한 매수 검토","매수 검토","기술매수 후보·수급 미확인"))
 RESEARCH = "연구용 매수 후보·실거래 미승인"
+RESEARCH_CAUTION = "연구용 후보·위험조건 미충족"
 HOLD = "위험관리·매수 유보"
 POLICIES = {
     "KR": {"score":68, "min_rr":1.5, "min_upside":3.0, "max_stop_pct":8.0,
@@ -46,31 +47,37 @@ def screen_candidate(signal, *, market, price, score, stop, target, plan, rsi,
         return HOLD, "가격·위험·추세 필수 데이터 누락", "불명"
     if price<=0 or not(0<stop<price<target):
         return HOLD, "손절가·익절가가 실제 가격 순서를 충족하지 않음", "불명"
-    # Strict regime gate: sideways/bear = wait, never add risk for a higher score.
+    # Hard stops are safety requirements, not fitted performance thresholds.
+    # Additional heuristics are visible warnings, not arbitrary elimination.
     bullish=(price>ma20>ma60>ma200 and ma200>older and bool(trend_ok))
     bearish=(price<ma200 or ma200<older)
     regime="상승" if bullish else ("하락" if bearish else "횡보")
-    if not bullish: reasons.append(f"{regime} 국면·신규 매수 보류")
-    if score<p["score"]:reasons.append(f"시장별 기술점수 {score:.0f}<{p['score']}")
-    if rsi>p["rsi_max"] or rsi<45:reasons.append("RSI 과열 또는 모멘텀 부족")
-    if macdh<=0:reasons.append("MACD 히스토그램 양수 미확인")
-    if (adx is not None and pdi is not None and mdi is not None and
-            adx>=25 and mdi>=pdi):
-        reasons.append("ADX 하락 방향 우세")
+    if bearish:
+        return HOLD, "200일선 하회 또는 장기 하락 추세: 신규 매수 제외",regime
     stop_pct=100*(price-stop)/price
     atr_pct=100*atr/price
     upside=100*(target-price)/price
     rr=(target-price)/(price-stop)
-    if stop_pct>p["max_stop_pct"]:reasons.append(f"손절폭 {stop_pct:.2f}% 초과")
-    if atr_pct>p["max_atr_pct"]:reasons.append(f"변동성 ATR {atr_pct:.2f}% 초과")
-    if upside<p["min_upside"]:reasons.append(f"상승여력 {upside:.2f}% 부족")
-    if rr<p["min_rr"]:reasons.append(f"손익비 {rr:.2f}R 부족")
+    if stop_pct>12.0:
+        return HOLD, f"손절 위험 {stop_pct:.2f}% > 절대 제한 12%", regime
     if not isinstance(plan,dict) or (plan.get("history_samples") or 0)<50:
-        reasons.append("완료된 과거 경로 50개 미만")
-    net=_val(plan.get("historical_net_expectancy_pct")) if isinstance(plan,dict) else None
-    if net is None or net<p["min_net_pct"]:
-        reasons.append("거래비용 반영 과거 평균 손익 미달")
+        return HOLD,"완료된 과거 경로 50개 미만",regime
+    net=_val(plan.get("historical_net_expectancy_pct"))
+    if net is None or net<=0:
+        return HOLD,"과거 비용 반영 평균 손익이 0% 이하 또는 계산 불가",regime
+    if not bullish: reasons.append(f"{regime} 국면: 상승세 미확인")
+    if score<p["score"]:reasons.append(f"연구용 점수 {score:.0f}<{p['score']}")
+    if rsi>p["rsi_max"] or rsi<45:reasons.append("RSI 과열·모멘텀 경고")
+    if macdh<=0:reasons.append("MACD 히스토그램 하락")
+    if (adx is not None and pdi is not None and mdi is not None and
+            adx>=25 and mdi>=pdi):
+        reasons.append("ADX 하락세 우위")
+    if stop_pct>p["max_stop_pct"]:reasons.append(f"권고 손절폭 {stop_pct:.2f}% 초과")
+    if atr_pct>p["max_atr_pct"]:reasons.append(f"변동성 ATR {atr_pct:.2f}% 초과")
+    if upside<p["min_upside"]:reasons.append(f"목표 상승여력 {upside:.2f}% 부족")
+    if rr<p["min_rr"]:reasons.append(f"참고 손익비 {rr:.2f}R 부족")
+    if net<p["min_net_pct"]:reasons.append(f"과거 순손익 {net:.2f}% 기준 미달")
     if reasons:
-        return HOLD, " · ".join(reasons), regime
+        return RESEARCH_CAUTION, ("실전 매수 미승인 · "+" · ".join(reasons)),regime
     return RESEARCH, ("시장별 위험 필터 통과, 그러나 독립 검증 미합격: 매수 권고 불가"
                       f" / 손절 {stop_pct:.1f}% / 기대손익비 {rr:.2f}R"), regime
