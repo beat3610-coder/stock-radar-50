@@ -13,16 +13,16 @@ permissions:
 jobs:
   diagnostics:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install pandas numpy finance-datareader yfinance lxml requests beautifulsoup4
+      - run: pip install pandas numpy finance-datareader yfinance lxml requests beautifulsoup4 html5lib pykrx
       - name: Test risk-first profit and stop engine
         run: python test_trade_plan.py
-      - name: Run seven-ticker historical trade audit
+      - name: Run 100-ticker historical trade audit
         run: python trade_strategy_audit.py
       - name: Save verification report
         if: always()
