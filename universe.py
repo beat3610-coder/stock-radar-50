@@ -145,7 +145,7 @@ def kosdaq_top100():
                 df=df[df[market_col].astype(str).str.upper().isin(("KOSDAQ","KSQ"))]
             df[code]=df[code].astype(str).str.strip().str.zfill(6)
             df[cap]=pd.to_numeric(df[cap].astype(str).str.replace(",","",regex=False),errors="coerce")
-            df=df[df[code].str.fullmatch(r"\\d{6}") & df[cap].gt(0)]
+            df=df[df[code].str.fullmatch(r"\d{6}") & df[cap].gt(0)]
             names=df[name].astype(str)
             df=df[~names.str.contains(r"스팩|SPAC|ETF|ETN|우선주|우$",case=False,regex=True,na=False)]
             df=df[~df[code].str.endswith(("1","5","7","9"))]
