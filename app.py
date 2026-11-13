@@ -571,6 +571,8 @@ with guide_tab:
                                f'| 요청 {intended}종목 · 분석 {verified}종목 · 실패 {audit100.get("failed_tickers")}종목 '
                                f'| 매매 신호 {audit100.get("total_trades",0)}건')
                     gate=audit100.get("release_gate",{})
+                    if not gate:
+                        st.warning("독립 검증구간의 합격 판정은 아직 완료되지 않았습니다. 기존 전체 구간 결과만 표시합니다.")
                     if gate:
                         if gate.get("status")=="PASS":
                             st.success("현재 익절·손절 기준이 설정된 홀드아웃 수익성 검사 조건을 통과했습니다. 외부 독립 검증과 시세 라이선스는 별개입니다.")
