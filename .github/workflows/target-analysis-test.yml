@@ -35,6 +35,9 @@ jobs:
           a=evaluate(x,market='KR',flow=flow)
           b=evaluate(x,market='KR',flow=None)
           u=evaluate(x,market='US',flow=None)
+          kq=evaluate(x,market='KQ',flow=flow)
+          assert kq['target_inputs']=='수급 포함'
+          assert kq['technical_max']==80
           assert 'target1' in a and 'target2' in a
           assert 0<=a['target_signal_points']<=100
           assert 0<=b['target_signal_points']<=100
