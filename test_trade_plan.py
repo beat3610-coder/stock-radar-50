@@ -14,6 +14,10 @@ assert plan["history_samples"]>=50,plan
 assert plan["target"]>float(x.Close.iloc[-1])
 assert plan["target2"]>=plan["target"]
 assert plan["planned_rr"]>0
+assert 0<=plan["historical_target_first_pct"]<=100
+assert 0<=plan["historical_second_first_pct"]<=plan["historical_target_first_pct"]
+assert 0<=plan["historical_stop_first_pct"]<=100
+assert plan["historical_target_first_pct"]+plan["historical_stop_first_pct"]<=100.02
 assert plan["stop_risk_pct"]>0
 assert "10거래일" in plan["basis"]
 # Historical plan must not include the future candle, even with a huge spike.
