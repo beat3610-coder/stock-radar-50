@@ -57,7 +57,7 @@ with st.sidebar:
     st.caption("캐시 주기 6시간 · 무료 호스팅은 사용하지 않을 때 잠들 수 있습니다.")
     st.warning("자동 주문 없음. 규칙 기반 참고 신호이며 투자 수익을 보장하지 않습니다.")
 
-rank,chart,flow,guide=st.tabs(["🏆 50종목 순위","📊 상세 차트","🏦 기관·외국인 수급","ℹ️ 안내"])
+rank,chart,flow,verification,guide=st.tabs(["🏆 50종목 순위","📊 상세 차트","🏦 기관·외국인 수급","✅ 50종목 시세 검증","ℹ️ 안내"])
 
 with rank:
     st.subheader("50종목 종합 모니터")
@@ -142,6 +142,32 @@ with flow:
             st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
         except Exception as e:st.error(str(e))
     st.caption("수급값은 KRX 공개자료 조회가 가능한 경우에만 표시합니다. 조회 실패 시 0으로 표시하지 않습니다.")
+
+with verification:
+    st.subheader("50종목 실제 시세 수신 검증")
+    st.caption("외부 검증 환경에서 종목별 가격과 거래일을 조회합니다. Render 서버의 연결 상태와는 다를 수 있습니다.")
+    import json
+    from pathlib import Path
+    report_file=Path(__file__).resolve().parent/"data"/"verification.json"
+    if not report_file.exists():
+        st.warning("검증 결과가 아직 없습니다. 검증 전에는 모든 종목이 정상이라고 표시하지 않습니다.")
+        st.markdown("[자동 검증 실행 상태 확인](https://github.com/beat3610-coder/stock-radar-50/actions)")
+    else:
+        report=json.loads(report_file.read_text(encoding="utf-8"))
+        counters=report["counts"]
+        st.caption(f'검증 시각(UTC): {report["checked_at_utc"]} | 검증 환경: {report["environment"]}')
+        a,b,c=st.columns(3)
+        a.metric("정상 조회",f'{counters.get("정상",0)}/50')
+        b.metric("오래된 데이터",counters.get("기준일 오래됨",0))
+        c.metric("조회 실패",counters.get("조회 실패",0))
+        if counters.get("정상",0)<50:
+            st.warning("전체 50종목 검증은 아직 통과하지 못했습니다. 실패 종목과 오류를 확인하세요.")
+        else:
+            st.success("외부 검사 환경에서 50종목 최신 시세가 정상 조회됐습니다. Render 서버 수집 성공은 별도로 확인해야 합니다.")
+        audit=pd.DataFrame(report["rows"])
+        st.dataframe(audit,hide_index=True,use_container_width=True,height=620)
+        st.download_button("📥 시세 검증 결과 CSV",audit.to_csv(index=False).encode("utf-8-sig"),"STOCK_RADAR50_시세검증.csv","text/csv")
+    st.info("상세 차트 탭을 통해 실제 Render 서버에서 개별 시세 조회 결과를 확인할 수 있습니다.")
 
 with guide:
     st.markdown("""**STOCK RADAR 50의 판단 규칙**
