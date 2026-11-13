@@ -2,28 +2,41 @@ name: Stock market data smoke test
 on:
   push:
     branches: [main]
-    paths:
-      - "providers.py"
-      - ".github/workflows/data-source-smoke.yml"
+    paths: ["providers.py", ".github/workflows/data-source-smoke.yml"]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   test-foreign-institution-netbuy:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install pandas requests beautifulsoup4 pykrx
-      - name: Test Samsung Electronics Naver investor page
+      - name: Test real Samsung Electronics investor data and record diagnostic
         run: |
           python - <<'PY'
+          import json, datetime
           from providers import _get_naver_flows
+          result={"tested_at_utc":datetime.datetime.now(datetime.timezone.utc).isoformat(),"ticker":"005930","source":"Naver investor daily"}
           try:
               data=_get_naver_flows("005930")
-              print("NAVER SUCCESS:", data)
+              result["success"]=True
+              result["data"]=data
           except Exception as exc:
-              print("NAVER FAILURE:", type(exc).__name__, str(exc))
-              raise
+              result["success"]=False
+              result["error"]=f"{type(exc).__name__}: {exc}"
+          print(json.dumps(result,ensure_ascii=False,indent=2))
+          import os
+          os.makedirs("data",exist_ok=True)
+          with open("data/flow-diagnostic.json","w",encoding="utf-8") as file:json.dump(result,file,ensure_ascii=False,indent=2)
           PY
+      - name: Commit smoke test results
+        run: |
+          git config user.name "stock-radar-diagnostics"
+          git config user.email "stock-radar-diagnostics@users.noreply.github.com"
+          git add data/flow-diagnostic.json
+          git diff --cached --quiet || (git commit -m "Record market flow diagnostic [skip ci]" && git push)
