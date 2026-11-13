@@ -168,17 +168,33 @@ def run(per_market=20):
                       vm["profit_factor"] is not None and vm["profit_factor"]>=1.15)
         selected=leader if accepted else None
         selected_trades=_interval(variants[selected],"test") if selected else []
+        holdout_measures=metrics(selected_trades)
         base=replay(selected_trades,frames,start=VALID_END,
                     initial_cash=10_000_000 if market in ("KR","KQ") else 100_000)
         stress=replay(selected_trades,frames,start=VALID_END,
                     initial_cash=10_000_000 if market in ("KR","KQ") else 100_000,
                     cost=0.007)
+        # Fail-closed deployment screen. Never retune parameters from these
+        # previously inspected test-period results.
+        research_eligible=bool(
+            selected and len(frames)==per_market
+            and holdout_measures["trades"]>=30
+            and holdout_measures["win_rate_pct"] is not None
+            and holdout_measures["win_rate_pct"]>=55
+            and holdout_measures["mean_net_pct"]>0
+            and holdout_measures["profit_factor"] is not None
+            and holdout_measures["profit_factor"]>=1.3
+            and base.get("total_return_pct",0)>0
+            and stress.get("total_return_pct",0)>0
+            and base.get("max_drawdown_pct",100)<=12)
         def compact(r):return {k:v for k,v in r.items() if k not in ("daily_equity","executions")}
         res["markets"][market]={
             "requested":per_market,"loaded":len(frames),"errors":failures,
             "training_selected":leader,"training_scores":scores,
             "validation_accepted":accepted,
             "selected_for_diagnostic":selected,
+            "research_eligible":research_eligible,
+            "live_approved":False,
             "train":train_metrics,"validation":validation_metrics,
             "holdout_all_variants_diagnostic_only":test_metrics,
             "holdout_selected_trades":len(selected_trades),
