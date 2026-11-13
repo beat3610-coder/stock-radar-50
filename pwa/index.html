@@ -1,56 +1,53 @@
 <!doctype html>
-<html lang="ko">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<html lang="ko"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#07101f">
+<meta name="description" content="STOCK RADAR 50 국내 39종목·미국 11종목 분석 앱">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="RADAR 50">
-<meta name="description" content="국내 39종목·미국 11종목 실시간이 아닌 최신 종가 기반 분석 대시보드">
-<link rel="icon" type="image/svg+xml" href="/icon.svg">
-<link rel="apple-touch-icon" href="/icon.svg">
 <link rel="manifest" href="/manifest.webmanifest">
-<title>STOCK RADAR 50 — 주식 분석</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+<title>STOCK RADAR 50 | 주식분석</title>
 <style>
-:root{font-family:system-ui,-apple-system,"Malgun Gothic",Arial,sans-serif;color-scheme:dark;background:#07101f;color:#f0f6fd}
-*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden}
-header{height:70px;display:flex;gap:14px;align-items:center;padding:10px max(18px,env(safe-area-inset-left));border-bottom:1px solid #304157;background:#0e192b}
-header img{width:47px;height:47px;border-radius:12px}
-h1{font-size:20px;letter-spacing:-.7px;line-height:1.2;margin:0}
-small{font-size:11px;color:#a9bdd0}
-#tools{margin-left:auto;display:flex;gap:10px;align-items:center}
-button,a.action{border:1px solid #2f4a62;border-radius:11px;background:#182b40;color:#eaf4ff;padding:10px 13px;font-size:13px;font-weight:700;cursor:pointer;text-decoration:none;white-space:nowrap}
-button.primary{background:#13a58b;color:#071827;border-color:#13a58b}
-#info{background:#172a3f;color:#d6e6f7;text-align:center;font-size:12px;padding:7px;display:none}
-#frame{display:block;width:100%;height:calc(100dvh - 70px);border:0;background:#0b1423}
-#fallback{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2;text-align:center;background:#101e31ee;padding:25px;max-width:90%;border-radius:20px;box-shadow:0 10px 50px #0005}
-#fallback h2{margin-top:4px;font-size:20px}#fallback p{font-size:14px;color:#aec4d7;line-height:1.7}
-#fallback .action{display:inline-block;margin-top:8px}
-@media(max-width:700px){header{height:64px;padding:9px}header img{width:41px;height:41px}h1{font-size:16px}small{font-size:10px}button,a.action{font-size:11px;padding:9px}#frame{height:calc(100dvh - 64px)}}
-</style>
-</head>
-<body>
-<header>
-<img src="/icon.svg" alt="STOCK RADAR 50 아이콘">
-<div><h1>STOCK RADAR 50</h1><small>국내 39종목 · 미국 11종목 · 차트와 매매 분석</small></div>
-<div id="tools"><button class="primary" id="install" hidden>⬇ 앱 설치</button><a class="action" href="https://stock-radar-50.onrender.com/" target="_blank" rel="noopener">↗ 원본 화면</a></div>
-</header>
-<div id="info">앱이 열리지 않으면 상단의 「원본 화면」을 눌러 주세요. 서버가 잠들어 있었다면 첫 접속 시간이 걸릴 수 있습니다.</div>
-<div id="fallback"><img src="/icon.svg" alt="" width="68" height="68"><h2>주식 분석 앱 연결 중</h2><p>서버에서 최신 종가 기반 분석 화면을 불러옵니다.<br>화면이 열리지 않으면 아래 버튼을 사용하세요.</p><a class="action" href="https://stock-radar-50.onrender.com/" target="_blank" rel="noopener">STOCK RADAR 50 바로 열기</a></div>
-<iframe id="frame" title="STOCK RADAR 50 분석 화면" src="https://stock-radar-50.onrender.com/?embed=true" loading="eager" allow="clipboard-write"></iframe>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,"Malgun Gothic",sans-serif;background:#07101f;color:#f0f6fd}
+*{box-sizing:border-box}body{margin:0;min-height:100dvh;background:radial-gradient(ellipse at 75% 10%,#16364a 0%,#07101f 58%);padding:25px}
+.wrap{max-width:670px;margin:7vh auto 0}
+.header{display:flex;align-items:center;gap:15px}
+.header img{width:72px;height:72px;border-radius:20px}
+h1{font-size:clamp(24px,5vw,38px);margin:0} .sub{color:#aac1d2;font-size:14px;margin-top:8px}
+main{background:#102039;border:1px solid #29435a;padding:clamp(23px,5vw,42px);border-radius:26px;margin-top:35px;box-shadow:0 25px 75px #0005}
+.tag{font-size:13px;color:#75ddbc;letter-spacing:.08em;font-weight:800}
+h2{font-size:clamp(23px,5vw,34px);margin:15px 0 12px;line-height:1.35}
+p{line-height:1.8;color:#aec2d6;margin:0 0 25px}
+.actions{display:grid;gap:12px}
+a.btn,button.btn{display:block;padding:17px 18px;border-radius:13px;font-size:17px;font-weight:800;cursor:pointer;text-align:center;text-decoration:none}
+a.go{color:#081722;background:#5de3ae}
+button.btn{border:1px solid #3d586f;background:#182d43;color:#e7f6ff}
+.note{margin-top:22px;font-size:13px;color:#a6bdce;line-height:1.8}
+footer{font-size:12px;color:#7890a7;margin:18px 0 20px;text-align:center}
+[hidden]{display:none!important}
+</style></head>
+<body><div class="wrap">
+<div class="header"><img src="/icon.svg" alt="STOCK RADAR 50 앱 아이콘">
+<div><h1>STOCK RADAR 50</h1><div class="sub">🇰🇷 국내 39종목 · 🇺🇸 미국 11종목</div></div></div>
+<main>
+<div class="tag">STOCK ANALYSIS DASHBOARD</div>
+<h2>주식 분석 프로그램</h2>
+<p>RSI 추세와 거래량, MACD, 이동평균선, 기술적 분석 점수를 확인하세요.<br>공유받은 사람도 회원가입 없이 이용할 수 있습니다.</p>
+<div class="actions">
+<a class="btn go" href="https://stock-radar-50.onrender.com/">📈 주식 분석 시작하기</a>
+<button class="btn" id="install" type="button" hidden>⬇ 바탕화면에 앱 설치</button>
+</div>
+<div class="note">
+※ 무료 서버는 첫 접속 시 실행 시간이 걸릴 수 있습니다.<br>
+※ 실시간 시세가 아닌 제공처의 최신 거래일 기준 데이터입니다.<br>
+※ 분석 점수는 투자 참고용이며 수익을 보장하지 않습니다.
+</div></main>
+<footer>주식 분석 화면은 별도 보안 창 없이 직접 열립니다.</footer></div>
 <script>
-const frame=document.getElementById('frame'); const fallback=document.getElementById('fallback');
-frame.addEventListener('load',()=>{fallback.style.display='none'});
-setTimeout(()=>{if(fallback.style.display!=='none')document.getElementById('info').style.display='block'},12000);
-let deferredPrompt=null;
-window.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferredPrompt=event;document.getElementById('install').hidden=false});
-document.getElementById('install').addEventListener('click',async()=>{
-if(!deferredPrompt){alert('Edge 오른쪽 위 … 메뉴 → 앱 → 이 사이트를 앱으로 설치를 선택하세요.');return;}
-deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null;document.getElementById('install').hidden=true;
-});
-window.addEventListener('appinstalled',()=>document.getElementById('install').hidden=true);
+let promptEvent;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();promptEvent=e;document.getElementById('install').hidden=false});
+document.getElementById('install').addEventListener('click',async()=>{if(promptEvent){promptEvent.prompt();await promptEvent.userChoice;promptEvent=null;document.getElementById('install').hidden=true}});
 if('serviceWorker' in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 </script>
-</body>
-</html>
+</body></html>
