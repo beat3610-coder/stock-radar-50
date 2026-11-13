@@ -557,6 +557,32 @@ with guide_tab:
 
 **주의사항:** 과거 7개 선정 종목 표본에서 검증한 결과로는 이 점수의 수익률 우위를 입증하지 못했습니다. 과거 수급과 거래비용이 없는 제한적 진단이며, 전략 수익률을 보장하지 않습니다. 무료 호스팅과 외부 데이터 공급자의 사정으로 일부 종목 조회가 실패할 수 있으며, 실시간 시세/정시 자동 갱신/자동매매 기능은 없습니다.""")
 
+    audit100_path=Path("data/trade-strategy-audit.json")
+    if audit100_path.exists():
+        try:
+            audit100=json.loads(audit100_path.read_text(encoding="utf8"))
+            intended=audit100.get("requested_tickers",7)
+            verified=audit100.get("analysed_tickers")
+            with st.expander("📊 100종목 매매전략 백테스트 결과 — 정확성·수익성 미입증"):
+                if intended!=100:
+                    st.info("100종목 테스트가 아직 완료되지 않았습니다. 최신으로 저장된 이전 7종목 진단입니다.")
+                else:
+                    st.caption(f'검증 기준일(UTC) {audit100.get("time_utc","—")} '
+                               f'| 요청 {intended}종목 · 분석 {verified}종목 · 실패 {audit100.get("failed_tickers")}종목 '
+                               f'| 매매 신호 {audit100.get("total_trades",0)}건')
+                    for market,stats in audit100.get("per_market",{}).items():
+                        st.caption(f'{market}: 종목 {stats.get("analysed")}/{stats.get("requested")} · 거래 {stats.get("trades")}')
+                    outcomes=[{"시장·종목":k,"종목명":v.get("name",""),"거래 수":v.get("trades",0),
+                               "평균 순수익률 %":v.get("mean_trade_net_pct"),
+                               "승률 %":v.get("win_rate_pct"),
+                               "오류":v.get("error","")}
+                              for k,v in audit100.get("tickers",{}).items()]
+                    if outcomes:st.dataframe(pd.DataFrame(outcomes),hide_index=True,use_container_width=True)
+                    st.warning("현 시총순 상위 종목을 과거로 되돌린 표본이므로 생존편향이 있습니다. "
+                               "과거 수급 부재·동시 보유·시장충격·지수 대비 초과성과 검증이 빠져 있습니다. "
+                               "유료 판매의 정확성·성과 인증 결과로 사용할 수 없습니다.")
+        except Exception as e:
+            st.warning("100종목 백테스트 결과 조회 오류: "+str(e)[:120])
     with st.expander("🧪 시세 교차확인·과거신호 검증 결과 (제한된 표본)"):
         audit_path=Path("data/accuracy-audit.json")
         if audit_path.exists():
