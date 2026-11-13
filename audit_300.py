@@ -100,7 +100,7 @@ def metrics(trades):
             "profit_factor":round(float(gains/losses),3) if losses>0 else None,
             "max_drawdown_pct":round(float(-dd.min()),2)}
 
-def run():
+def run(per_market=100):
     universe = get_universe()
     result = {"created_utc":datetime.now(timezone.utc).isoformat(),
               "status":"NOT_VALIDATED", "scope":"Current constituents only: survivorship bias",
@@ -114,7 +114,7 @@ def run():
     for market in ("KR","KQ","US"):
         # Remove mandatory ETFs; audit exactly 100 ordinary companies per market.
         extras = {"KR":{"472150","0262B0"},"US":{"SOXL"},"KQ":set()}[market]
-        items = [i for i in universe[market] if i[0] not in extras][:100]
+        items = [i for i in universe[market] if i[0] not in extras][:per_market]
         trades = []
         successes = 0
         for ticker,name,_,_ in items:
@@ -134,10 +134,10 @@ def run():
         train = [r for r in trades if r["entry_date"]<cut] if cut else []
         test = [r for r in trades if r["entry_date"]>=cut] if cut else []
         m = metrics(test)
-        result["markets"][market] = {"requested":100,"listed":len(items),
+        result["markets"][market] = {"requested":per_market,"listed":len(items),
              "loaded":successes,"date_split":cut,
              "train":metrics(train),"holdout":m,
-             "status":"PASS" if (len(items)==100 and successes==100
+             "status":"PASS" if (len(items)==per_market and successes==per_market
                      and m["trades"]>=30 and m["win_rate_pct"]>=55
                      and m["mean_net_pct"]>0 and m["profit_factor"] is not None
                      and m["profit_factor"]>=1.3) else "FAIL_OR_INSUFFICIENT"}
@@ -151,8 +151,9 @@ def run():
 if __name__ == "__main__":
     parser=argparse.ArgumentParser()
     parser.add_argument("--output",default="data/three-hundred-audit.json")
+    parser.add_argument("--per-market",type=int,default=100,choices=[20,100])
     args=parser.parse_args()
-    report=run()
+    report=run(per_market=args.per_market)
     dest=Path(args.output);dest.parent.mkdir(parents=True,exist_ok=True)
     dest.write_text(json.dumps(report,ensure_ascii=False,indent=2,default=str),encoding="utf-8")
     print(json.dumps({k:v for k,v in report.items() if k not in ("trades",)},
