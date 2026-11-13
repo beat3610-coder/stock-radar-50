@@ -67,6 +67,11 @@ def to_row(item,with_flow=True,market_rank=None):
       "52주 고점":round(r["hi52"],2) if r["hi52"] else None,
       "52주 저점":round(r["lo52"],2) if r["lo52"] else None,
       "손절 참고":round(r["stop"],2) if r["stop"] is not None else None,
+      "통합 목표가":round(r["integrated_target"],2) if r["integrated_target"] is not None else None,
+      "목표 여건":r["target_grade"],
+      "목표 분석점수":r["target_signal_points"],
+      "목표 수급반영":r["target_inputs"],
+      "거래량 돌파":("확인" if r["resistance_breakout"] else "미확인") if r["resistance_breakout"] is not None else "자료 부족",
       "1차 저항 목표":round(r["target1"],2) if r["target1"] is not None else None,
       "2차 저항 목표":round(r["target2"],2) if r["target2"] is not None else None,
       "2R 손익비 목표":round(r["target"],2) if r["target"] is not None else None,
@@ -74,6 +79,9 @@ def to_row(item,with_flow=True,market_rank=None):
       "2차 저항 근거":r["target2_basis"],
       "1차 기대손익비(R)":round(r["target1_r"],2) if r["target1_r"] is not None else None,
       "2차 기대손익비(R)":round(r["target2_r"],2) if r["target2_r"] is not None else None,
+      "통합목표 손익비(R)":round(r["target_r"],2) if r["target_r"] is not None else None,
+      "목표 판단 근거":r["target_evidence"],
+      "매물대 분석":r["volume_profile"],
       "시세 출처":src}
 
 def fmt(v):return "—" if v is None else f"{v:,.2f}"
@@ -128,7 +136,7 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v6_"+mkt
+    key="results_v7_"+mkt
     if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
     state=st.session_state[key]
     left,right=st.columns([3,1])
@@ -222,14 +230,23 @@ with detail_tab:
                 fig.add_hline(y=25,row=4,col=1,line_dash="dash")
                 fig.update_layout(height=840,xaxis_rangeslider_visible=False,margin=dict(l=8,r=8,t=18,b=8))
                 st.plotly_chart(fig,use_container_width=True)
+                st.subheader("통합 기술·수급 목표가")
+                p1,p2,p3,p4=st.columns(4)
+                p1.metric("통합 목표가",fmt(r["integrated_target"]))
+                p2.metric("목표 달성 여건",r["target_grade"])
+                p3.metric("목표 근거 점수",f'{r["target_signal_points"]}/100' if r["target_signal_points"] is not None else "자료 부족")
+                p4.metric("통합목표 손익비",f'{r["target_r"]:.2f}R' if r["target_r"] is not None else "—")
+                st.caption("종합 근거: "+(r["target_evidence"] or "분석 가능한 자료 없음"))
+                st.caption("과거 매물대 분석 방식: "+(r["volume_profile"] or "자료 부족")+
+                           " | 외국인·기관: "+r["target_inputs"])
                 m1,m2,m3,m4=st.columns(4)
                 m1.metric("손절 참고",fmt(r["stop"]))
                 m2.metric("1차 저항 목표",fmt(r["target1"]))
                 m3.metric("2차 저항 목표",fmt(r["target2"]))
-                m4.metric("2R 손익비 목표",fmt(r["target"]))
+                m4.metric("2R 손익비 참고",fmt(r["target"]))
                 st.caption("1차 저항 근거: "+(r["target1_basis"] or "현재가 위의 확인된 저항 없음")+
                            " | 2차 저항 근거: "+(r["target2_basis"] or "추가 저항 미확인"))
-                st.caption("1·2차 목표는 과거 고점 중 현재가보다 높은 저항대입니다. 2R은 손절폭의 두 배를 더한 시나리오로 실제 상승 예측이 아닙니다.")
+                st.caption("통합 목표가는 확인된 1·2차 저항대에서 거래량 돌파·이평선·RSI·MACD·수급의 상승 여건을 반영해 선택합니다. 2R은 별개이며 목표가 도달 확률을 뜻하지 않습니다.")
                 if r["target1_r"] is not None:
                     st.caption(f'1차 저항까지 손익비: {r["target1_r"]:.2f}R'+
                                (f' | 2차 저항까지: {r["target2_r"]:.2f}R' if r["target2_r"] is not None else ""))
@@ -269,9 +286,13 @@ with guide_tab:
 - 수급 누락 시 **기술점수(80점 만점)를 100점으로 환산**해 표시하되, 점수 기준에 **기술환산(수급 제외)**이라고 구분합니다. 종합점수와 직접 비교하지 마세요.
 - 변동성 보조: 볼린저밴드, ATR. 200일 가격·거래량 자료 부족 시 기술점수도 유보합니다.
 
-**목표가 해석**
-- **1·2차 저항 목표:** 과거 20·60·120·252일 고점 및 확인된 국소 고점 중 현재가보다 높은 가격만 선택합니다. 0.5% 또는 ATR의 0.25배 이내의 가까운 가격은 하나의 저항대로 간주합니다. 저항이 없으면 공란으로 둡니다.
-- **2R 손익비 목표:** ATR과 20일선을 참고해 정한 손절폭의 두 배를 현재가에 더한 값입니다. 실제 도달 가능성을 예측한 값이 아닙니다.
+**통합 목표가 산정 (규칙 기반, 백테스트 미실시)**
+- **저항 가격 후보:** 직전 20·60·120·252일 고점, 3거래일 좌우 국소 고점, 현재가 위의 20·60·120일 이동평균선, 거래량 집중 가격대(일별 대표가격×거래량 히스토그램 근사). 가까운 가격대는 저항 구간 하나로 합칩니다.
+- **거래량·돌파:** 현재가가 직전 20일 고점을 넘어가고 거래량이 20일 평균의 1.5배 이상인지 확인합니다.
+- **상승 여건:** 20·60·120일 정배열, RSI 범위와 MACD 히스토그램 방향, 가까운 거래량 집중 저항 유무, 국내 주식은 외국인·기관의 5·20일 누적 순매수를 함께 평가합니다. 수급 미조회 시 **수급 제외**라고 명시합니다.
+- **통합 목표 선택:** 위 조건이 강하고 거래량 돌파까지 확인되면 2차 저항을 선택할 수 있으며, 그렇지 않으면 가까운 1차 저항을 선택합니다. 기준은 **개발자가 정한 휴리스틱**으로, 실제 목표 달성 확률·적정주가를 의미하지 않습니다.
+- **매물대 제한:** 거래량 집중 가격대는 일봉 대표가격에 하루 거래량을 배정한 **근사치**입니다. 실제 가격별 체결량·매물대 분석과 동일하지 않습니다.
+- **2R 손익비 목표:** ATR과 20일선을 참고해 정한 손절폭의 두 배를 현재가에 더한 값입니다. 통합 목표가와 별개입니다.
 - **ETF 주의:** SOXL의 3배 레버리지와 TIGER 커버드콜 ETF의 분배금·분배락은 저항 목표 산식에 반영되지 않습니다.
 
 **주의사항:** 이 점수는 백테스트로 수익률이 입증되지 않은 규칙 기반 분석입니다. 무료 호스팅과 외부 데이터 공급자의 사정으로 일부 종목 조회가 실패할 수 있으며, 실시간 시세/정시 자동 갱신/자동매매 기능은 없습니다.""")
