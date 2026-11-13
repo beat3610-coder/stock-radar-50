@@ -2,7 +2,7 @@ name: Integrated target algorithm tests
 on:
   push:
     branches: [main]
-    paths: ["engine.py", "app.py", ".github/workflows/target-analysis-test.yml"]
+    paths: ["engine.py", "app.py", "providers.py", "test_quote_verify.py", ".github/workflows/target-analysis-test.yml"]
   workflow_dispatch:
 permissions:
   contents: write
@@ -90,10 +90,12 @@ jobs:
           with open('data/target-test-result.json','w') as fh:json.dump(results,fh,ensure_ascii=False,indent=2)
           print(json.dumps(results,ensure_ascii=False))
           PY
+      - name: Test secondary quote-date and discrepancy guards
+        run: python test_quote_verify.py
       - name: Commit verification artifact
         if: success()
         run: |
           git config user.name "stock-radar-diagnostics"
           git config user.email "stock-radar-diagnostics@users.noreply.github.com"
-          git add data/target-test-result.json
+          git add data/target-test-result.json data/quote-test-result.json
           git diff --cached --quiet || (git commit -m "Record integrated target algorithm test [skip ci]" && git push)
