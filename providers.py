@@ -146,9 +146,13 @@ def _get_public_aggregated_flows(code):
     return result
 
 def get_flows(code,end_date):
-    """Try visible retail market data first, then KRX; require aligned latest date."""
+    """Use verified settled aggregate first, fall back to KRX when available."""
+    if str(code) in ("472150","0262B0"):
+        raise ValueError("커버드콜 ETF는 공개 투자자별 수급 집계 대상이 아닙니다. 기술점수만 제공합니다.")
     errors=[]
-    for provider in (_get_public_aggregated_flows,_get_naver_flows,lambda symbol:_get_krx_flows(symbol,end_date)):
+    # finance.naver.com/item/frgn.naver now redirects to stock.naver.com, so
+    # the old HTML table is gone; do not burn ~40 seconds scraping empty pages.
+    for provider in (_get_public_aggregated_flows,lambda symbol:_get_krx_flows(symbol,end_date)):
         try:
             result=provider(code)
             gap=abs((pd.Timestamp(end_date)-pd.Timestamp(result["date"])).days)
@@ -156,7 +160,7 @@ def get_flows(code,end_date):
                 raise ValueError(f"가격일 {end_date} 대비 수급 기준일 {result['date']} ({gap}일 차이)")
             return result
         except Exception as exc:
-            errors.append(f"{'공개 집계' if provider==_get_public_aggregated_flows else '네이버' if provider==_get_naver_flows else 'KRX'}: {str(exc)[:165]}")
+            errors.append(f"{'공개 집계' if provider==_get_public_aggregated_flows else 'KRX'}: {str(exc)[:165]}")
     import logging
     logging.getLogger("stock_radar.flows").warning(
         "Investor flow failed %s %s: %s",code,end_date," | ".join(errors))
