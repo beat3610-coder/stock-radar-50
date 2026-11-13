@@ -8,6 +8,8 @@ import pandas as pd
 from engine import compute, evaluate
 from providers import get_prices
 from universe import get_universe
+from portfolio_audit import replay
+from certification import assess
 
 BUY = {"연구용 매수 후보·실거래 미승인", "연구용 후보·위험조건 미충족"}
 HOLD_DAYS = 10
@@ -82,6 +84,7 @@ def audit_symbol(frame, market, ticker):
                      "signal_date":str(pd.Timestamp(x.index[t]).date()),
                      "entry_date":str(pd.Timestamp(x.index[t+1]).date()),
                      "entry":next_open,"stop":float(stop),"take":float(target),
+                     "exit_date":str(pd.Timestamp(x.index[outcome["exit_index"]]).date()),
                      "score":info.get("score"), **outcome})
     return rows
 
@@ -114,17 +117,21 @@ def run(per_market=100):
                              "flow_history":"unavailable, excluded",
                              "selection":"every 10th trading session, no overlapping positions"},
               "universe_sources":{k:universe.get(k+"_source") for k in ("KR","KQ","US")},
-              "markets":{}, "errors":[], "trades":[]}
+              "markets":{}, "errors":[], "trades":[],
+              "portfolios":{}, "historical_data_previously_inspected":True,
+              "survivorship_bias":True}
     for market in ("KR","KQ","US"):
         # Remove mandatory ETFs; audit exactly 100 ordinary companies per market.
         extras = {"KR":{"472150","0262B0"},"US":{"SOXL"},"KQ":set()}[market]
         items = [i for i in universe[market] if i[0] not in extras][:per_market]
         trades = []
+        frames = {}
         successes = 0
         for ticker,name,_,_ in items:
             try:
                 raw,source = get_prices(ticker,market)
                 rows = audit_symbol(raw,market,ticker)
+                frames[ticker]=raw
                 for row in rows: row["provider"] = source
                 trades.extend(rows)
                 successes += 1
@@ -144,10 +151,14 @@ def run(per_market=100):
                      and m["mean_net_pct"]>0 and m["profit_factor"] is not None
                      and m["profit_factor"]>=1.3) else "FAIL_OR_INSUFFICIENT"}
         result["trades"].extend(trades)
+        portfolio=replay(test,frames,start=cut)
+        # Detail lives in the audit JSON. Summary never substitutes for broker fills.
+        result["portfolios"][market]=portfolio
     result["status"] = ("PASS_WITH_LIMITATIONS"
                         if all(result["markets"][m]["status"]=="PASS"
                                for m in ("KR","KQ","US"))
                         else "FAIL_OR_INSUFFICIENT")
+    result["certification"]=assess(result, portfolio={"valid":False}, paper=None)
     return result
 
 if __name__ == "__main__":
