@@ -1,0 +1,49 @@
+{
+  "success": true,
+  "screens": [
+    {
+      "market": "코스피",
+      "ranking_titles": [
+        "코스피 시총 100 + TIGER ETF 2종",
+        "종목별 기술적 분석",
+        "국내 기관·외국인 순매수"
+      ],
+      "detail_options": [
+        "KR_SAMPLE_SAMSUNG (005930)"
+      ]
+    },
+    {
+      "market": "코스닥",
+      "ranking_titles": [
+        "코스닥 시총 상위 100",
+        "종목별 기술적 분석",
+        "국내 기관·외국인 순매수"
+      ],
+      "detail_options": [
+        "KQ_SAMPLE_ALTEOGEN (196170)"
+      ]
+    },
+    {
+      "market": "Nasdaq",
+      "ranking_titles": [
+        "Nasdaq-100 기업 100 + SOXL",
+        "종목별 기술적 분석",
+        "국내 기관·외국인 순매수"
+      ],
+      "detail_options": [
+        "US_SAMPLE_NVIDIA (NVDA)"
+      ]
+    },
+    {
+      "market": "코스피",
+      "ranking_titles": [
+        "코스피 시총 100 + TIGER ETF 2종",
+        "종목별 기술적 분석",
+        "국내 기관·외국인 순매수"
+      ],
+      "detail_options": [
+        "KR_SAMPLE_SAMSUNG (005930)"
+      ]
+    }
+  ]
+}
