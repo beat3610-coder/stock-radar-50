@@ -98,7 +98,7 @@ def metrics(trades):
     return {"trades":int(len(pnl)), "win_rate_pct":round(float((pnl>0).mean()*100),2),
             "mean_net_pct":round(float(pnl.mean()),3),
             "profit_factor":round(float(gains/losses),3) if losses>0 else None,
-            "max_drawdown_pct":round(float(-dd.min()),2)}
+            "max_drawdown_pct":round(float(dd.max()),2)}
 
 def run(per_market=100):
     universe = get_universe()
