@@ -354,25 +354,25 @@ with candidate_tab:
         st.caption(f'현재 분석 자료 {len(candidates)}개 — 전체 {len(listing[active])}개 종목 중 조회된 결과')
         groups={
             "전체":"전체",
-            "매수 검토":"매수 검토",
+            "연구용 위험필터 통과":"연구용 위험필터 통과",
             "기술적 상승 신호":"기술적 상승 신호",
             "종가 확인 필요":"종가 확인 필요",
             "매수 유보·관찰":"매수 유보·관찰"}
         filter_choice=st.selectbox("후보 필터",list(groups),key="candidate_filter_"+active)
-        if filter_choice=="매수 검토":
-            candidates=candidates[candidates["매매 판단"].isin(("매수 검토","강한 매수 검토"))]
+        if filter_choice=="연구용 위험필터 통과":
+            candidates=candidates[candidates["매매 판단"]=="연구용 매수 후보·실거래 미승인"]
         elif filter_choice=="기술적 상승 신호":
             candidates=candidates[candidates["기술 판단(목표 검증 전)"].isin(
                 ("매수 검토","강한 매수 검토","기술매수 후보·수급 미확인"))]
         elif filter_choice=="종가 확인 필요":
             candidates=candidates[candidates["종가 교차검증"]!="보조 시세 일치(공식값 미검증)"]
         elif filter_choice=="매수 유보·관찰":
-            candidates=candidates[~candidates["매매 판단"].isin(("매수 검토","강한 매수 검토"))]
+            candidates=candidates[candidates["매매 판단"]!="연구용 매수 후보·실거래 미승인"]
         sort_col=st.selectbox("정렬 기준",["점수","목표 상승여력 %","기대손익비(R)"],
                               key="candidate_sort_"+active)
         candidates=candidates.sort_values(sort_col,ascending=False,na_position="last")
         columns=["구분","종목","코드","매매 판단","기술 판단(목표 검증 전)",
-                 "종가","통합 목표가","손절 참고","목표 상승여력 %","손절폭 %",
+                 "시장 위험국면","실전 전략 승인","종가","통합 목표가","손절 참고","목표 상승여력 %","손절폭 %",
                  "기대손익비(R)","과거 비용 반영 손익 %",
                  "과거 1차 익절 우선 %","과거 경로 표본",
                  "점수","종가 교차검증","매매 판단 근거","거래일"]
