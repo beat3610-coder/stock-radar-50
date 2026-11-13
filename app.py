@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
@@ -416,7 +418,7 @@ with guide_tab:
 - 수급 누락 시 **기술점수(80점 만점)를 100점으로 환산**해 표시하되, 점수 기준에 **기술환산(수급 제외)**이라고 구분합니다. 종합점수와 직접 비교하지 마세요.
 - 변동성 보조: 볼린저밴드, ATR. 200일 가격·거래량 자료 부족 시 기술점수도 유보합니다.
 
-**통합 목표가 산정 (규칙 기반, 백테스트 미실시)**
+**통합 목표가 산정 (규칙 기반, 제한된 과거 표본 검증만 시행)**
 - **저항 가격 후보:** 직전 20·60·120·252일 고점, 3거래일 좌우 국소 고점, 현재가 위의 20·60·120일 이동평균선, 거래량 집중 가격대(일별 대표가격×거래량 히스토그램 근사). 가까운 가격대는 저항 구간 하나로 합칩니다.
 - **거래량·돌파:** 현재가가 직전 20일 고점을 넘어가고 거래량이 20일 평균의 1.5배 이상인지 확인합니다.
 - **상승 여건:** 20·60·120일 정배열, RSI 범위와 MACD 히스토그램 방향, 가까운 거래량 집중 저항 유무, 국내 주식은 외국인·기관의 5·20일 누적 순매수를 함께 평가합니다. 수급 미조회 시 **수급 제외**라고 명시합니다.
@@ -429,4 +431,27 @@ with guide_tab:
 
 **시세 품질:** 동일 거래일의 종가를 Yahoo 보조 시세와 자동 대조합니다. 오차가 0.5%를 넘으면 **시세 불일치·매수 보류**, 조회가 안 되면 **교차검증 불가**를 표시하며 신규 매수 신호를 유보합니다. 가격 비교만 수행하며 공식 KRX 확정 종가 또는 전체 OHLCV의 검증을 의미하지 않습니다. 무료 시세 공급처의 OHLCV는 공식 확정 종가와 자동 대조하지 않습니다. 실제로 2026-11-13 일부 코스닥 종목에서 타 공급처 종가와 차이가 관측되었습니다. 시세 출처와 거래일을 반드시 확인하고, 불일치 시 매매 판단에 이용하지 마세요.
 
-**주의사항:** 이 점수는 백테스트로 수익률이 입증되지 않은 규칙 기반 분석입니다. 무료 호스팅과 외부 데이터 공급자의 사정으로 일부 종목 조회가 실패할 수 있으며, 실시간 시세/정시 자동 갱신/자동매매 기능은 없습니다.""")
+**주의사항:** 과거 7개 선정 종목 표본에서 검증한 결과로는 이 점수의 수익률 우위를 입증하지 못했습니다. 과거 수급과 거래비용이 없는 제한적 진단이며, 전략 수익률을 보장하지 않습니다. 무료 호스팅과 외부 데이터 공급자의 사정으로 일부 종목 조회가 실패할 수 있으며, 실시간 시세/정시 자동 갱신/자동매매 기능은 없습니다.""")
+
+    with st.expander("🧪 시세 교차확인·과거신호 검증 결과 (제한된 표본)"):
+        audit_path=Path("data/accuracy-audit.json")
+        if audit_path.exists():
+            audit=json.loads(audit_path.read_text(encoding="utf8"))
+            st.caption("진단 수행 시각(UTC): "+audit.get("as_of_utc","미상")+
+                       " — 표본 7개 종목, 공식 거래소 종가 검증 및 시장 전체 백테스트 아님")
+            quote_rows=[{"시장":q["market"],"종목코드":q["ticker"],
+                         "보조 종가 검증":q["comparison"].get("status"),
+                         "시세 차이 %":q["comparison"].get("relative_difference_pct")}
+                        for q in audit.get("quote_comparisons",[])]
+            if quote_rows:
+                st.dataframe(pd.DataFrame(quote_rows),hide_index=True,use_container_width=True)
+            back=audit.get("backtest",{})
+            pooled=back.get("pooled_selected_sample",{})
+            st.caption(f'과거 10거래일 후 수익률의 전체 표본: {back.get("total_observations","—")}건 '
+                       "— 표본 선정 편향·관측기간 중복·거래비용·과거 수급 미반영")
+            if pooled:
+                st.dataframe(pd.DataFrame([{"신호":signal,**values} for signal,values in pooled.items()]),
+                             hide_index=True,use_container_width=True)
+            st.warning("이 제한적 진단에서 통합 목표가·매수판단의 우수성은 입증되지 않았습니다. 실제 주문 전 공식 확정 시세를 따로 대조해야 합니다.")
+        else:
+            st.info("자동 진단 파일이 생성되지 않아 검증 결과를 표시할 수 없습니다.")
