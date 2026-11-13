@@ -26,6 +26,9 @@ def auth_required():
     return access_mode()=="private"
 
 def enforce_access(st):
+    if access_mode() not in ("demo","private"):
+        st.error("APP_ACCESS_MODE는 demo 또는 private로만 설정할 수 있습니다. 잘못된 설정에서는 서비스를 차단합니다.")
+        st.stop()
     if not auth_required():
         return
     if not authorized_emails_configured():
