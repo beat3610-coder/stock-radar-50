@@ -40,14 +40,15 @@ def analyze_item(item,with_flow=True):
     r=evaluate(data,market=market,flow=flow_data)
     return data,src,r,flow_data,flow_error
 
-def to_row(item,with_flow=True):
+def to_row(item,with_flow=True,market_rank=None):
     code,name,market,sector=item
     data,src,r,flow_data,flow_error=analyze_item(item,with_flow=with_flow)
     f=flow_data or {}
     foreign=f.get("외국인",{})
     institution=f.get("기관",{})
     return {
-      "구분":"코스피" if market=="KR" else "나스닥","종목":name,"코드":code,"업종":sector,
+      "구분":(f"코스피 {market_rank}위" if market_rank is not None else "국내 ETF") if market=="KR" else (f"나스닥 {market_rank}위" if market_rank is not None else "미국 ETF"),
+      "종목":name,"코드":code,"업종":sector,
       "거래일":r["date"],"통화":"KRW" if market=="KR" else "USD",
       "종가":round(r["price"],2),"전일대비 %":round(r["change"],2),
       "점수":r["score"],"기술점수":r["technical_score"],"기술만점":r["technical_max"],
@@ -79,7 +80,7 @@ with st.sidebar:
     if st.button("🔄 종목·시세 갱신",use_container_width=True):
         st.cache_data.clear()
         for k in list(st.session_state):
-            if k.startswith("results_v2_"):st.session_state.pop(k,None)
+            if k.startswith("results_"):st.session_state.pop(k,None)
         st.rerun()
     with_flow=st.checkbox("국내 외국인·기관 순매수 포함(조회가 느릴 수 있음)",value=True)
     st.caption("수급 조회 실패는 0점 처리하지 않으며 국내 종합점수를 유보합니다.")
@@ -110,10 +111,17 @@ def ranking_page(mkt):
     # The universe is pre-ranked by exchange market cap. Keep this stable order.
     ordered=[t for t in items if t[0] in mandatories]+[t for t in items if t[0] not in mandatories]
     order_index={code:i for i,(code,_,_,_) in enumerate(ordered)}
+    market_rank={code:i for i,(code,_,_,_) in enumerate(
+        (t for t in ordered if t[0] not in mandatories),start=1)}
     if mkt=="US" and not listing.get("US_cap_sorted",False):
         st.warning("나스닥 시가총액 자료 조회가 실패하여 현재 표시 순서는 정확한 시총순이 아닙니다. 시총 확인 시에만 시총순으로 표시합니다.")
     st.caption(f"현재 목록 {len(ordered)}개: "+", ".join(t[1] for t in ordered if t[0] in mandatories))
-    key="results_v2_"+mkt
+    if mkt=="KR":
+        st.caption("구분의 코스피 N위는 조회일 기준 일반주 시가총액 순위입니다. ETF는 순위에서 제외합니다.")
+        unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
+        if unknown:
+            st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
+    key="results_v3_"+mkt
     if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
     state=st.session_state[key]
     left,right=st.columns([3,1])
@@ -121,7 +129,7 @@ def ranking_page(mkt):
         remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
         with st.spinner(f"{min(50,len(remaining))}개 종목의 실제 OHLCV 조회 중"):
             for item in remaining[:50]:
-                try:state["rows"][item[0]]=to_row(item,with_flow=with_flow)
+                try:state["rows"][item[0]]=to_row(item,with_flow=with_flow,market_rank=market_rank.get(item[0]))
                 except Exception as e:state["errors"][item[0]]={"종목":item[1],"코드":item[0],"오류":str(e)[:260]}
     if right.button("이 시장 결과 초기화",key="reset"+mkt):
         st.session_state[key]={"rows":{},"errors":{}}
@@ -150,7 +158,7 @@ def ranking_page(mkt):
         listing_page=st.selectbox("종목 목록 페이지",list(range(1,listing_pages+1)),key="listing_page_"+mkt,
                                    format_func=lambda p:f"{p}페이지 / {listing_pages}페이지")
         page_items=ordered[(listing_page-1)*50:listing_page*50]
-        st.dataframe(pd.DataFrame([{"코드":c,"종목":n,"분류":s} for c,n,_,s in page_items]),use_container_width=True,hide_index=True,height=360)
+        st.dataframe(pd.DataFrame([{"구분":(f"코스피 {market_rank[c]}위" if mkt=="KR" else f"나스닥 {market_rank[c]}위") if c in market_rank else ("국내 ETF" if mkt=="KR" else "미국 ETF"),"코드":c,"종목":n,"업종":s} for c,n,_,s in page_items]),use_container_width=True,hide_index=True,height=360)
 
 with kr_tab:ranking_page("KR")
 with us_tab:ranking_page("US")
