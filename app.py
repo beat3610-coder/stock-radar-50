@@ -32,6 +32,9 @@ def scan():
                 "종가":round(r["price"],2),"등락률 %":round(r["change"],2),
                 "점수":r["score"],"판정":r["signal"],
                 "RSI":round(r["rsi"],1) if r["rsi"] is not None else None,
+                "RSI 5일 변화":round(r["rsi_delta5"],1) if r["rsi_delta5"] is not None else None,
+                "RSI 방향":r["rsi_direction"],
+                "RSI 거래량 확인":"확인" if r["rsi_volume_confirmed"] else "미확인",
                 "52주 고점":round(r["hi52"],2),"52주 저점":round(r["lo52"],2),
                 "거래량 배율":round(r["volratio"],2) if r["volratio"] else None,
                 "손절 참고":round(r["stop"],2) if r["stop"] else None,
@@ -96,7 +99,8 @@ with chart:
             x1,x2,x3,x4,x5=st.columns(5)
             x1.metric("최근 종가",f(r["price"]),f'{r["change"]:+.2f}%')
             x2.metric("점수",str(r["score"]) if r["score"] is not None else "데이터 부족")
-            x3.metric("RSI14",f(r["rsi"]))
+            x3.metric("RSI14",f(r["rsi"]),f'{r["rsi_delta5"]:+.1f}p / 5거래일' if r["rsi_delta5"] is not None else None)
+            st.caption(f'RSI 최근 5거래일: {r["rsi_direction"]} | RSI 상승·거래량 동시 확인: {"예" if r["rsi_volume_confirmed"] else "아니오"}')
             x4.metric("52주 고점",f(r["hi52"]))
             x5.metric("52주 저점",f(r["lo52"]))
             st.subheader(f'판정: {r["signal"]}')
@@ -142,7 +146,11 @@ with flow:
 with guide:
     st.markdown("""**STOCK RADAR 50의 판단 규칙**
 - 20/60/200일 이동평균, MACD, RSI, 거래량, 20일 고점 돌파로 최대 100점 계산
-- RSI 과열 및 200일선 하회 시 감점
+- RSI 45~68 +5점, 5거래일 상승폭 3p 이상(현재 RSI 35~70) +5점
+- 거래량 동반 상승(20일 평균의 1.5배 초과) +5점, RSI 상승과 거래량 동반 확인(1.2배 이상) +5점
+- RSI가 5거래일 동안 5p 이상 하락하면 −5점, RSI가 75 초과면 −15점
+- 200일선 하회 시 감점
+- RSI의 상승·하락은 확정된 일봉에 기반한 규칙일 뿐, 반등·추세 전환을 보장하지 않음
 - 장기 시세가 200거래일 미만인 신규 ETF는 점수를 유보
 - 목표가와 손절가는 ATR 기반 모델 참고값이며 미래 가격 예측이 아님
 
