@@ -1,5 +1,6 @@
 {
   "success": true,
+  "entry_guard_passed": true,
   "KR": {
     "price": 127.99151027113115,
     "target1": 129.32441111246362,
