@@ -1,0 +1,68 @@
+name: Integrated target algorithm tests
+on:
+  push:
+    branches: [main]
+    paths: ["engine.py", "app.py", ".github/workflows/target-analysis-test.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas
+      - name: Compile and exercise integrated target engine
+        run: |
+          python - <<'PY'
+          import ast, json, numpy as np, pandas as pd
+          for f in ('engine.py','app.py','providers.py'):
+              ast.parse(open(f,encoding='utf8').read())
+          from engine import compute,evaluate,integrated_targets
+          rng=np.random.default_rng(42)
+          ix=pd.bdate_range('2025-07-01',periods=320)
+          close=100+np.arange(320)*0.08+np.sin(np.arange(320)/5)*3
+          high=close+1.8; low=close-2.0
+          data=pd.DataFrame({'Open':close-0.2,'High':high,'Low':low,
+                             'Close':close,'Volume':100000+np.arange(320)*500},index=ix)
+          x=compute(data)
+          flow={'date':str(ix[-1].date()),'외국인':{'5일':100,'20일':200},
+                '기관':{'5일':100,'20일':300}}
+          a=evaluate(x,market='KR',flow=flow)
+          b=evaluate(x,market='KR',flow=None)
+          u=evaluate(x,market='US',flow=None)
+          assert 'target1' in a and 'target2' in a
+          assert 0<=a['target_signal_points']<=100
+          assert 0<=b['target_signal_points']<=100
+          assert 0<=u['target_signal_points']<=100
+          assert a['target_inputs']=='수급 포함'
+          assert b['target_inputs']=='수급 제외'
+          assert u['target_inputs']=='수급 제외'
+          for obj in [a,b,u]:
+              if obj['integrated_target'] is not None:
+                  assert obj['integrated_target']>obj['price']
+                  assert obj['integrated_target'] in [obj['target1'],obj['target2']]
+              assert obj['target'] is None or obj['target']>obj['price']
+          # Flat-time series: don't invent resistance targets above current price.
+          flat=data.copy()
+          flat['Close']=100;flat['Open']=100;flat['High']=100.01;flat['Low']=99.99
+          flat=compute(flat)
+          f=evaluate(flat,market='KR',flow=None)
+          assert f['integrated_target'] is None or f['integrated_target']>100
+          results={'success':True,'KR':{k:a[k] for k in ('price','target1','target2','integrated_target','target_grade','target_signal_points','target_inputs')},
+                   'KR_flow_unavailable':{'integrated_target':b['integrated_target'],'target_inputs':b['target_inputs']},
+                   'US':{'integrated_target':u['integrated_target'],'target_inputs':u['target_inputs']}}
+          with open('data/target-test-result.json','w') as fh:json.dump(results,fh,ensure_ascii=False,indent=2)
+          print(json.dumps(results,ensure_ascii=False))
+          PY
+      - name: Commit verification artifact
+        if: success()
+        run: |
+          git config user.name "stock-radar-diagnostics"
+          git config user.email "stock-radar-diagnostics@users.noreply.github.com"
+          git add data/target-test-result.json
+          git diff --cached --quiet || (git commit -m "Record integrated target algorithm test [skip ci]" && git push)
