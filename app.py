@@ -136,7 +136,7 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v11_"+mkt
+    key="results_v12_"+mkt
     if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
     state=st.session_state[key]
     left,right=st.columns([3,1])
@@ -159,6 +159,11 @@ def ranking_page(mkt):
         pages=max(1,(len(df)+49)//50)
         page=st.selectbox("분석 결과 페이지 (50개씩)",list(range(1,pages+1)),key="result_page_"+mkt,
                           format_func=lambda p:f"{p}페이지 / {pages}페이지")
+        # Prioritize actionable prices and the trading decision in the horizontal table.
+        primary_cols=("구분","종목","코드","종가","손절 참고","통합 목표가",
+                      "52주 고점","52주 저점","매매 판단")
+        first=[col for col in primary_cols if col in df.columns]
+        df=df[first+[col for col in df.columns if col not in first]]
         shown=df.iloc[(page-1)*50:page*50]
         st.caption(f"분석 완료 {len(df)}종목 중 {len(shown)}종목 표시")
         # Display thousands separators for every price/target/MA field,
