@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from access_control import enforce_access, access_mode
 from trade_plan import position_sizing
+from signal_playbook import playbook
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
@@ -439,6 +440,38 @@ with detail_tab:
                     st.warning("종가 독립 검증 불가: "+qc["reason"])
                 else:
                     st.caption(f'같은 거래일 보조 종가 대조 통과(차이 {qc["difference_pct"]:.2f}%). 공식 확정 종가 검증은 아닙니다.')
+                st.subheader("🧭 전략형 매매계획 · 가격·손절·익절")
+                lab_file=Path("data/strategy-lab-latest.json")
+                adopted=None
+                if lab_file.exists():
+                    try:
+                        lab_data=json.loads(lab_file.read_text(encoding="utf-8"))
+                        adopted=lab_data.get("markets",{}).get(mkt,{}).get("selected_for_diagnostic")
+                    except Exception:
+                        adopted=None
+                capital_for_plan=10_000_000.0 if mkt in ("KR","KQ") else 100_000.0
+                draft=playbook(data,mkt,capital=capital_for_plan)
+                if not draft["setups"]:
+                    st.info("오늘의 돌파·눌림목·재상승 조건에 부합하는 신호가 없습니다. 무리한 신규 매수보다 관찰입니다.")
+                else:
+                    st.caption("다음 거래일 시가가 진입 허용범위에 있을 때만 재산정. 10거래일 보유 시뮬레이션 기준이며 확정 목표가 아님.")
+                    idea_rows=[]
+                    korean_names={"trend_breakout":"거래량 동반 고점 돌파",
+                                  "trend_pullback":"상승추세 눌림목 반등",
+                                  "momentum_reentry":"MACD 재상승 진입"}
+                    for idea in draft["setups"]:
+                        label=("개발·검증 확인 연구후보" if adopted==idea["strategy"] else "검증 미채택 · 참고만")
+                        idea_rows.append({"전략":korean_names.get(idea["strategy"],idea["strategy"]),
+                           "검증 구분":label,"기준 종가":idea["signal_price"],
+                           "익일 허용 매수가 하한":idea["entry_min"],
+                           "익일 허용 매수가 상한":idea["entry_max"],
+                           "계획 손절가":idea["stop"],"1차 목표가":idea["target"],
+                           "계획 손익비":idea["risk_reward"],
+                           "자금제한 최대 주수":idea["max_shares"],
+                           "계획 손실":idea["planned_loss"],"계획 이익":idea["planned_profit"]})
+                    st.dataframe(pd.DataFrame(idea_rows),hide_index=True,use_container_width=True)
+                    st.warning("위 가격은 연구용 시나리오입니다. 익일 시가 확인 후 손익비·거래비용을 재산정해야 하며, 실제 주문 자동화는 비활성화되어 있습니다.")
+                st.divider()
                 st.subheader("종합 판단: "+r["signal"])
                 st.write(r["reason"] or "강한 매수 조건 미충족")
                 if r["technical_signal_before_gate"]!=r["signal"]:
