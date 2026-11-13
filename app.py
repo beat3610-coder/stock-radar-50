@@ -80,7 +80,7 @@ def ranking_page(mkt):
         st.error("현재 종목 목록을 조회할 수 없습니다.")
         return
     st.subheader(("코스피 시총 100 + TIGER ETF 2종" if mkt=="KR" else "Nasdaq-100 기업 100 + SOXL"))
-    st.caption("필수 상품은 상단에 고정 표시됩니다. 전체 종목 분석은 서버 부하를 줄이기 위해 15종목씩 실행합니다.")
+    st.caption("필수 상품은 상단에 고정 표시됩니다. 전체 종목 분석은 서버 부하를 줄이기 위해 50종목씩 실행합니다.")
     mandatories={"472150","0262B0"} if mkt=="KR" else {"SOXL"}
     ordered=[t for t in items if t[0] in mandatories]+[t for t in items if t[0] not in mandatories]
     st.caption(f"현재 목록 {len(ordered)}개: "+", ".join(t[1] for t in ordered if t[0] in mandatories))
@@ -88,10 +88,10 @@ def ranking_page(mkt):
     if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
     state=st.session_state[key]
     left,right=st.columns([3,1])
-    if left.button("▶ 다음 15종목 실제 시세 분석",key="run"+mkt,type="primary"):
+    if left.button("▶ 다음 50종목 실제 시세 분석",key="run"+mkt,type="primary"):
         remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
-        with st.spinner(f"{min(15,len(remaining))}개 종목의 실제 OHLCV 조회 중"):
-            for item in remaining[:15]:
+        with st.spinner(f"{min(50,len(remaining))}개 종목의 실제 OHLCV 조회 중"):
+            for item in remaining[:50]:
                 try:state["rows"][item[0]]=to_row(item)
                 except Exception as e:state["errors"][item[0]]={"종목":item[1],"코드":item[0],"오류":str(e)[:260]}
     if right.button("이 시장 결과 초기화",key="reset"+mkt):
@@ -103,15 +103,25 @@ def ranking_page(mkt):
         df=pd.DataFrame(list(state["rows"].values()))
         df["_priority"]=df["코드"].isin(mandatories).map({True:0,False:1})
         df=df.sort_values(["_priority","점수"],ascending=[True,False],na_position="last").drop(columns="_priority")
-        st.dataframe(df,hide_index=True,use_container_width=True,height=510)
+        # Display at most 50 analyzed rows at once; preserve full CSV download.
+        pages=max(1,(len(df)+49)//50)
+        page=st.selectbox("분석 결과 페이지 (50개씩)",list(range(1,pages+1)),key="result_page_"+mkt,
+                          format_func=lambda p:f"{p}페이지 / {pages}페이지")
+        shown=df.iloc[(page-1)*50:page*50]
+        st.caption(f"분석 완료 {len(df)}종목 중 {len(shown)}종목 표시")
+        st.dataframe(shown,hide_index=True,use_container_width=True,height=510)
         st.download_button("📥 분석 결과 CSV 저장",df.to_csv(index=False).encode("utf-8-sig"),f"STOCK_RADAR200_{mkt}.csv","text/csv",key="csv"+mkt)
     else:
         st.info("위 버튼을 눌러 종목별 시세 분석을 시작하세요. 항목을 추측해서 채우지 않습니다.")
     if fail:
         with st.expander(f"⚠️ 조회 실패 {fail}개 — 원인 확인"):
             st.dataframe(pd.DataFrame(list(state["errors"].values())),hide_index=True,use_container_width=True)
-    with st.expander(f"전체 구성 종목 {len(ordered)}개 보기"):
-        st.dataframe(pd.DataFrame([{"코드":c,"종목":n,"분류":s} for c,n,_,s in ordered]),use_container_width=True,hide_index=True,height=360)
+    with st.expander(f"전체 구성 종목 {len(ordered)}개 보기 (50개씩)"):
+        listing_pages=max(1,(len(ordered)+49)//50)
+        listing_page=st.selectbox("종목 목록 페이지",list(range(1,listing_pages+1)),key="listing_page_"+mkt,
+                                   format_func=lambda p:f"{p}페이지 / {listing_pages}페이지")
+        page_items=ordered[(listing_page-1)*50:listing_page*50]
+        st.dataframe(pd.DataFrame([{"코드":c,"종목":n,"분류":s} for c,n,_,s in page_items]),use_container_width=True,hide_index=True,height=360)
 
 with kr_tab:ranking_page("KR")
 with us_tab:ranking_page("US")
