@@ -6,6 +6,7 @@ on:
       - "trade_plan.py"
       - "trade_strategy_audit.py"
       - "test_trade_plan.py"
+      - "test_300_universe.py"
       - ".github/workflows/risk-plan-audit.yml"
   workflow_dispatch:
 concurrency:
@@ -25,6 +26,8 @@ jobs:
       - run: pip install pandas numpy finance-datareader yfinance lxml requests beautifulsoup4 html5lib pykrx
       - name: Test risk-first profit and stop engine
         run: python test_trade_plan.py
+      - name: Verify 300 ticker inclusion and conservative stop fills
+        run: python test_300_universe.py
       - name: Run 300-ticker historical trade audit
         run: python trade_strategy_audit.py
       - name: Save verification report
