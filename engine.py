@@ -396,6 +396,15 @@ def evaluate(x, market="US", flow=None):
     # the closest resistance. Resistance remains a separately shown obstacle.
     plan=scenario_from_history(x,stop)
     signal,entry_reason=decide_trade(signal,plan,score=score)
+    # Avoid false breakouts during longer downtrends. This uses only
+    # information available as of the recommendation date.
+    trend_rising=(len(x)>=221 and np.isfinite(x.MA200.iloc[-21])
+                  and np.isfinite(r.MA200) and np.isfinite(r.MA60)
+                  and r.MA200>x.MA200.iloc[-21] and r.MA60>=r.MA200
+                  and p>=r.MA60)
+    if signal in ("매수 검토","강한 매수 검토","기술매수 후보·수급 미확인") and not trend_rising:
+        signal="중장기 추세 미확인·매수 유보"
+        entry_reason="60일선이 200일선 위이고 200일선이 최근 20거래일간 상승해야 신규 매수 후보 인정"
     trade_target=plan["target"]
     upside_pct=plan["expected_upside_pct"]
     entry_rr=plan["planned_rr"]
@@ -404,6 +413,7 @@ def evaluate(x, market="US", flow=None):
         "technical_max":tech_max,"score_basis":score_basis,"signal":signal,
         "technical_signal_before_gate":technical_signal_before_gate,
         "reason":" · ".join(details),"entry_reason":entry_reason,
+        "medium_long_trend_rising":bool(trend_rising),
         "upside_pct":upside_pct,"entry_rr":entry_rr,
         "trade_target":trade_target,"trade_target2":plan["target2"],
         "trade_plan_basis":plan["basis"],"historical_samples":plan["history_samples"],
