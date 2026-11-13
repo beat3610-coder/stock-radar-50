@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from universe import get_universe
 from engine import compute,evaluate
-from providers import get_prices,get_flows
+from providers import get_prices,get_flows,verify_recent_close
 
 st.set_page_config(page_title="STOCK RADAR 200",page_icon="📈",layout="wide")
 st.markdown("<style>.block-container{padding-top:1.4rem;max-width:1560px}.stMetric{padding:12px;border:1px solid #64748b44;border-radius:12px}</style>",unsafe_allow_html=True)
@@ -25,6 +25,10 @@ def priced(code,market):
 @st.cache_data(ttl=10800,show_spinner=False)
 def flows(code,date):return get_flows(code,date)
 
+@st.cache_data(ttl=21600,show_spinner=False)
+def quote_check(code,market,date,close,source):
+    return verify_recent_close(code,market,date,close,source)
+
 try: listing=universe()
 except Exception as e:
     st.error(f"종목 목록 초기화 실패: {e}")
@@ -41,6 +45,14 @@ def analyze_item(item,with_flow=True):
         except Exception as exc:
             flow_error=str(exc)[:160]
     r=evaluate(data,market=market,flow=flow_data)
+    qc=quote_check(code,market,str(data.index[-1].date()),float(data.Close.iloc[-1]),src)
+    r["quote_check"]=qc
+    if qc["status"]=="mismatch":
+        r["signal"]="시세 불일치·매수 보류"
+        r["entry_reason"]=qc["reason"]
+    elif qc["status"]=="unverified" and r["signal"] in ("매수 검토","강한 매수 검토","기술매수 후보·수급 미확인"):
+        r["signal"]="시세 미검증·매수 유보"
+        r["entry_reason"]=qc["reason"]
     return data,src,r,flow_data,flow_error
 
 def to_row(item,with_flow=True,market_rank=None):
@@ -89,7 +101,12 @@ def to_row(item,with_flow=True,market_rank=None):
       "통합목표 손익비(R)":round(r["target_r"],2) if r["target_r"] is not None else None,
       "목표 판단 근거":r["target_evidence"],
       "매물대 분석":r["volume_profile"],
-      "시세 출처":src,"종가 교차검증":"미실시 — 증권사 확정 종가 대조 필요"}
+      "시세 출처":src,
+      "종가 교차검증":("보조 시세 일치(공식값 미검증)" if r["quote_check"]["status"]=="agree"
+                       else "종가 불일치·매수 보류" if r["quote_check"]["status"]=="mismatch"
+                       else "교차검증 불가"),
+      "종가 차이 %":r["quote_check"]["difference_pct"],
+      "교차검증 설명":r["quote_check"]["reason"]}
 
 def fmt(v):return "—" if v is None else f"{v:,.0f}"
 
@@ -153,11 +170,11 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v20_"+mkt+("_flow" if with_flow else "_tech")
+    key="results_v21_"+mkt+("_flow" if with_flow else "_tech")
     if key not in st.session_state:
         st.session_state[key]={"rows":{},"errors":{},"batches":[]}
     state=st.session_state[key]
-    page_key="result_batch_page_v20_"+mkt+("_flow" if with_flow else "_tech")
+    page_key="result_batch_page_v21_"+mkt+("_flow" if with_flow else "_tech")
     left,right=st.columns([3,1])
     remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
     if left.button("▶ 다음 50종목 실제 시세 분석",key="run"+mkt,type="primary",
@@ -181,6 +198,11 @@ def ranking_page(mkt):
     st.progress((success+fail)/len(ordered),text=f"분석 진행: {success+fail}/{len(ordered)} (정상 {success} · 오류 {fail})")
     if success:
         checked=list(state["rows"].values())
+        disagreement=sum(x.get("종가 교차검증")=="종가 불일치·매수 보류" for x in checked)
+        not_verified=sum(x.get("종가 교차검증")=="교차검증 불가" for x in checked)
+        if disagreement or not_verified:
+            st.warning(f"종가 확인: 공급처 불일치 {disagreement}개, 교차검증 불가 {not_verified}개. "
+                       "종가 차이 %와 교차검증 설명을 확인하세요. 공식 종가 확정 전 신규 매수 신호를 신뢰하지 마세요.")
         approved=sum(x.get("매매 판단") in ("매수 검토","강한 매수 검토") for x in checked)
         technical_only=sum(x.get("매매 판단")=="기술매수 후보·수급 미확인" for x in checked)
         gated=sum("매수 유보" in str(x.get("매매 판단","")) and
@@ -245,6 +267,8 @@ def ranking_page(mkt):
             number_formats["전일대비 %"]="{:.2f}"
         if "목표 상승여력 %" in shown.columns:
             number_formats["목표 상승여력 %"]="{:.2f}"
+        if "종가 차이 %" in shown.columns:
+            number_formats["종가 차이 %"]="{:.2f}"
         styled=shown.style.format(number_formats,na_rep="—")
         st.dataframe(styled,hide_index=True,use_container_width=True,height=510)
         st.download_button("📥 분석 결과 CSV 저장",df.to_csv(index=False).encode("utf-8-sig"),f"STOCK_RADAR200_{mkt}.csv","text/csv",key="csv"+mkt)
@@ -282,6 +306,13 @@ with detail_tab:
                 c.metric("RSI14",fmt(r["rsi"]),f'{r["rsi_delta5"]:+.1f}p/5일' if r["rsi_delta5"] is not None else None)
                 d.metric("ADX14",fmt(r["adx"]))
                 e.metric("52주 고점",fmt(r["hi52"]))
+                qc=r["quote_check"]
+                if qc["status"]=="mismatch":
+                    st.error(f'시세 공급처 불일치: 차이 {qc["difference_pct"]:.2f}% — 공식 종가 확인 전 매매 판단을 이용하지 마세요.')
+                elif qc["status"]=="unverified":
+                    st.warning("종가 독립 검증 불가: "+qc["reason"])
+                else:
+                    st.caption(f'같은 거래일 보조 종가 대조 통과(차이 {qc["difference_pct"]:.2f}%). 공식 확정 종가 검증은 아닙니다.')
                 st.subheader("종합 판단: "+r["signal"])
                 st.write(r["reason"] or "강한 매수 조건 미충족")
                 if r["technical_signal_before_gate"]!=r["signal"]:
@@ -396,6 +427,6 @@ with guide_tab:
 - **수급 조회 실패:** 기술점수가 60점 이상이면 **기술매수 후보·수급 미확인**으로 별도 표시하고, 목표·손익비 미달은 **기술상승·매수 유보(수급 미확인)**으로 표기합니다. 이를 외국인·기관 매수가 확인된 실제 **매수 검토**와 혼동하지 마세요. 수급 조회 설정을 바꾸면 이전 분석 결과와 별개로 저장됩니다.
 - **ETF 주의:** SOXL의 3배 레버리지와 TIGER 커버드콜 ETF의 분배금·분배락은 저항 목표 산식에 반영되지 않습니다.
 
-**시세 품질:** 무료 시세 공급처의 OHLCV는 공식 확정 종가와 자동 대조하지 않습니다. 실제로 2026-11-13 일부 코스닥 종목에서 타 공급처 종가와 차이가 관측되었습니다. 시세 출처와 거래일을 반드시 확인하고, 불일치 시 매매 판단에 이용하지 마세요.
+**시세 품질:** 동일 거래일의 종가를 Yahoo 보조 시세와 자동 대조합니다. 오차가 0.5%를 넘으면 **시세 불일치·매수 보류**, 조회가 안 되면 **교차검증 불가**를 표시하며 신규 매수 신호를 유보합니다. 가격 비교만 수행하며 공식 KRX 확정 종가 또는 전체 OHLCV의 검증을 의미하지 않습니다. 무료 시세 공급처의 OHLCV는 공식 확정 종가와 자동 대조하지 않습니다. 실제로 2026-11-13 일부 코스닥 종목에서 타 공급처 종가와 차이가 관측되었습니다. 시세 출처와 거래일을 반드시 확인하고, 불일치 시 매매 판단에 이용하지 마세요.
 
 **주의사항:** 이 점수는 백테스트로 수익률이 입증되지 않은 규칙 기반 분석입니다. 무료 호스팅과 외부 데이터 공급자의 사정으로 일부 종목 조회가 실패할 수 있으며, 실시간 시세/정시 자동 갱신/자동매매 기능은 없습니다.""")
