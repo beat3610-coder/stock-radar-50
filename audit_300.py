@@ -158,7 +158,11 @@ def run(per_market=100):
                         if all(result["markets"][m]["status"]=="PASS"
                                for m in ("KR","KQ","US"))
                         else "FAIL_OR_INSUFFICIENT")
-    result["certification"]=assess(result, portfolio={"valid":False}, paper=None)
+    portfolio_checks=[result["portfolios"][m] for m in ("KR","KQ","US")]
+    result["certification"]=assess(result,portfolio={
+        "valid":all(p.get("valid") for p in portfolio_checks),
+        "max_drawdown_pct":max((p.get("max_drawdown_pct") or 0) for p in portfolio_checks),
+        "benchmark_verified":False},paper=None)
     return result
 
 if __name__ == "__main__":
