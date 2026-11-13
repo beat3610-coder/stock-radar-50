@@ -1,0 +1,21 @@
+{
+  "id": "/",
+  "name": "STOCK RADAR 50 | 주식분석",
+  "short_name": "RADAR 50",
+  "description": "국내 39종목·미국 11종목 주식 분석 앱",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#07101f",
+  "theme_color": "#07101f",
+  "orientation": "any",
+  "lang": "ko-KR",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
