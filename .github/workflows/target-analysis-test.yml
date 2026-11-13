@@ -22,7 +22,7 @@ jobs:
           import ast, json, numpy as np, pandas as pd
           for f in ('engine.py','app.py','providers.py'):
               ast.parse(open(f,encoding='utf8').read())
-          from engine import compute,evaluate,integrated_targets
+          from engine import compute,evaluate,integrated_targets,apply_target_risk_gate
           rng=np.random.default_rng(42)
           ix=pd.bdate_range('2025-07-01',periods=320)
           close=100+np.arange(320)*0.08+np.sin(np.arange(320)/5)*3
@@ -53,7 +53,20 @@ jobs:
           flat=compute(flat)
           f=evaluate(flat,market='KR',flow=None)
           assert f['integrated_target'] is None or f['integrated_target']>100
-          results={'success':True,'KR':{k:a[k] for k in ('price','target1','target2','integrated_target','target_grade','target_signal_points','target_inputs')},
+          # Explicitly verify entry guard thresholds and risk-warning precedence.
+          def gate(sig,goal,stop=95):
+              return apply_target_risk_gate(sig,100,stop,goal)
+          assert gate("매수 검토",102)[0]=="상승 신호·매수 유보"  # 2% upside / 0.4R
+          assert gate("강한 매수 검토",106)[0]=="상승 신호·매수 유보" # 6% but 1.2R
+          assert gate("강한 매수 검토",108)[0]=="강한 매수 검토" # 8% / 1.6R
+          assert gate("매수 검토",None)[0]=="상승 신호·매수 유보"
+          assert gate("매수 검토",108,stop=None)[0]=="상승 신호·매수 유보"
+          assert gate("과열·추격 주의",108)[0]=="과열·추격 주의"
+          assert gate("하락 추세·매수 보류",108)[0]=="하락 추세·매수 보류"
+          for obj in (a,b,u):
+              if obj['signal'] in ("매수 검토","강한 매수 검토"):
+                  assert obj['upside_pct']>=3.0 and obj['entry_rr']>=1.5
+          results={'success':True,'entry_guard_passed':True,'KR':{k:a[k] for k in ('price','target1','target2','integrated_target','target_grade','target_signal_points','target_inputs')},
                    'KR_flow_unavailable':{'integrated_target':b['integrated_target'],'target_inputs':b['target_inputs']},
                    'US':{'integrated_target':u['integrated_target'],'target_inputs':u['target_inputs']}}
           with open('data/target-test-result.json','w') as fh:json.dump(results,fh,ensure_ascii=False,indent=2)
