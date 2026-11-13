@@ -1,0 +1,122 @@
+{
+  "as_of_utc": "2026-11-13T21:39:01.906858837Z",
+  "report_name": "STOCK RADAR Real-Money Readiness Audit",
+  "release_status": "NOT_APPROVED",
+  "universe": "20 current constituents per market; 1 US OHLC verification failure",
+  "holdout_start": "2026-04-01",
+  "historical_data_previously_inspected": true,
+  "assumptions": {
+    "entry": "next session open",
+    "intraday": "stop wins ambiguous bars",
+    "hold_days": 10,
+    "roundtrip_cost_pct": 0.35,
+    "stress_cost_pct": 0.7,
+    "max_positions": 5,
+    "max_stock_allocation_pct": 20,
+    "risk_budget_per_trade_pct": 1,
+    "currency_separate": true
+  },
+  "markets": {
+    "KR": {
+      "name": "코스피",
+      "requested": 20,
+      "loaded": 20,
+      "holdout_trades": 3,
+      "holdout_win_rate_pct": 66.67,
+      "holdout_mean_net_pct": 7.053,
+      "holdout_profit_factor": 4.058,
+      "portfolio_base": {
+        "currency": "KRW",
+        "initial_equity": 10000000,
+        "end_equity": 10189441.65,
+        "total_return_pct": 1.894,
+        "max_drawdown_pct": 0.954,
+        "trades_executed": 3
+      },
+      "portfolio_stress": {
+        "total_return_pct": 1.181,
+        "max_drawdown_pct": 0.883,
+        "trades_executed": 3
+      }
+    },
+    "KQ": {
+      "name": "코스닥",
+      "requested": 20,
+      "loaded": 20,
+      "holdout_trades": 2,
+      "holdout_win_rate_pct": 50,
+      "holdout_mean_net_pct": -4.677,
+      "holdout_profit_factor": 0.235,
+      "portfolio_base": {
+        "currency": "KRW",
+        "initial_equity": 10000000,
+        "end_equity": 9960872.52,
+        "total_return_pct": -0.391,
+        "max_drawdown_pct": 1.117,
+        "trades_executed": 2
+      },
+      "portfolio_stress": {
+        "total_return_pct": -0.486,
+        "max_drawdown_pct": 1.021,
+        "trades_executed": 2
+      }
+    },
+    "US": {
+      "name": "나스닥100 구성 종목",
+      "requested": 20,
+      "loaded": 19,
+      "holdout_trades": 6,
+      "holdout_win_rate_pct": 33.33,
+      "holdout_mean_net_pct": -0.742,
+      "holdout_profit_factor": 0.792,
+      "portfolio_base": {
+        "currency": "USD",
+        "initial_equity": 100000,
+        "end_equity": 99219.35,
+        "total_return_pct": -0.781,
+        "max_drawdown_pct": 3.038,
+        "trades_executed": 6
+      },
+      "portfolio_stress": {
+        "total_return_pct": -1.227,
+        "max_drawdown_pct": 3.128,
+        "trades_executed": 6
+      }
+    }
+  },
+  "certification_gate": {
+    "status": "NOT_APPROVED",
+    "minimum_symbols_per_market": 100,
+    "minimum_holdout_trades_per_market": 30,
+    "minimum_holdout_win_rate_pct": 55,
+    "minimum_holdout_profit_factor": 1.3,
+    "maximum_portfolio_drawdown_pct": 12,
+    "minimum_forward_paper_days": 90,
+    "minimum_forward_paper_trades": 60,
+    "outstanding": [
+      "fewer than 100 symbols in each market",
+      "fewer than 30 holdout trades in each market",
+      "no historical constituent survivorship correction",
+      "no independently verified market index benchmark",
+      "previously inspected historical period",
+      "no 90-day, 60-trade forward paper record"
+    ]
+  },
+  "price_errors": [
+    {
+      "market": "US",
+      "ticker": "ADSK",
+      "error": "Latest OHLC feed inconsistent on available providers; ticker excluded rather than imputed."
+    }
+  ],
+  "limitations": [
+    "Simulated past daily OHLC; NOT brokerage executions",
+    "Current constituent/survivorship bias",
+    "Previously inspected calendar holdout is not untouched prospective test",
+    "Single-market not cross-currency consolidated",
+    "No actual liquidity, taxes, short-sale constraints or market impact",
+    "Daily mark-to-market using historical close, not intraday account drawdown",
+    "Extremely small holdout sample; avoid claims of predictive superiority"
+  ],
+  "pass_label": "FAIL_OR_INSUFFICIENT"
+}
