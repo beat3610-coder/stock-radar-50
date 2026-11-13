@@ -35,6 +35,12 @@ def scan():
                 "RSI 5일 변화":round(r["rsi_delta5"],1) if r["rsi_delta5"] is not None else None,
                 "RSI 방향":r["rsi_direction"],
                 "RSI 거래량 확인":"확인" if r["rsi_volume_confirmed"] else "미확인",
+                "ADX":round(r["adx"],1) if r["adx"] is not None else None,
+                "OBV": "매수 우세" if r["obv_up"] else "확인 필요",
+                "추세 점수":r["scores"]["추세"],
+                "모멘텀 점수":r["scores"]["모멘텀"],
+                "ADX 점수":r["scores"]["추세 강도"],
+                "거래량 점수":r["scores"]["수급·거래량"],
                 "52주 고점":round(r["hi52"],2),"52주 저점":round(r["lo52"],2),
                 "거래량 배율":round(r["volratio"],2) if r["volratio"] else None,
                 "손절 참고":round(r["stop"],2) if r["stop"] else None,
@@ -105,17 +111,30 @@ with chart:
             x5.metric("52주 저점",f(r["lo52"]))
             st.subheader(f'판정: {r["signal"]}')
             st.write(r["reason"] or "강한 상승 조건이 부족합니다")
+            st.caption("새로운 종합판단: 추세 30점 · 모멘텀(RSI+MACD) 25점 · ADX 20점 · 거래량+OBV 25점 | 과열·하락 위험 감점")
+            metrics=st.columns(4)
+            for col,(label,points) in zip(metrics,r["scores"].items()):
+                col.metric(label,points)
+            xadx,xobv,xbb=st.columns(3)
+            xadx.metric("ADX14",f(r["adx"]))
+            xobv.metric("OBV 수급 방향","매수 우세" if r["obv_up"] else "미확인")
+            xbb.metric("볼린저 상단",f(r["bb_upper"]))
+            if r["penalty"]>0: st.warning(f'위험 감점 {r["penalty"]}점 반영')
             if r["score"] is None:st.warning("장기 데이터가 200거래일 미만이므로 점수를 계산하지 않습니다.")
             view=data.tail(252)
-            fig=make_subplots(rows=3,cols=1,shared_xaxes=True,row_heights=[.67,.17,.16],vertical_spacing=.03)
+            fig=make_subplots(rows=4,cols=1,shared_xaxes=True,row_heights=[.54,.16,.15,.15],vertical_spacing=.03)
             fig.add_trace(go.Candlestick(x=view.index,open=view.Open,high=view.High,low=view.Low,close=view.Close,name="주가"),row=1,col=1)
             for n,color in [(20,"#e9ae54"),(60,"#4d9cdf"),(200,"#b683df")]:
                 fig.add_trace(go.Scatter(x=view.index,y=view[f"MA{n}"],name=f"{n}일선",line=dict(color=color,width=1.7)),row=1,col=1)
             fig.add_trace(go.Bar(x=view.index,y=view.Volume,name="거래량"),row=2,col=1)
             fig.add_trace(go.Scatter(x=view.index,y=view.RSI,name="RSI"),row=3,col=1)
+            fig.add_trace(go.Scatter(x=view.index,y=view.ADX,name="ADX14",line=dict(color="#30c5b8")),row=4,col=1)
+            fig.add_trace(go.Scatter(x=view.index,y=view.PDI,name="+DI",line=dict(color="#6fcb6f")),row=4,col=1)
+            fig.add_trace(go.Scatter(x=view.index,y=view.MDI,name="-DI",line=dict(color="#df7373")),row=4,col=1)
+            fig.add_hline(y=25,row=4,col=1,line_dash="dash")
             fig.add_hline(y=30,row=3,col=1,line_dash="dash")
             fig.add_hline(y=70,row=3,col=1,line_dash="dash")
-            fig.update_layout(height=700,xaxis_rangeslider_visible=False,margin=dict(l=8,r=8,t=20,b=8))
+            fig.update_layout(height=850,xaxis_rangeslider_visible=False,margin=dict(l=8,r=8,t=20,b=8))
             st.plotly_chart(fig,use_container_width=True)
             a,b,c,d=st.columns(4)
             a.metric("20일 지지 참고",f(r["support"]))
@@ -171,11 +190,12 @@ with verification:
 
 with guide:
     st.markdown("""**STOCK RADAR 50의 판단 규칙**
-- 20/60/200일 이동평균, MACD, RSI, 거래량, 20일 고점 돌파로 최대 100점 계산
-- RSI 45~68 +5점, 5거래일 상승폭 3p 이상(현재 RSI 35~70) +5점
-- 거래량 동반 상승(20일 평균의 1.5배 초과) +5점, RSI 상승과 거래량 동반 확인(1.2배 이상) +5점
-- RSI가 5거래일 동안 5p 이상 하락하면 −5점, RSI가 75 초과면 −15점
-- 200일선 하회 시 감점
+- **추세 30점:** 20일선 상회(10), 20·60일 정배열(10), 60·200일 장기 정배열(10)
+- **모멘텀 25점:** MACD 히스토그램 양수(10), RSI 45~68(8), 최근 5거래일 RSI 3p 이상 상승(7)
+- **추세 강도 ADX 20점:** ADX 25 이상이며 +DI가 −DI보다 높으면 20점. ADX 20~25면 10점
+- **거래량·OBV 25점:** 상승하며 거래량 20일 평균 1.5배 이상(10), OBV가 20일선·5거래일 전보다 높음(10), 20일 고점 돌파(5)
+- **위험 감점:** RSI 75 초과 −10점, RSI 5거래일 5p 이상 하락 −5점, 볼린저밴드 상단 돌파 −5점, ADX 하락세 강함 −15점
+- **보조지표:** 볼린저밴드(20, 2표준편차)는 과열 참고, ATR14는 손절·목표 참고가격 계산
 - RSI의 상승·하락은 확정된 일봉에 기반한 규칙일 뿐, 반등·추세 전환을 보장하지 않음
 - 장기 시세가 200거래일 미만인 신규 ETF는 점수를 유보
 - 목표가와 손절가는 ATR 기반 모델 참고값이며 미래 가격 예측이 아님
