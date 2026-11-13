@@ -10,6 +10,9 @@ st.set_page_config(page_title="STOCK RADAR 200",page_icon="📈",layout="wide")
 st.markdown("<style>.block-container{padding-top:1.4rem;max-width:1560px}.stMetric{padding:12px;border:1px solid #64748b44;border-radius:12px}</style>",unsafe_allow_html=True)
 st.title("📈 STOCK RADAR 200")
 st.caption("🇰🇷 코스피 시총 100 + TIGER ETF 2개 | 🇰🇷 코스닥 시총 100 | 🇺🇸 Nasdaq-100 기업 100 + SOXL | 종가 기준 분석")
+st.warning("시세 교차검증 주의: 2026-11-13 공개 자료 대조에서 무료 시세 공급처 간 종가 불일치가 확인됐습니다. "
+           "현재는 공식 확정 종가와 자동 교차검증하지 않습니다. 실제 주문 전 증권사 시세와 거래일을 반드시 대조하세요. "
+           "목표가·매매 판단은 검증된 주가 예측이 아닙니다.")
 
 @st.cache_data(ttl=86400,show_spinner=False)
 def universe():return get_universe()
@@ -86,7 +89,7 @@ def to_row(item,with_flow=True,market_rank=None):
       "통합목표 손익비(R)":round(r["target_r"],2) if r["target_r"] is not None else None,
       "목표 판단 근거":r["target_evidence"],
       "매물대 분석":r["volume_profile"],
-      "시세 출처":src}
+      "시세 출처":src,"종가 교차검증":"미실시 — 증권사 확정 종가 대조 필요"}
 
 def fmt(v):return "—" if v is None else f"{v:,.0f}"
 
@@ -145,11 +148,11 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v19_"+mkt+("_flow" if with_flow else "_tech")
+    key="results_v20_"+mkt+("_flow" if with_flow else "_tech")
     if key not in st.session_state:
         st.session_state[key]={"rows":{},"errors":{},"batches":[]}
     state=st.session_state[key]
-    page_key="result_batch_page_v19_"+mkt+("_flow" if with_flow else "_tech")
+    page_key="result_batch_page_v20_"+mkt+("_flow" if with_flow else "_tech")
     left,right=st.columns([3,1])
     remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
     if left.button("▶ 다음 50종목 실제 시세 분석",key="run"+mkt,type="primary",
@@ -386,5 +389,7 @@ with guide_tab:
 - **신규 매수 검증:** 종합점수상 매수 검토 신호여도 (1) 통합 목표까지 상승 여력이 최소 3.0%, (2) 손절 참고가 대비 손익비가 최소 1.5R이어야 **매수 검토**를 유지합니다. 하나라도 부족하거나 목표가·손절가가 없으면 **상승 신호·매수 유보**로 표시합니다. 기존의 과열·하락 경고는 우선 유지합니다. 3%·1.5R은 백테스트 전 잠정 운영 기준입니다.
 - **수급 조회 실패:** 기술점수가 60점 이상이면 **기술매수 후보·수급 미확인**으로 별도 표시하고, 목표·손익비 미달은 **기술상승·매수 유보(수급 미확인)**으로 표기합니다. 이를 외국인·기관 매수가 확인된 실제 **매수 검토**와 혼동하지 마세요. 수급 조회 설정을 바꾸면 이전 분석 결과와 별개로 저장됩니다.
 - **ETF 주의:** SOXL의 3배 레버리지와 TIGER 커버드콜 ETF의 분배금·분배락은 저항 목표 산식에 반영되지 않습니다.
+
+**시세 품질:** 무료 시세 공급처의 OHLCV는 공식 확정 종가와 자동 대조하지 않습니다. 실제로 2026-11-13 일부 코스닥 종목에서 타 공급처 종가와 차이가 관측되었습니다. 시세 출처와 거래일을 반드시 확인하고, 불일치 시 매매 판단에 이용하지 마세요.
 
 **주의사항:** 이 점수는 백테스트로 수익률이 입증되지 않은 규칙 기반 분석입니다. 무료 호스팅과 외부 데이터 공급자의 사정으로 일부 종목 조회가 실패할 수 있으며, 실시간 시세/정시 자동 갱신/자동매매 기능은 없습니다.""")
