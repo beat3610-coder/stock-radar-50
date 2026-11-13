@@ -183,6 +183,19 @@ def run():
             "mean_forward_10d_net_pct":round(total/n,3) if n else None,
             "direction_match_pct":round(100*(pos if group=="BUY" else neg)/n,2) if n and group!="HOLD" else None}
     report["signal_direction_audit"]=direction_summary
+    for market in SAMPLE_ALLOCATION:
+        market_rows=[v for key,v in report["tickers"].items() if key.startswith(market+":")]
+        market_directions={}
+        for group in ("BUY","HOLD","SELL"):
+            dims=[v.get("direction_counts",{}).get(group,{}) for v in market_rows]
+            n=sum(x.get("observations",0) for x in dims)
+            pos=sum(x.get("positive_10d",0) for x in dims)
+            neg=sum(x.get("negative_10d",0) for x in dims)
+            total=sum(x.get("sum_forward_net_pct",0) for x in dims)
+            market_directions[group]={"observations":n,"positive_rate_pct":round(100*pos/n,2) if n else None,
+                 "direction_match_pct":round(100*(pos if group=="BUY" else neg)/n,2) if n and group!="HOLD" else None,
+                 "mean_forward_10d_net_pct":round(total/n,3) if n else None}
+        report["per_market"][market]["signal_direction_audit"]=market_directions
     report["historical_decision_count"]=sum(v.get("historical_decisions",0) for v in report["tickers"].values())
     report["verification_complete"]=(report["analysed_tickers"]==300)
     return report
