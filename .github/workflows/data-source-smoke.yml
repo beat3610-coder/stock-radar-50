@@ -47,6 +47,19 @@ jobs:
           except Exception as exc:
               result["success"]=False
               result["error"]=f"{type(exc).__name__}: {exc}"
+          try:
+              api="https://stock.naver.com/api/domestic/detail/005930/trend"
+              rr=requests.get(api,params={"tradeType":"KRX","startIdx":0,"pageSize":20},
+                  headers={"User-Agent":"Mozilla/5.0","Accept":"application/json","Referer":"https://stock.naver.com/domestic/stock/005930/investmentinfo"},timeout=15)
+              obj=rr.json() if rr.ok else {}
+              def brief(v):
+                  if isinstance(v,dict):return {k:brief(w) for k,w in list(v.items())[:20]}
+                  if isinstance(v,list):return [brief(t) for t in v[:2]]
+                  return v
+              result["new_naver_api"]={"status":rr.status_code,"url":rr.url,"content_type":rr.headers.get("content-type"),
+                                       "body":brief(obj) if obj else rr.text[:350]}
+          except Exception as ex:
+              result["new_naver_api"]={"error":str(ex)[:350]}
           print(json.dumps(result,ensure_ascii=False,indent=2))
           import os
           os.makedirs("data",exist_ok=True)
