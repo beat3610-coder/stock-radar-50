@@ -225,6 +225,32 @@ def integrated_targets(x, market, flow, stop):
         "target_inputs":"수급 포함" if flow_covered else "수급 제외"
     }
 
+def apply_target_risk_gate(signal, price, stop, target, min_upside_pct=3.0, min_rr=1.5):
+    """Guard BUY recommendations with observable target upside and stop-based R/R.
+
+    This is a configurable, unbacktested entry filter, not a return forecast.
+    Never override non-buy risk warnings or recommend buying without inputs.
+    """
+    upside=(100.0*(target/price-1.0)) if (
+        price is not None and price>0 and target is not None and np.isfinite(target)
+    ) else None
+    rr=(target-price)/(price-stop) if (
+        upside is not None and stop is not None and np.isfinite(stop) and 0<stop<price
+    ) else None
+    if signal not in ("강한 매수 검토","매수 검토"):
+        return signal,upside,rr,"기존 기술적 위험 판단 유지"
+    if upside is None or rr is None:
+        return "상승 신호·매수 유보",upside,rr,"목표가 또는 손절가 불확실"
+    reasons=[]
+    if upside<min_upside_pct:
+        reasons.append(f"목표 상승여력 {upside:.2f}% < 기준 {min_upside_pct:.1f}%")
+    if rr<min_rr:
+        reasons.append(f"목표 손익비 {rr:.2f}R < 기준 {min_rr:.1f}R")
+    if reasons:
+        return "상승 신호·매수 유보",upside,rr," · ".join(reasons)
+    return signal,upside,rr,f"목표 상승여력 {upside:.2f}% · 기대손익비 {rr:.2f}R"
+
+
 def evaluate(x, market="US", flow=None):
     """Rules-based daily signal. KR: 80 technical + 20 investor flow.
     US: 100 technical only. Missing KR flow never implies zero purchases.
@@ -351,9 +377,13 @@ def evaluate(x, market="US", flow=None):
     target2_basis=target_eval["target2_basis"]
     target1_r=target_eval["target1_r"]
     target2_r=target_eval["target2_r"]
+    signal,upside_pct,entry_rr,entry_reason=apply_target_risk_gate(
+        signal,p,stop,target_eval["integrated_target"])
     return {"date":str(pd.Timestamp(x.index[-1]).date()),"price":p,
         "change":(p/float(prev.Close)-1)*100,"score":score,"technical_score":technical_score,
-        "technical_max":tech_max,"score_basis":score_basis,"signal":signal,"reason":" · ".join(details),
+        "technical_max":tech_max,"score_basis":score_basis,"signal":signal,
+        "reason":" · ".join(details),"entry_reason":entry_reason,
+        "upside_pct":upside_pct,"entry_rr":entry_rr,
         "scores":scores,"penalty":penalty,"flow_status":flow_status,"flow_date":flow_date,
         "rsi":num(r.RSI),"rsi_delta5":rsi_delta,
         "rsi_direction":("상승" if rsi_delta>=3 else "하락" if rsi_delta<=-3 else "횡보") if rsi_delta is not None else "데이터 부족",
