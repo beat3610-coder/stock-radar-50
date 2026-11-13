@@ -12,11 +12,11 @@ from engine import compute,evaluate
 from providers import get_prices
 from universe import get_universe
 
-# The 100 candidates are selected *before* any trade outcomes are computed.
+# The 300 candidates are selected *before* any trade outcomes are computed.
 SAMPLE_ALLOCATION={"KR":100,"KQ":100,"US":100}
 MAX_WORKERS=4
 
-def pick_100():
+def pick_300():
     universe=get_universe()
     selected=[]
     for market,n in SAMPLE_ALLOCATION.items():
@@ -25,11 +25,10 @@ def pick_100():
                 if code not in ("472150","0262B0","SOXL")]
         if len(stocks)<n:
             raise RuntimeError(f"{market}: 필요 {n}종목, 조회된 종목 {len(stocks)}종목")
-        # Spread ranks evenly across each market's top 100 rather than taking
-        # only the mega-caps. Choice is deterministic and independent of returns.
+        # Use each market's entire current 100-member universe (fixed before scoring).
         positions=np.linspace(0,min(99,len(stocks)-1),num=n,dtype=int)
         selected.extend(stocks[int(i)] for i in positions)
-    assert len(selected)==300 and len({(m,c) for m,c,_ in selected})==100
+    assert len(selected)==300 and len({(m,c) for m,c,_ in selected})==300
     return selected,universe
 
 
@@ -63,10 +62,20 @@ def test_ticker(market, code):
     df,_=get_prices(code,market)
     x=compute(df)
     samples=[]
+    snapshots=[]
     for i in range(260,len(x)-HORIZON,STRIDE):
         data=x.iloc[:i+1]
         r=evaluate(data,market=market,flow=None)
         signal=r["signal"]
+        # Directional audit covers EVERY historical decision, not just actual entries.
+        next_open=float(x.Open.iloc[i+1])
+        close_10d=float(x.Close.iloc[i+HORIZON])
+        return_10d=100*(close_10d/next_open-1)-TRADING_COST_PCT if next_open>0 else float("nan")
+        if np.isfinite(return_10d):
+            category=("BUY" if signal in ("기술매수 후보·수급 미확인","매수 검토","강한 매수 검토")
+                      else "SELL" if signal in ("축소·매도 검토","하락 추세·매수 보류","과열·추격 주의")
+                      else "HOLD")
+            snapshots.append({"group":category,"signal":signal,"forward_10d_net_pct":return_10d})
         if signal not in ("기술매수 후보·수급 미확인","매수 검토","강한 매수 검토"):
             continue
         if r["stop_risk_pct"] is None or r["upside_pct"] is None:
@@ -84,8 +93,16 @@ def test_ticker(market, code):
         samples.append({"as_of":str(x.index[i].date()),"signal":signal,
                         "exit":fill["exit_reason"],"net_return_pct":fill["net_return_pct"],
                         "hold_net_pct":hold})
+    direction={}
+    for group in ("BUY","HOLD","SELL"):
+        vals=[o["forward_10d_net_pct"] for o in snapshots if o["group"]==group]
+        direction[group]={"observations":len(vals),
+                          "positive_10d":int(sum(v>0 for v in vals)),
+                          "negative_10d":int(sum(v<0 for v in vals)),
+                          "sum_forward_net_pct":round(float(sum(vals)),6)}
+    audit={"historical_decisions":len(snapshots),"direction_counts":direction}
     if not samples:
-        return {"trades":0,"reason":"유효한 매수 검토 신호가 없음"}
+        return {"trades":0,"reason":"유효한 매수 검토 신호가 없음",**audit}
     r=np.array([s["net_return_pct"] for s in samples])
     b=np.array([s["hold_net_pct"] for s in samples])
     return {"trades":len(samples),"mean_trade_net_pct":round(float(r.mean()),3),
@@ -96,10 +113,10 @@ def test_ticker(market, code):
             "mean_same_entry_10d_hold_pct":round(float(b.mean()),3),
             "worst_trade_pct":round(float(r.min()),3),
             "stop_or_gap_count":sum(s["exit"] in ("stop","gap_stop") for s in samples),
-            "take_count":sum(s["exit"] in ("take","gap_take") for s in samples)}
+            "take_count":sum(s["exit"] in ("take","gap_take") for s in samples),**audit}
 
 def run():
-    samples,universe=pick_100()
+    samples,universe=pick_300()
     report={"time_utc":datetime.now(timezone.utc).isoformat(),
             "status":"300_ticker_exploratory_diagnostic_not_validated",
             "requested_tickers":300,
@@ -154,6 +171,19 @@ def run():
         "no_lookahead_verified":True,
         "statistical_significance_verified":False,
         "after_tax_verified":False}
+    direction_summary={}
+    for group in ("BUY","HOLD","SELL"):
+        direction=[v.get("direction_counts",{}).get(group,{}) for v in report["tickers"].values()]
+        n=sum(d.get("observations",0) for d in direction)
+        pos=sum(d.get("positive_10d",0) for d in direction)
+        neg=sum(d.get("negative_10d",0) for d in direction)
+        total=sum(d.get("sum_forward_net_pct",0) for d in direction)
+        direction_summary[group]={"observations":n,"positive_10d":pos,
+            "positive_rate_pct":round(100*pos/n,2) if n else None,
+            "mean_forward_10d_net_pct":round(total/n,3) if n else None,
+            "direction_match_pct":round(100*(pos if group=="BUY" else neg)/n,2) if n and group!="HOLD" else None}
+    report["signal_direction_audit"]=direction_summary
+    report["historical_decision_count"]=sum(v.get("historical_decisions",0) for v in report["tickers"].values())
     report["verification_complete"]=(report["analysed_tickers"]==300)
     return report
 
