@@ -66,6 +66,17 @@ jobs:
           assert gate("매수 검토",108,stop=None)[0]=="상승 신호·매수 유보"
           assert gate("과열·추격 주의",108)[0]=="과열·추격 주의"
           assert gate("하락 추세·매수 보류",108)[0]=="하락 추세·매수 보류"
+          assert gate("기술매수 후보·수급 미확인",108)[0]=="기술매수 후보·수급 미확인"
+          assert gate("기술매수 후보·수급 미확인",102)[0]=="기술상승·매수 유보(수급 미확인)"
+          assert gate("관찰·수급 미확인",108)[0]=="관찰·수급 미확인"
+          future_flow={'date':str((ix[-1]+pd.Timedelta(days=3)).date()),
+                       '외국인':{'5일':100,'20일':200},'기관':{'5일':100,'20일':300}}
+          future=evaluate(x,market='KQ',flow=future_flow)
+          assert future['flow_status']!='정상'
+          assert future['target_inputs']=='수급 제외'
+          if b['score'] is not None and b['score']>=60:
+              assert b['technical_signal_before_gate']=="기술매수 후보·수급 미확인" or "추격" in b['signal'] or "보류" in b['signal'] or "매도" in b['signal']
+
           for obj in (a,b,u):
               if obj['signal'] in ("매수 검토","강한 매수 검토"):
                   assert obj['upside_pct']>=3.0 and obj['entry_rr']>=1.5
