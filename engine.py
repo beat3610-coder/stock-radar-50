@@ -182,7 +182,7 @@ def integrated_targets(x, market, flow, stop):
     else:
         points+=10;evidence.append("단기 집중 매물대 저항 제한적")
     flow_covered=False
-    if market=="KR":
+    if market in ("KR","KQ"):
         if isinstance(flow,dict):
             try:
                 f=flow["외국인"];ins=flow["기관"]
@@ -205,7 +205,7 @@ def integrated_targets(x, market, flow, stop):
     selected=second if second is not None and strength>=75 and breakout and not near_overhead else first
     grade=("상승 여건 강함" if strength>=75 else
            "상승 여건 보통" if strength>=50 else "상승 여건 약함")
-    if market=="KR" and not flow_covered:grade+=" · 수급 제외"
+    if market in ("KR","KQ") and not flow_covered:grade+=" · 수급 제외"
     def rr(level):
         return (level-p)/(p-stop) if level is not None and stop is not None and p>stop else None
     return {
@@ -264,7 +264,7 @@ def evaluate(x, market="US", flow=None):
     rsi_delta=float(r.RSI-rsi_prev) if ok("RSI") and finite(rsi_prev) else None
     volume_available=bool(ok("VOL20") and r.VOL20>0 and ok("Volume") and r.Volume>0)
     volratio=float(r.Volume/r.VOL20) if volume_available else None
-    domestic=market=="KR"
+    domestic=market in ("KR","KQ")
     scores={"추세":0,"모멘텀":0,"추세 강도":0,"거래량·OBV":0}
     if domestic:scores["외국인·기관"]=None
     details=[]
