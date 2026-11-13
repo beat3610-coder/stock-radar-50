@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "STOCK RADAR 50 | 주식분석",
-  "short_name": "RADAR 50",
-  "description": "국내 39종목·미국 11종목 주식 분석 앱",
+  "name": "STOCK RADAR 200 | 주식분석",
+  "short_name": "RADAR 200",
+  "description": "코스피 100종목 + 나스닥100종목 + 필수 ETF 3종 주식 분석 앱",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
