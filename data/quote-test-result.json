@@ -1,0 +1,10 @@
+{
+  "success": true,
+  "statuses": {
+    "equal": "agree",
+    "mismatch": "mismatch",
+    "date_mismatch": "unverified",
+    "same_source": "unverified",
+    "invalid_data": "unverified"
+  }
+}
