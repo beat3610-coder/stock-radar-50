@@ -151,26 +151,78 @@ def kosdaq_top100():
             # Do not infer share class from ticker last digit: ordinary KOSDAQ tickers may end in 1/5/7/9.
             df=df.sort_values(cap,ascending=False).drop_duplicates(code)
             sector_col=column(("sector","industry","업종","업종명"))
+            def normal_code(value):
+                return str(value).strip().split(".")[0].zfill(6)
+            valid_codes={normal_code(v) for v in df.head(100)[code]}
             sectors={}
-            # KRX sector classifications first, with FDR sector labels as fallback.
-            try:
-                from pykrx import stock as krx
-                for back in (0,1,3,5,8):
-                    day=(dt.date.today()-dt.timedelta(days=back)).strftime("%Y%m%d")
+            sources=[]
+            def add_sectors(frame,code_name,sector_name):
+                added=0
+                for ticker_value,sector_value in zip(frame[code_name],frame[sector_name]):
+                    ticker_value=normal_code(ticker_value)
+                    if (ticker_value in valid_codes and pd.notna(sector_value)
+                        and str(sector_value).strip().lower() not in ("","nan","none","-","0")
+                        and ticker_value not in sectors):
+                        sectors[ticker_value]=str(sector_value).strip()
+                        added+=1
+                return added
+            if sector_col:
+                if add_sectors(df.head(100),code,sector_col):
+                    sources.append("FDR 업종")
+            # KIND provides a public corporate-sector table even when KRX/pykrx
+            # JSON sector endpoints reject requests. Try this before pykrx.
+            if len(sectors)<100:
+                try:
+                    import requests
+                    from io import StringIO
+                    resp=requests.get("https://kind.krx.co.kr/corpgeneral/corpList.do",
+                                      params={"method":"download","searchType":"13"},
+                                      headers={"User-Agent":"Mozilla/5.0"},timeout=12)
+                    resp.raise_for_status()
+                    resp.encoding=resp.apparent_encoding
+                    for meta in pd.read_html(StringIO(resp.text)):
+                        meta.columns=[str(v).strip() for v in meta.columns]
+                        kind_code=next((v for v in meta if v in ("종목코드","종목 코드","단축코드")),None)
+                        kind_sector=next((v for v in meta if v in ("업종","업종명")),None)
+                        if kind_code and kind_sector:
+                            if add_sectors(meta,kind_code,kind_sector):
+                                sources.append("KIND 업종목록")
+                            break
+                except Exception:
+                    pass
+            if len(sectors)<100:
+                for market_desc in ("KOSDAQ-DESC","KRX-DESC"):
+                    try:
+                        meta=fdr.StockListing(market_desc)
+                        meta.columns=[str(v).strip() for v in meta.columns]
+                        desc_code=next((v for v in meta if v.lower().replace("_","") in
+                                        ("code","symbol","ticker","종목코드","단축코드")),None)
+                        desc_sector=next((v for v in meta if v.lower().replace("_","") in
+                                          ("sector","industry","업종","업종명","sectorname","industryname")),None)
+                        if desc_code and desc_sector and add_sectors(meta,desc_code,desc_sector):
+                            sources.append(market_desc)
+                        if len(sectors)>=100:break
+                    except Exception:
+                        continue
+            # Last resort: a single latest-session KRX sector attempt. Repeated
+            # blocked JSON requests previously caused noisy errors and long waits.
+            if len(sectors)<100:
+                try:
+                    from pykrx import stock as krx
+                    day=(dt.date.today()-dt.timedelta(days=1)).strftime("%Y%m%d")
                     meta=krx.get_market_sector_classifications(day,"KOSDAQ")
                     if meta is not None and not meta.empty and "업종명" in meta:
-                        sectors={str(k).zfill(6):str(v) for k,v in meta["업종명"].items() if pd.notna(v)}
-                        if sectors:break
-            except Exception:
-                pass
-            rows=[]
-            for _,r in df.head(100).iterrows():
-                symbol=str(r[code])
-                sector=sectors.get(symbol,str(r[sector_col]) if sector_col else "")
-                if sector.strip().lower() in ("","nan","none","-"):sector="업종 확인 불가"
-                rows.append((symbol,str(r[name]),sector))
+                        meta=meta.reset_index()
+                        if add_sectors(meta,meta.columns[0],"업종명"):
+                            sources.append(f"KRX {day}")
+                except Exception:
+                    pass
+            rows=[(str(r[code]),str(r[name]),sectors.get(str(r[code]),"업종 확인 불가"))
+                  for _,r in df.head(100).iterrows()]
             if len(rows)!=100:raise ValueError(f"종목 수 부족: {len(rows)}")
-            return rows,f"FinanceDataReader {market} 코스닥 시총순 / {dt.date.today().isoformat()} (업종 KRX/FDR)"
+            covered=sum(s!="업종 확인 불가" for _,_,s in rows)
+            return rows,(f"FinanceDataReader {market} 코스닥 시총순 / {dt.date.today().isoformat()}"
+                         f" / 업종 {covered}/100 확인 ({', '.join(sources) if sources else '조회 불가'})")
         except Exception as exc:
             errors.append(f"{market}: {str(exc)[:140]}")
     raise RuntimeError("코스닥 상위 100개 조회 실패: "+" | ".join(errors))
