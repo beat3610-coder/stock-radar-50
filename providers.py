@@ -16,7 +16,9 @@ def get_prices(code, market):
         import yfinance as yf
         suffix=".KQ" if market=="KQ" else ".KS"
         ticker=code if market=="US" else code+suffix
-        data=yf.download(ticker,period="2y",interval="1d",auto_adjust=True,progress=False,threads=False,timeout=12)
+        # Keep raw close series (not dividend-adjusted total-return proxy), consistent with
+        # the displayed exchange price; critical for distribution-paying ETFs.
+        data=yf.download(ticker,period="2y",interval="1d",auto_adjust=False,progress=False,threads=False,timeout=12)
         return normalize(data),f"Yahoo {ticker}"
     except Exception as e:
         failures.append(f"Yahoo: {str(e)[:110]}")
@@ -155,8 +157,8 @@ def get_flows(code,end_date):
     for provider in (_get_public_aggregated_flows,lambda symbol:_get_krx_flows(symbol,end_date)):
         try:
             result=provider(code)
-            gap=abs((pd.Timestamp(end_date)-pd.Timestamp(result["date"])).days)
-            if gap>7:
+            gap=(pd.Timestamp(end_date)-pd.Timestamp(result["date"])).days
+            if gap<0 or gap>7:
                 raise ValueError(f"가격일 {end_date} 대비 수급 기준일 {result['date']} ({gap}일 차이)")
             return result
         except Exception as exc:
