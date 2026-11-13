@@ -9,7 +9,7 @@ from providers import get_prices,get_flows
 st.set_page_config(page_title="STOCK RADAR 200",page_icon="📈",layout="wide")
 st.markdown("<style>.block-container{padding-top:1.4rem;max-width:1560px}.stMetric{padding:12px;border:1px solid #64748b44;border-radius:12px}</style>",unsafe_allow_html=True)
 st.title("📈 STOCK RADAR 200")
-st.caption("🇰🇷 코스피 시총 상위 100 + TIGER ETF 2개 | 🇺🇸 Nasdaq-100 기업 100 + SOXL | 지표별 종가 기준 분석")
+st.caption("🇰🇷 코스피 시총 100 + TIGER ETF 2개 | 🇰🇷 코스닥 시총 100 | 🇺🇸 Nasdaq-100 기업 100 + SOXL | 종가 기준 분석")
 
 @st.cache_data(ttl=86400,show_spinner=False)
 def universe():return get_universe()
@@ -32,7 +32,7 @@ def analyze_item(item,with_flow=True):
     data,src=priced(code,market)
     flow_data=None
     flow_error=None
-    if market=="KR" and with_flow:
+    if market in ("KR","KQ") and with_flow:
         try:
             flow_data=flows(code,str(data.index[-1].date()))
         except Exception as exc:
@@ -47,9 +47,9 @@ def to_row(item,with_flow=True,market_rank=None):
     foreign=f.get("외국인",{})
     institution=f.get("기관",{})
     return {
-      "구분":(f"코스피 {market_rank}위" if market_rank is not None else "국내 ETF") if market=="KR" else (f"나스닥 {market_rank}위" if market_rank is not None else "미국 ETF"),
+      "구분":(f"코스피 {market_rank}위" if market_rank is not None else "국내 ETF") if market=="KR" else (f"코스닥 {market_rank}위" if market_rank is not None else "코스닥") if market=="KQ" else (f"나스닥 {market_rank}위" if market_rank is not None else "미국 ETF"),
       "종목":name,"코드":code,"업종":sector,
-      "거래일":r["date"],"통화":"KRW" if market=="KR" else "USD",
+      "거래일":r["date"],"통화":"KRW" if market in ("KR","KQ") else "USD",
       "종가":round(r["price"],2),"전일대비 %":round(r["change"],2),
       "점수":r["score"],"점수 기준":r["score_basis"],"기술점수":r["technical_score"],"기술만점":r["technical_max"],
       "매매 판단":r["signal"],
@@ -91,9 +91,9 @@ def fmt(v):return "—" if v is None else f"{v:,.0f}"
 
 with st.sidebar:
     st.header("조회 설정")
-    st.info("코스피 100종목과 나스닥 100기업을 별도로 분석합니다. 필수 ETF 3개는 항상 추가됩니다.")
-    market=st.radio("분석 시장",["🇰🇷 코스피 100 + TIGER 2개","🇺🇸 나스닥100 + SOXL"])
-    active="KR" if "코스피" in market else "US"
+    st.info("코스피 100 + 코스닥 100 + 나스닥100을 시장별로 분석합니다. 필수 ETF 3개는 기존 시장에 추가됩니다.")
+    market=st.radio("분석 시장",["🇰🇷 코스피 100 + TIGER 2개","🇰🇷 코스닥 100","🇺🇸 나스닥100 + SOXL"])
+    active="KR" if "코스피" in market else "KQ" if "코스닥" in market else "US"
     if st.button("🔄 종목·시세 갱신",use_container_width=True):
         st.cache_data.clear()
         for k in list(st.session_state):
@@ -107,25 +107,30 @@ with st.sidebar:
 
 entries=listing[active]
 st.caption("국내 구성 출처: "+listing["KR_source"])
+st.caption("코스닥 구성 출처: "+listing["KQ_source"])
 st.caption("미국 구성 출처: "+listing["US_source"])
 if listing["KR_error"]:
     st.warning("코스피 시총 상위 100종목 목록을 조회하지 못했습니다. 필수 ETF 2개만 표시합니다. 임의 종목을 100개로 채우지 않습니다. 오류: "+listing["KR_error"][:230])
 
-summaryA,summaryB,summaryC=st.columns(3)
-summaryA.metric("코스피 상위 기업 수",listing["KR_index_count"])
-summaryB.metric("나스닥100 기업 수",listing["US_index_count"])
-summaryC.metric("필수 별도 상품",3)
+if listing["KQ_error"]:
+    st.warning("코스닥 시총 상위 100종목 목록을 조회하지 못했습니다. 임의의 종목으로 채우지 않습니다. 오류: "+listing["KQ_error"][:230])
 
-kr_tab,us_tab,detail_tab,flow_tab,guide_tab=st.tabs(["🇰🇷 코스피 100","🇺🇸 나스닥 100","📊 상세 차트","🏦 국내 수급","ℹ️ 분석 기준"])
+summaryA,summaryB,summaryC,summaryD=st.columns(4)
+summaryA.metric("코스피 상위 기업 수",listing["KR_index_count"])
+summaryB.metric("코스닥 상위 기업 수",listing["KQ_index_count"])
+summaryC.metric("나스닥100 기업 수",listing["US_index_count"])
+summaryD.metric("필수 별도 상품",3)
+
+kr_tab,kq_tab,us_tab,detail_tab,flow_tab,guide_tab=st.tabs(["🇰🇷 코스피 100","🇰🇷 코스닥 100","🇺🇸 나스닥 100","📊 상세 차트","🏦 국내 수급","ℹ️ 분석 기준"])
 
 def ranking_page(mkt):
     items=listing[mkt]
     if not items:
         st.error("현재 종목 목록을 조회할 수 없습니다.")
         return
-    st.subheader(("코스피 시총 100 + TIGER ETF 2종" if mkt=="KR" else "Nasdaq-100 기업 100 + SOXL"))
-    st.caption("국내 TIGER 2종 / 미국 SOXL 상단 고정, 이후 시가총액 내림차순. 분석 점수는 순위 정렬에 사용하지 않습니다. 50종목씩 조회합니다.")
-    mandatories={"472150","0262B0"} if mkt=="KR" else {"SOXL"}
+    st.subheader("코스피 시총 100 + TIGER ETF 2종" if mkt=="KR" else "코스닥 시총 상위 100" if mkt=="KQ" else "Nasdaq-100 기업 100 + SOXL")
+    st.caption("코스피 TIGER 2종 / 미국 SOXL 고정, 코스닥 100은 시총순. 나머지도 시장별 시총순 조회(나스닥 데이터 실패 시 예외). 50종목씩 분석합니다.")
+    mandatories={"472150","0262B0"} if mkt=="KR" else {"SOXL"} if mkt=="US" else set()
     # The universe is pre-ranked by exchange market cap. Keep this stable order.
     ordered=[t for t in items if t[0] in mandatories]+[t for t in items if t[0] not in mandatories]
     order_index={code:i for i,(code,_,_,_) in enumerate(ordered)}
@@ -134,16 +139,16 @@ def ranking_page(mkt):
     if mkt=="US" and not listing.get("US_cap_sorted",False):
         st.warning("나스닥 시가총액 자료 조회가 실패하여 현재 표시 순서는 정확한 시총순이 아닙니다. 시총 확인 시에만 시총순으로 표시합니다.")
     st.caption(f"현재 목록 {len(ordered)}개: "+", ".join(t[1] for t in ordered if t[0] in mandatories))
-    if mkt=="KR":
-        st.caption("구분의 코스피 N위는 조회일 기준 일반주 시가총액 순위입니다. ETF는 순위에서 제외합니다.")
+    if mkt in ("KR","KQ"):
+        st.caption("구분의 코스피/코스닥 N위는 해당 시장 일반주 시총 순위입니다. ETF는 순위에서 제외합니다.")
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v16_"+mkt
+    key="results_v17_"+mkt
     if key not in st.session_state:
         st.session_state[key]={"rows":{},"errors":{},"batches":[]}
     state=st.session_state[key]
-    page_key="result_batch_page_v16_"+mkt
+    page_key="result_batch_page_v17_"+mkt
     left,right=st.columns([3,1])
     remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
     if left.button("▶ 다음 50종목 실제 시세 분석",key="run"+mkt,type="primary",
@@ -231,9 +236,10 @@ def ranking_page(mkt):
         listing_page=st.selectbox("종목 목록 페이지",list(range(1,listing_pages+1)),key="listing_page_"+mkt,
                                    format_func=lambda p:f"{p}페이지 / {listing_pages}페이지")
         page_items=ordered[(listing_page-1)*50:listing_page*50]
-        st.dataframe(pd.DataFrame([{"구분":(f"코스피 {market_rank[c]}위" if mkt=="KR" else f"나스닥 {market_rank[c]}위") if c in market_rank else ("국내 ETF" if mkt=="KR" else "미국 ETF"),"코드":c,"종목":n,"업종":s} for c,n,_,s in page_items]),use_container_width=True,hide_index=True,height=360)
+        st.dataframe(pd.DataFrame([{"구분":(f"코스피 {market_rank[c]}위" if mkt=="KR" else f"코스닥 {market_rank[c]}위" if mkt=="KQ" else f"나스닥 {market_rank[c]}위") if c in market_rank else ("국내 ETF" if mkt=="KR" else "미국 ETF"),"코드":c,"종목":n,"업종":s} for c,n,_,s in page_items]),use_container_width=True,hide_index=True,height=360)
 
 with kr_tab:ranking_page("KR")
+with kq_tab:ranking_page("KQ")
 with us_tab:ranking_page("US")
 
 with detail_tab:
@@ -248,7 +254,7 @@ with detail_tab:
         if st.session_state.get("detail_ticker")==selected:
             try:
                 data,src,r,flow_data,flow_error=analyze_item((code,name,mkt,""),with_flow=with_flow)
-                st.caption(f'가격 기준일: {r["date"]} | 공급처: {src} | 통화: {"KRW" if mkt=="KR" else "USD"}')
+                st.caption(f'가격 기준일: {r["date"]} | 공급처: {src} | 통화: {"KRW" if mkt in ("KR","KQ") else "USD"}')
                 a,b,c,d,e=st.columns(5)
                 a.metric("종가",fmt(r["price"]),f'{r["change"]:+.2f}%')
                 b.metric("분석 점수",r["score"] if r["score"] is not None else "시세 부족")
@@ -267,10 +273,10 @@ with detail_tab:
                                (f' | 손절가 대비 기대손익비: {r["entry_rr"]:.2f}R' if r["entry_rr"] is not None else ""))
                 if r["score"] is None:
                     st.warning("200일 시세·거래량 등 기술분석 기초 자료가 부족하여 점수 계산을 유보합니다.")
-                elif mkt=="KR" and r["flow_status"]!="정상":
+                elif mkt in ("KR","KQ") and r["flow_status"]!="정상":
                     st.info("수급 조회 실패: 이 점수는 외국인·기관 점수를 제외한 기술분석 환산점수입니다. 종합점수와 직접 비교하지 마세요.")
                 st.caption(f'기술점수: {r["technical_score"] if r["technical_score"] is not None else "—"}/{r["technical_max"]}점 | 국내 수급 상태: {r["flow_status"]}')
-                if mkt=="KR":
+                if mkt in ("KR","KQ"):
                     if flow_data:
                         fstats=flow_data["외국인"]; istats=flow_data["기관"]
                         st.dataframe(pd.DataFrame([
@@ -324,13 +330,13 @@ with detail_tab:
 
 with flow_tab:
     st.subheader("국내 기관·외국인 순매수")
-    kr_entries=listing["KR"]
+    kr_entries=listing["KR"]+listing["KQ"]
     if kr_entries:
         sel=st.selectbox("국내 종목",range(len(kr_entries)),format_func=lambda i:f"{kr_entries[i][1]} ({kr_entries[i][0]})")
         code=kr_entries[sel][0]
         if st.button("🏦 순매수 조회",key="flows"):
             try:
-                data,src=priced(code,"KR")
+                data,src=priced(code,"KQ" if any(t[0]==code for t in listing["KQ"]) else "KR")
                 result=flows(code,str(data.index[-1].date()))
                 st.caption("KRX 수급 기준일 "+result["date"])
                 flow_df=pd.DataFrame([{"구분":investor,**stats} for investor,stats in result.items() if investor in ("기관","외국인")])
@@ -342,6 +348,7 @@ with flow_tab:
 with guide_tab:
     st.markdown("""**종목 선정**
 - 코스피: FinanceDataReader의 코스피 시가총액 상위 100 일반 종목을 조회합니다. *공식 코스피100 지수 편입종목과 동일하다고 주장하지 않습니다.*
+- 코스닥: FinanceDataReader의 코스닥 시가총액 상위 100 일반 종목을 별도로 조회합니다. ETF·스팩·우선주를 제외하며 종목수 부족·시총 조회 실패 시 임의 목록으로 대체하지 않습니다.
 - 나스닥: Nasdaq-100 지수에 편입된 약 100개 기업을 기준으로, 알파벳 복수 주식 종류는 GOOGL만 표시합니다. 공개 구성 목록 조회 실패 시 2026-11-13에 저장한 100종목 목록을 사용하고 출처를 명시합니다.
 - 예외 상품: TIGER 배당커버드콜액티브(472150), TIGER 200커버드콜액티브(0262B0), SOXL을 항상 따로 포함합니다.
 
