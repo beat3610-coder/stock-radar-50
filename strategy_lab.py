@@ -102,9 +102,9 @@ def candidates_from_frame(frame,ticker,market):
     return x,result
 
 def _interval(trades,part):
-    if part=="train":return [t for t in trades if t["entry_date"]<TRAIN_END]
-    if part=="validate":return [t for t in trades if TRAIN_END<=t["entry_date"]<VALID_END]
-    return [t for t in trades if VALID_END<=t["entry_date"]<HOLDOUT_END]
+    if part=="train":return [t for t in trades if t["entry_date"]<TRAIN_END and t["exit_date"]<TRAIN_END]
+    if part=="validate":return [t for t in trades if TRAIN_END<=t["entry_date"]<VALID_END and t["exit_date"]<VALID_END]
+    return [t for t in trades if VALID_END<=t["entry_date"]<HOLDOUT_END and t["exit_date"]<HOLDOUT_END]
 
 def train_choice(choices):
     """Development only. Don't reward single lucky huge wins."""
