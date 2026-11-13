@@ -118,7 +118,8 @@ def test_ticker(market, code):
         return_10d=100*(close_10d/next_open-1)-TRADING_COST_PCT if next_open>0 else float("nan")
         if np.isfinite(return_10d):
             category=("BUY" if signal in ("기술매수 후보·수급 미확인","매수 검토","강한 매수 검토")
-                      else "SELL" if signal in ("축소·매도 검토","하락 추세·매수 보류","과열·추격 주의")
+                      else "SELL" if signal=="축소·매도 검토"
+                      else "AVOID" if signal in ("하락 추세·매수 보류","과열·추격 주의")
                       else "HOLD")
             snapshots.append({"group":category,"signal":signal,"forward_10d_net_pct":return_10d})
         if signal not in ("기술매수 후보·수급 미확인","매수 검토","강한 매수 검토"):
@@ -141,7 +142,7 @@ def test_ticker(market, code):
                         "exit":fill["exit_reason"],"net_return_pct":fill["net_return_pct"],
                         "hold_net_pct":hold,"variants":scenarios})
     direction={}
-    for group in ("BUY","HOLD","SELL"):
+    for group in ("BUY","HOLD","SELL","AVOID"):
         vals=[o["forward_10d_net_pct"] for o in snapshots if o["group"]==group]
         direction[group]={"observations":len(vals),
                           "positive_10d":int(sum(v>0 for v in vals)),
@@ -220,7 +221,7 @@ def run():
         "statistical_significance_verified":False,
         "after_tax_verified":False}
     direction_summary={}
-    for group in ("BUY","HOLD","SELL"):
+    for group in ("BUY","HOLD","SELL","AVOID"):
         direction=[v.get("direction_counts",{}).get(group,{}) for v in report["tickers"].values()]
         n=sum(d.get("observations",0) for d in direction)
         pos=sum(d.get("positive_10d",0) for d in direction)
@@ -229,19 +230,19 @@ def run():
         direction_summary[group]={"observations":n,"positive_10d":pos,
             "positive_rate_pct":round(100*pos/n,2) if n else None,
             "mean_forward_10d_net_pct":round(total/n,3) if n else None,
-            "direction_match_pct":round(100*(pos if group=="BUY" else neg)/n,2) if n and group!="HOLD" else None}
+            "direction_match_pct":round(100*(pos if group=="BUY" else neg)/n,2) if n and group in ("BUY","SELL") else None}
     report["signal_direction_audit"]=direction_summary
     for market in SAMPLE_ALLOCATION:
         market_rows=[v for key,v in report["tickers"].items() if key.startswith(market+":")]
         market_directions={}
-        for group in ("BUY","HOLD","SELL"):
+        for group in ("BUY","HOLD","SELL","AVOID"):
             dims=[v.get("direction_counts",{}).get(group,{}) for v in market_rows]
             n=sum(x.get("observations",0) for x in dims)
             pos=sum(x.get("positive_10d",0) for x in dims)
             neg=sum(x.get("negative_10d",0) for x in dims)
             total=sum(x.get("sum_forward_net_pct",0) for x in dims)
             market_directions[group]={"observations":n,"positive_rate_pct":round(100*pos/n,2) if n else None,
-                 "direction_match_pct":round(100*(pos if group=="BUY" else neg)/n,2) if n and group!="HOLD" else None,
+                 "direction_match_pct":round(100*(pos if group=="BUY" else neg)/n,2) if n and group in ("BUY","SELL") else None,
                  "mean_forward_10d_net_pct":round(total/n,3) if n else None}
         report["per_market"][market]["signal_direction_audit"]=market_directions
     report["historical_decision_count"]=sum(v.get("historical_decisions",0) for v in report["tickers"].values())
