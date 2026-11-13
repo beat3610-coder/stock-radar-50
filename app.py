@@ -52,9 +52,7 @@ def to_row(item,with_flow=True,market_rank=None):
       "거래일":r["date"],"통화":"KRW" if market=="KR" else "USD",
       "종가":round(r["price"],2),"전일대비 %":round(r["change"],2),
       "점수":r["score"],"점수 기준":r["score_basis"],"기술점수":r["technical_score"],"기술만점":r["technical_max"],
-      "매매 판단":r["signal"],"수급 상태":r["flow_status"] if market=="KR" else "미국은 수급 점수 미적용",
-      "수급 조회 오류":flow_error if market=="KR" else None,
-      "수급 출처":flow_data.get("source") if flow_data else None,
+      "매매 판단":r["signal"],
       "외국인 5일 순매수(주)":foreign.get("5일"),"외국인 20일 순매수(주)":foreign.get("20일"),
       "기관 5일 순매수(주)":institution.get("5일"),"기관 20일 순매수(주)":institution.get("20일"),
       "RSI":round(r["rsi"],1) if r["rsi"] is not None else None,
@@ -124,7 +122,7 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v4_"+mkt
+    key="results_v5_"+mkt
     if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
     state=st.session_state[key]
     left,right=st.columns([3,1])
