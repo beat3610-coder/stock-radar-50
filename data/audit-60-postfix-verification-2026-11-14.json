@@ -1,0 +1,58 @@
+{
+  "run_utc": "2026-11-13T21:15:50Z",
+  "method": "paired fixed-calendar diagnostic using current engine signal_before_risk as baseline; screen marks research candidate (including caution)",
+  "cutoff": "2026-04-01",
+  "last_signal": "2026-11-01",
+  "scan_step_sessions": 5,
+  "assumed_roundtrip_cost_pct": 0.35,
+  "market_results": {
+    "KR": {
+      "requested": 20,
+      "loaded": 20,
+      "baseline_trades_total": 78,
+      "postfix_trades_total": 78,
+      "holdout_trades": 12,
+      "holdout_win_pct": 75,
+      "holdout_mean_net_pct": 6.092,
+      "holdout_profit_factor": 3.53
+    },
+    "KQ": {
+      "requested": 20,
+      "loaded": 20,
+      "baseline_trades_total": 26,
+      "postfix_trades_total": 26,
+      "holdout_trades": 4,
+      "holdout_win_pct": 50,
+      "holdout_mean_net_pct": -4.304,
+      "holdout_profit_factor": 0.244
+    },
+    "US": {
+      "requested": 20,
+      "loaded": 19,
+      "baseline_trades_total": 34,
+      "postfix_trades_total": 34,
+      "holdout_trades": 13,
+      "holdout_win_pct": 53.85,
+      "holdout_mean_net_pct": 2.036,
+      "holdout_profit_factor": 1.973
+    }
+  },
+  "errors": [
+    {
+      "market": "US",
+      "symbol": "ADSK",
+      "reason": "OHLC consistency checks failed for current primary and secondary price feeds (Stooq unsupported)"
+    }
+  ],
+  "outcome": "NO MEASURABLE SIGNAL PERFORMANCE IMPROVEMENT - baseline and revised research warning classifier simulate same trades; only research labeling corrected",
+  "caveats": [
+    "Same historical data was previously used for code revisions, so holdout is not untouched independent test",
+    "Present-day constituent selection has survivorship bias",
+    "Trade-sequence MDD is not portfolio MDD",
+    "Small 29-trade holdout sample",
+    "No real fills, broker fees or slippage measurements",
+    "US had 1/20 unavailable tickers",
+    "Baseline is reconstructed signal_before_risk from current engine and not literal replay of earlier engine version"
+  ],
+  "release_status": "NOT APPROVED FOR LIVE TRADING"
+}
