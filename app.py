@@ -44,6 +44,30 @@ if readiness_path.exists():
     except Exception as ex:
         st.warning("검증표 파일 읽기 오류: "+str(ex)[:120])
 
+
+strategy_report=Path("data/strategy-lab-latest.json")
+if strategy_report.exists():
+    try:
+        lab=json.loads(strategy_report.read_text(encoding="utf-8"))
+        with st.expander("📊 시장별 매매전략 비교 · 100종목 역사적 평가"):
+            st.caption("고점 돌파·눌림목 반등·MACD 재상승 전략을 과거 자료에서 개발·검증·평가로 나누어 비교합니다. 이미 검토한 과거 기간이므로 실전 독립 검증은 아닙니다.")
+            table=[]
+            names={"KR":"코스피","KQ":"코스닥","US":"나스닥"}
+            for key,name in names.items():
+                data_m=lab.get("markets",{}).get(key,{})
+                tested=data_m.get("holdout_selected_metrics") or {}
+                port=data_m.get("portfolio") or {}
+                table.append({"시장":name,"시세 확인":f'{data_m.get("loaded","—")}/{data_m.get("requested","—")}',
+                    "학습 선택":data_m.get("training_selected") or "없음",
+                    "검증 통과":("예" if data_m.get("validation_accepted") else "아니오"),
+                    "평가 거래수":tested.get("trades"),"평가 승률 %":tested.get("win_rate_pct"),
+                    "거래당 순손익 %":tested.get("mean_net_pct"),
+                    "가상 계좌 수익 %":port.get("total_return_pct")})
+            st.dataframe(pd.DataFrame(table),hide_index=True,use_container_width=True)
+            st.warning("과거 전략 비교는 실전 수익 증빙이 아닙니다. 모든 시장의 실전 매수 승인은 차단되어 있습니다.")
+    except Exception as exc:
+        st.warning("전략 비교 보고서 조회 오류: "+str(exc)[:120])
+
 if access_mode()!="private":
     st.caption("공개 베타 · 비상업용 평가 버전 | 공식 시세 라이선스·결제·회원 운영 미연결")
 else:
