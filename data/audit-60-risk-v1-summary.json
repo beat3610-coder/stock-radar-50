@@ -1,0 +1,66 @@
+{
+  "version": "risk-screen-v1",
+  "run_date_utc": "2026-11-13",
+  "source": "Render AUDIT60_RESULT 2026-11-13T14:26:26.620Z",
+  "status": "FAIL_OR_INSUFFICIENT",
+  "requested": {
+    "KR": 20,
+    "KQ": 20,
+    "US": 20
+  },
+  "loaded": {
+    "KR": 20,
+    "KQ": 20,
+    "US": 20
+  },
+  "trades_total": 10,
+  "markets": {
+    "KR": {
+      "split": "2025-12-26",
+      "train": {
+        "trades": 7,
+        "win_rate_pct": 57.14,
+        "mean_net_pct": 3.732,
+        "profit_factor": 2.966,
+        "trade_sequence_drawdown_pct": 9.83
+      },
+      "holdout": {
+        "trades": 3,
+        "win_rate_pct": 33.33,
+        "mean_net_pct": -1.175,
+        "profit_factor": 0.744,
+        "trade_sequence_drawdown_pct": 13.3
+      },
+      "status": "FAIL_OR_INSUFFICIENT"
+    },
+    "KQ": {
+      "split": null,
+      "train": {
+        "trades": 0
+      },
+      "holdout": {
+        "trades": 0
+      },
+      "status": "FAIL_OR_INSUFFICIENT"
+    },
+    "US": {
+      "split": null,
+      "train": {
+        "trades": 0
+      },
+      "holdout": {
+        "trades": 0
+      },
+      "status": "FAIL_OR_INSUFFICIENT"
+    }
+  },
+  "limitations": [
+    "Current 20 constituent stocks per market introduce survivorship bias",
+    "Holdout trade sample sizes too small",
+    "Thresholds are subjective uncalibrated risk constraints",
+    "Trade-sequence drawdown is not synchronized portfolio MDD",
+    "Changing signal rules changes trade splits; prior and current holdout are not identical",
+    "Costs assumed 0.35% round trip, not true broker fill costs"
+  ],
+  "conclusion": "Controls lowered entry frequency but have not established profitable signal accuracy. Do not use for automated real-money execution."
+}
