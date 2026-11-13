@@ -118,7 +118,8 @@ def run(per_market=100):
                              "selection":"every 10th trading session, no overlapping positions"},
               "universe_sources":{k:universe.get(k+"_source") for k in ("KR","KQ","US")},
               "markets":{}, "errors":[], "trades":[],
-              "portfolios":{}, "historical_data_previously_inspected":True,
+              "portfolios":{}, "stress_portfolios":{},
+              "historical_data_previously_inspected":True,
               "survivorship_bias":True}
     for market in ("KR","KQ","US"):
         # Remove mandatory ETFs; audit exactly 100 ordinary companies per market.
@@ -156,13 +157,18 @@ def run(per_market=100):
         portfolio["currency"]="KRW" if market in ("KR","KQ") else "USD"
         # Detail lives in the audit JSON. Summary never substitutes for broker fills.
         result["portfolios"][market]=portfolio
+        stress=replay(test,frames,start=cut,
+                      initial_cash=10_000_000.0 if market in ("KR","KQ") else 100_000.0,
+                      cost=0.007)
+        stress["currency"]=portfolio["currency"]
+        result["stress_portfolios"][market]=stress
     result["status"] = ("PASS_WITH_LIMITATIONS"
                         if all(result["markets"][m]["status"]=="PASS"
                                for m in ("KR","KQ","US"))
                         else "FAIL_OR_INSUFFICIENT")
     portfolio_checks=[result["portfolios"][m] for m in ("KR","KQ","US")]
     result["certification"]=assess(result,portfolio={
-        "valid":all(p.get("valid") for p in portfolio_checks),
+        "valid":all(p.get("valid") and p.get("trades_executed",0)>0 for p in portfolio_checks),
         "max_drawdown_pct":max((p.get("max_drawdown_pct") or 0) for p in portfolio_checks),
         "benchmark_verified":False},paper=None)
     return result
