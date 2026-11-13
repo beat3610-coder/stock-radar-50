@@ -1,0 +1,27 @@
+name: Market selector regression smoke
+on:
+  push:
+    branches: [main]
+    paths: ["app.py", "test_market_switch.py", ".github/workflows/market-switch-test.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  market-ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install streamlit plotly pandas numpy
+      - name: Verify KR to KQ to US to KR switching
+        run: python test_market_switch.py
+      - name: Save results
+        if: success()
+        run: |
+          git config user.name "stock-radar-diagnostics"
+          git config user.email "stock-radar-diagnostics@users.noreply.github.com"
+          git add data/market-switch-test.json
+          git diff --cached --quiet || (git commit -m "Record market selector UI smoke [skip ci]" && git push)
