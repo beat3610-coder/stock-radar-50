@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from trade_plan import scenario_from_history,decide_trade
 
 NEEDED = ["Open", "High", "Low", "Close", "Volume"]
 
@@ -391,14 +392,23 @@ def evaluate(x, market="US", flow=None):
     target1_r=target_eval["target1_r"]
     target2_r=target_eval["target2_r"]
     technical_signal_before_gate=signal
-    signal,upside_pct,entry_rr,entry_reason=apply_target_risk_gate(
-        signal,p,stop,target_eval["integrated_target"])
+    # Plan exits from fully observed historical price excursions, not just
+    # the closest resistance. Resistance remains a separately shown obstacle.
+    plan=scenario_from_history(x,stop)
+    signal,entry_reason=decide_trade(signal,plan,score=score)
+    trade_target=plan["target"]
+    upside_pct=plan["expected_upside_pct"]
+    entry_rr=plan["planned_rr"]
     return {"date":str(pd.Timestamp(x.index[-1]).date()),"price":p,
         "change":(p/float(prev.Close)-1)*100,"score":score,"technical_score":technical_score,
         "technical_max":tech_max,"score_basis":score_basis,"signal":signal,
         "technical_signal_before_gate":technical_signal_before_gate,
         "reason":" · ".join(details),"entry_reason":entry_reason,
         "upside_pct":upside_pct,"entry_rr":entry_rr,
+        "trade_target":trade_target,"trade_target2":plan["target2"],
+        "trade_plan_basis":plan["basis"],"historical_samples":plan["history_samples"],
+        "stop_risk_pct":plan["stop_risk_pct"],
+        "downside_p75_pct":plan["downside_p75_pct"],
         "scores":scores,"penalty":penalty,"flow_status":flow_status,"flow_date":flow_date,
         "rsi":num(r.RSI),"rsi_delta5":rsi_delta,
         "rsi_direction":("상승" if rsi_delta>=3 else "하락" if rsi_delta<=-3 else "횡보") if rsi_delta is not None else "데이터 부족",
