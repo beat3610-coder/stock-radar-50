@@ -35,6 +35,7 @@ def get_flows(code,end_date):
         if not ins or not foreign:raise ValueError("기관 또는 외국인 수급 항목 없음")
         data=data[[ins,foreign]].apply(pd.to_numeric,errors="coerce").dropna()
         if data.empty:raise ValueError("순매수 데이터 없음")
+        if len(data)<20:raise ValueError(f"20거래일 수급 자료 부족: {len(data)}일")
         def stat(s):
             streak=0
             for v in s.iloc[::-1]:
