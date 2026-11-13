@@ -1,5 +1,5 @@
 {
-  "tested_at_utc": "2026-11-13T10:00:36.454271+00:00",
+  "tested_at_utc": "2026-11-13T10:01:42.613021+00:00",
   "ticker": "005930",
   "source": "Naver investor daily",
   "html_diagnostic": {
@@ -9,5 +9,11 @@
     "sample_tables": []
   },
   "success": false,
-  "error": "ValueError: 네이버 20거래일 조회 실패 [p1:200/0일/137288B; p2:200/0일/137288B; p3:200/0일/137288B; p4:200/0일/137288B]"
+  "error": "ValueError: 네이버 20거래일 조회 실패 [p1:200/0일/137288B; p2:200/0일/137288B; p3:200/0일/137288B; p4:200/0일/137288B]",
+  "new_naver_api": {
+    "status": 404,
+    "url": "https://stock.naver.com/api/domestic/detail/005930/trend?tradeType=KRX&startIdx=0&pageSize=20",
+    "content_type": "application/json; charset=utf-8",
+    "body": "{\"message\":\"Route GET:/api/domestic/detail/005930/trend?tradeType=KRX&startIdx=0&pageSize=20 not found\",\"error\":\"Not Found\",\"statusCode\":404}"
+  }
 }
