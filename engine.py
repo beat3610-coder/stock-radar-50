@@ -61,6 +61,170 @@ def compute(data):
 
 def finite(v): return pd.notna(v) and bool(np.isfinite(v))
 
+
+def integrated_targets(x, market, flow, stop):
+    """Evidence-driven trade-plan target levels, not statistical price forecasts.
+
+    Volume-by-price is a DAILY OHLCV proxy (typical price with full-day volume);
+    actual traded-at-price volume requires intraday/tick data and is NOT claimed.
+    Signal strength controls whether the nearer or farther resistance is a
+    supportable scenario. No unsupported upside price is invented.
+    """
+    last=x.iloc[-1]
+    p=float(last.Close)
+    prior=x.iloc[:-1].tail(252)
+    empty={"target1":None,"target2":None,"target1_basis":None,"target2_basis":None,
+           "integrated_target":None,"target_grade":"산정 불가","target_evidence":"",
+           "target1_r":None,"target2_r":None,"target_r":None,
+           "volume_profile":None,"target_signal_points":None,
+           "resistance_breakout":None,"target_inputs":"자료 부족"}
+    if len(prior)<120 or not finite(last.ATR) or last.ATR<=0:
+        return empty
+    atr=float(last.ATR)
+    gap=max(p*0.006,atr*0.25)
+    levels=[]
+    # Prior high-price levels, excluding the current incomplete candle.
+    for n in (20,60,120,252):
+        if len(prior)<n:continue
+        val=float(prior.High.iloc[-n:].max())
+        if val>p+gap:levels.append((val,f"{n}일 과거 고점","고점"))
+    # Prior pivot resistance, strictly historical (no lookahead from today).
+    h=prior.High.astype(float)
+    if len(h)>=7:
+        prev3=h.shift(1).rolling(3,min_periods=3).max()
+        next3=h.iloc[::-1].shift(1).rolling(3,min_periods=3).max().iloc[::-1]
+        pivots=h[(h>prev3)&(h>=next3)].tail(24)
+        for price in pivots:
+            if float(price)>p+gap:levels.append((float(price),"국소 고점","고점"))
+    # Price/volume histogram: one daily typical-price sample per session.
+    # It is an APPROXIMATION of cost-basis/supply zones, not an order-book.
+    vol=prior.loc[prior.Volume.gt(0)].copy()
+    profile_note="일별 대표가격×거래량 근사"
+    if len(vol)>=60:
+        typical=(vol.High+vol.Low+vol.Close)/3
+        lower=float(min(vol.Low.min(),p))
+        upper=float(max(vol.High.max(),p+gap))
+        if upper>lower:
+            bins=32
+            weights=np.histogram(typical,bins=bins,range=(lower,upper),weights=vol.Volume)[0]
+            edges=np.linspace(lower,upper,bins+1)
+            top=float(max(weights)) if len(weights) else 0
+            if top>0:
+                for idx,w in enumerate(weights):
+                    midpoint=float((edges[idx]+edges[idx+1])/2)
+                    if midpoint>p+gap and w>=0.35*top and w>0:
+                        levels.append((midpoint,"거래량 집중 가격대(근사)","매물대"))
+    else:
+        profile_note="거래량 자료 부족"
+    # Moving averages can be overhead resistance when above current price.
+    for n in (20,60,120):
+        key=f"MA{n}"
+        if finite(last[key]) and float(last[key])>p+gap:
+            levels.append((float(last[key]),f"{n}일 이동평균선","이평선"))
+
+    levels.sort(key=lambda z:z[0])
+    merged=[]
+    for price,label,kind in levels:
+        if merged and price-merged[-1]["price"]<gap:
+            # Combine close levels into one cluster, with evidence sources.
+            merged[-1]["tags"].add(label)
+            merged[-1]["kinds"].add(kind)
+        else:
+            merged.append({"price":price,"tags":{label},"kinds":{kind}})
+    if not merged:
+        result=empty.copy()
+        result["target_evidence"]="현재가 위에서 확인된 저항 없음"
+        result["volume_profile"]=profile_note
+        return result
+
+    first=merged[0]
+    second=merged[1] if len(merged)>1 else None
+    # Classify RSI/MACD, breakout+volume, MA trend and investor net buying.
+    evidence=[]
+    points=0;possible=0
+    possible+=20
+    vratio=float(last.Volume/last.VOL20) if finite(last.VOL20) and last.VOL20>0 else None
+    prev20=float(prior.High.tail(20).max())
+    breakout=bool(p>prev20 and vratio is not None and vratio>=1.5)
+    if breakout:points+=20;evidence.append("20일 고점·거래량 동반 돌파")
+    elif p>prev20:evidence.append("고점 돌파, 거래량 미확인")
+    else:evidence.append("20일 고점 거래량 돌파 미확인")
+    possible+=15
+    ordered_ma=all(finite(last[f"MA{n}"]) for n in (20,60,120))
+    if ordered_ma and p>last.MA20>last.MA60>last.MA120:
+        points+=15;evidence.append("20·60·120일 정배열")
+    elif ordered_ma and p>last.MA20:
+        points+=7;evidence.append("20일선 상회")
+    else:evidence.append("이평선 추세 미흡")
+    possible+=20
+    if finite(last.RSI):
+        rsi=float(last.RSI)
+        if 48<=rsi<=68:
+            points+=20;evidence.append("RSI 상승 가능 구간")
+        elif 40<=rsi<48 or 68<rsi<=72:
+            points+=10;evidence.append("RSI 중립·과열 경계")
+        else:evidence.append("RSI 약세/과열")
+    else:evidence.append("RSI 정보 없음")
+    possible+=20
+    if finite(last.MACDH):
+        if last.MACDH>0 and len(x)>1 and finite(x.MACDH.iloc[-2]) and last.MACDH>x.MACDH.iloc[-2]:
+            points+=20;evidence.append("MACD 양수·상승")
+        elif last.MACDH>0:
+            points+=12;evidence.append("MACD 양수")
+        else:evidence.append("MACD 상승 모멘텀 미흡")
+    else:evidence.append("MACD 정보 없음")
+    # Include volume-profile resistance as a hurdle: large overhead
+    # supply is less supportive of an aggressive (second resistance) target.
+    possible+=10
+    near_overhead=bool("매물대" in first["kinds"] and first["price"]<p+max(atr,p*0.035))
+    if near_overhead:
+        evidence.append("가까운 거래량 집중 저항")
+    else:
+        points+=10;evidence.append("단기 집중 매물대 저항 제한적")
+    flow_covered=False
+    if market=="KR":
+        if isinstance(flow,dict):
+            try:
+                f=flow["외국인"];ins=flow["기관"]
+                gap_days=abs((pd.Timestamp(x.index[-1]).normalize()-pd.Timestamp(flow["date"]).normalize()).days)
+                vals=[float(f["5일"]),float(f["20일"]),float(ins["5일"]),float(ins["20일"])]
+                if gap_days<=7 and all(np.isfinite(z) for z in vals):
+                    flow_covered=True
+                    possible+=15
+                    points+=sum(z>0 for z in vals)*3.75
+                    evidence.append(f"수급 외국인·기관 5·20일 순매수 {sum(z>0 for z in vals)}/4")
+            except (KeyError,TypeError,ValueError):
+                pass
+        if not flow_covered:
+            evidence.append("외국인·기관 수급 미확인(평가 제외)")
+    else:
+        evidence.append("미국 종목: 국내식 외국인·기관 수급 미적용")
+    strength=int(round(100*points/possible))
+    # The 'integrated target' is an OBSERVED resistance selected on evidence.
+    # Avoid projecting beyond observed supportable supply levels.
+    selected=second if second is not None and strength>=75 and breakout and not near_overhead else first
+    grade=("상승 여건 강함" if strength>=75 else
+           "상승 여건 보통" if strength>=50 else "상승 여건 약함")
+    if market=="KR" and not flow_covered:grade+=" · 수급 제외"
+    def rr(level):
+        return (level-p)/(p-stop) if level is not None and stop is not None and p>stop else None
+    return {
+        "target1":first["price"],
+        "target2":second["price"] if second else None,
+        "target1_basis":" · ".join(sorted(first["tags"])),
+        "target2_basis":" · ".join(sorted(second["tags"])) if second else None,
+        "integrated_target":selected["price"],
+        "target_grade":grade,
+        "target_evidence":" / ".join(evidence),
+        "target1_r":rr(first["price"]),
+        "target2_r":rr(second["price"]) if second else None,
+        "target_r":rr(selected["price"]),
+        "volume_profile":profile_note,
+        "target_signal_points":strength,
+        "resistance_breakout":breakout,
+        "target_inputs":"수급 포함" if flow_covered else "수급 제외"
+    }
+
 def evaluate(x, market="US", flow=None):
     """Rules-based daily signal. KR: 80 technical + 20 investor flow.
     US: 100 technical only. Missing KR flow never implies zero purchases.
@@ -180,39 +344,13 @@ def evaluate(x, market="US", flow=None):
         stop=max(0.01,min(float(r.MA20),p-2*r.ATR) if ok("MA20") and p>r.MA20 else p-2*r.ATR)
         if stop<p:target=p+2*(p-stop)
 
-    observed=x.iloc[:-1].tail(252)
-    levels=[]
-    if len(observed)>=20:
-        for period in (20,60,120,252):
-            if len(observed)>=period:
-                value=observed.High.iloc[-period:].max()
-                if finite(value):
-                    levels.append((float(value),f"직전 {period}일 고점"))
-        # Local swing highs based only on historical candles: 3 trading sessions on
-        # each side. They complement broad period highs where those overlap.
-        highs=observed.High.astype(float)
-        if len(highs)>=7:
-            left=highs.shift(1).rolling(3,min_periods=3).max()
-            right=highs.iloc[::-1].shift(1).rolling(3,min_periods=3).max().iloc[::-1]
-            peaks=observed.loc[(highs>left)&(highs>=right)].tail(24)
-            for _,bar in peaks.iterrows():
-                value=float(bar.High)
-                if finite(value):
-                    levels.append((value,"과거 국소 고점"))
-    # Reject levels at/below today's price. Nearby highs are one resistance zone;
-    # don't show two virtually identical levels as 1st and 2nd targets.
-    minimum_gap=max(p*0.005,float(r.ATR)*0.25 if ok("ATR") and r.ATR>0 else 0.0)
-    usable=sorted((price,label) for price,label in levels if price>p+minimum_gap)
-    distinct=[]
-    for price,label in usable:
-        if not distinct or price-distinct[-1][0]>=minimum_gap:
-            distinct.append((price,label))
-    target1=distinct[0][0] if distinct else None
-    target2=distinct[1][0] if len(distinct)>1 else None
-    target1_basis=distinct[0][1] if distinct else None
-    target2_basis=distinct[1][1] if len(distinct)>1 else None
-    target1_r=(target1-p)/(p-stop) if target1 is not None and stop is not None and p>stop else None
-    target2_r=(target2-p)/(p-stop) if target2 is not None and stop is not None and p>stop else None
+    target_eval=integrated_targets(x,market,flow,stop)
+    target1=target_eval["target1"]
+    target2=target_eval["target2"]
+    target1_basis=target_eval["target1_basis"]
+    target2_basis=target_eval["target2_basis"]
+    target1_r=target_eval["target1_r"]
+    target2_r=target_eval["target2_r"]
     return {"date":str(pd.Timestamp(x.index[-1]).date()),"price":p,
         "change":(p/float(prev.Close)-1)*100,"score":score,"technical_score":technical_score,
         "technical_max":tech_max,"score_basis":score_basis,"signal":signal,"reason":" · ".join(details),
@@ -229,4 +367,13 @@ def evaluate(x, market="US", flow=None):
         "volratio":volratio,"support":num(r.SUP),"resistance":num(r.RES),
         "stop":stop,"target":target,"target1":target1,"target2":target2,
         "target1_basis":target1_basis,"target2_basis":target2_basis,
-        "target1_r":target1_r,"target2_r":target2_r,"days":len(x)}
+        "target1_r":target1_r,"target2_r":target2_r,
+        "integrated_target":target_eval["integrated_target"],
+        "target_grade":target_eval["target_grade"],
+        "target_evidence":target_eval["target_evidence"],
+        "target_r":target_eval["target_r"],
+        "target_signal_points":target_eval["target_signal_points"],
+        "resistance_breakout":target_eval["resistance_breakout"],
+        "volume_profile":target_eval["volume_profile"],
+        "target_inputs":target_eval["target_inputs"],
+        "days":len(x)}
