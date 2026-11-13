@@ -18,6 +18,7 @@ st.set_page_config(page_title="STOCK RADAR | 투자분석",page_icon="📈",layo
 enforce_access(st)
 st.markdown("<style>.block-container{padding-top:1.4rem;max-width:1560px}.stMetric{padding:12px;border:1px solid #64748b44;border-radius:12px}</style>",unsafe_allow_html=True)
 st.title("📈 STOCK RADAR")
+st.error("⚠️ 현재 전략은 독립 수익 검증 미통과 상태입니다. 표시되는 매수 후보는 연구용이며 실전 매수 권고가 아닙니다.")
 if access_mode()!="private":
     st.caption("공개 베타 · 비상업용 평가 버전 | 공식 시세 라이선스·결제·회원 운영 미연결")
 else:
@@ -82,6 +83,8 @@ def to_row(item,with_flow=True,market_rank=None):
       "종가":round(r["price"],2),"전일대비 %":round(r["change"],2),
       "점수":r["score"],"점수 기준":r["score_basis"],"기술점수":r["technical_score"],"기술만점":r["technical_max"],
       "매매 판단":r["signal"],
+      "시장 위험국면":r.get("risk_regime","미확인"),
+      "실전 전략 승인":"미승인" if not r.get("live_strategy_approved") else "승인",
       "기술 판단(목표 검증 전)":r["technical_signal_before_gate"],
       "목표 상승여력 %":round(r["upside_pct"],2) if r["upside_pct"] is not None else None,
       "기대손익비(R)":round(r["entry_rr"],2) if r["entry_rr"] is not None else None,
@@ -248,7 +251,7 @@ def ranking_page(mkt):
             st.caption(f"보조 시세 검토: 큰 차이(2% 초과) {disagreement}개 · 교차검증 불가 {not_verified}개. "
                        "작은 공급처 차이보다 상승여력·손절폭·손익비를 우선해서 비교하세요.")
         approved=sum(x.get("매매 판단") in ("매수 검토","강한 매수 검토") for x in checked)
-        technical_only=sum(x.get("매매 판단")=="기술매수 후보·수급 미확인" for x in checked)
+        technical_only=sum(x.get("매매 판단")=="연구용 매수 후보·실거래 미승인" for x in checked)
         gated=sum("매수 유보" in str(x.get("매매 판단","")) and
                   str(x.get("기술 판단(목표 검증 전)","")).startswith(("매수 검토","강한 매수 검토","기술매수 후보"))
                   for x in checked)
