@@ -3,6 +3,7 @@ from pathlib import Path
 from access_control import enforce_access, access_mode
 from trade_plan import position_sizing
 from signal_playbook import playbook
+from position_decision import position_review
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
@@ -507,6 +508,36 @@ with detail_tab:
                            "계획 손실":idea["planned_loss"],"계획 이익":idea["planned_profit"]})
                     st.dataframe(pd.DataFrame(idea_rows),hide_index=True,use_container_width=True)
                     st.warning("위 가격은 연구용 시나리오입니다. 익일 시가 확인 후 손익비·거래비용을 재산정해야 하며, 실제 주문 자동화는 비활성화되어 있습니다.")
+                st.divider()
+                with st.expander("💼 보유 종목 매도·손절·익절 금액 계산", expanded=False):
+                    st.caption("실제 보유 평균단가·주수를 입력하여 각 가격대에서의 계획 손익을 계산합니다.")
+                    h1,h2,h3=st.columns(3)
+                    owned_entry=h1.number_input("내 평균 매수가",min_value=0.01,
+                        value=float(r["price"]),key="owned_entry_"+mkt+"_"+code)
+                    owned_shares=h2.number_input("보유 주수",min_value=1,
+                        value=1,step=1,key="owned_shares_"+mkt+"_"+code)
+                    exit_cost=h3.number_input("왕복 비용·슬리피지 (%)",min_value=0.0,
+                        max_value=5.0,value=0.35,step=0.05,key="owned_fee_"+mkt+"_"+code)
+                    rs=r.get("stop");rt=r.get("trade_target")
+                    if rs and rt and rs<rt:
+                        own1,own2=st.columns(2)
+                        my_stop=own1.number_input("관리 손절가",min_value=0.01,
+                            value=float(rs),key="owned_stop_"+mkt+"_"+code)
+                        my_target=own2.number_input("관리 목표가",min_value=0.01,
+                            value=float(rt),key="owned_target_"+mkt+"_"+code)
+                        decision=position_review(entry=owned_entry,shares=owned_shares,
+                            current=r["price"],stop=my_stop,target=my_target,
+                            ma20=r.get("ma20"),macdh=float(data.MACDH.iloc[-1]),
+                            cost_pct=exit_cost)
+                        if decision["valid"]:
+                            a1,a2,a3=st.columns(3)
+                            a1.metric("현재 청산 시 추정손익",f'{decision["liquidation_net"]:+,.0f}')
+                            a2.metric("손절 체결 시 추정손익",f'{decision["stop_net"]:+,.0f}')
+                            a3.metric("목표 도달 시 추정손익",f'{decision["target_net"]:+,.0f}')
+                            st.info(decision["decision"]+" · "+decision["why"])
+                            st.caption(decision["cost_note"])
+                        else:st.warning(decision["reason"])
+                    else:st.info("손절가·익절가 산정 자료가 없어 보유 종목 손익 시나리오 계산을 보류합니다.")
                 st.divider()
                 st.subheader("종합 판단: "+r["signal"])
                 st.write(r["reason"] or "강한 매수 조건 미충족")
