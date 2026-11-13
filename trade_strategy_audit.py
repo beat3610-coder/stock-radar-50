@@ -285,15 +285,21 @@ def run():
     acceptable=(report["verification_complete"] and n>=50 and
                 current_mean is not None and benchmark_mean is not None and
                 current_mean>0 and current_mean>benchmark_mean)
+    # This historical holdout was already inspected when the strategy was
+    # redesigned; future re-runs on it are useful diagnostics but NOT an
+    # untouched independent validation of the redesigned strategy.
     report["release_gate"]={
-        "status":"PASS" if acceptable else "FAIL",
+        "status":"EXPLORATORY_PASS_NOT_INDEPENDENT" if acceptable else "FAIL",
+        "numeric_requirements_passed":bool(acceptable),
+        "independent_validation_passed":False,
+        "holdout_reused_after_model_revision":True,
         "holdout_trades":n,"minimum_holdout_trades":50,
         "holdout_strategy_mean_net_pct":current_mean,
         "holdout_identical_entry_hold_mean_net_pct":benchmark_mean,
         "requirements":["300/300 ticker analyses","at least 50 untouched holdout trades",
                         "positive held-out strategy mean net return",
                         "strategy return better than same-entry 10-session hold"],
-        "warning":"PASS would still not validate commercial fitness: survivorship bias, missing flows and correlated samples remain"}
+        "warning":"Historical holdout has been inspected and reused; results are exploratory, NOT independent. Survivorship bias, missing historical flows and correlated samples remain."}
     return report
 
 if __name__=="__main__":
