@@ -46,61 +46,38 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
     q50=max(0,float(np.quantile(favorable,0.50)))
     q75=max(q50,float(np.quantile(favorable,0.75)))
     risk=p-stop
-    # At a historical entry price, test which barrier is reached FIRST.
-    # Stop is assumed first when both prices touch in one daily bar.
+    # Vectorized stop-first historical executions, avoiding millions of .iloc
+    # calls when the 300-symbol walk-forward test repeats this calculation.
     stop_fraction=risk/p
-    first_hit=second_hit=stops_first=0
-    for i in starts:
-        first_outcome=second_outcome=None
-        entry=close[i]
-        for bar in range(i+1,i+horizon+1):
-            hit_stop=lows[bar]<=entry*(1-stop_fraction)
-            hit_first=highs[bar]>=entry*(1+q50)
-            hit_second=highs[bar]>=entry*(1+q75)
-            if first_outcome is None:
-                if hit_stop:first_outcome="stop"
-                elif hit_first:first_outcome="take"
-            if second_outcome is None:
-                if hit_stop:second_outcome="stop"
-                elif hit_second:second_outcome="take"
-            if first_outcome is not None and second_outcome is not None:
-                break
-        first_hit+=(first_outcome=="take")
-        second_hit+=(second_outcome=="take")
-        stops_first+=(first_outcome=="stop")
-    hist_target_first_pct=round(100*first_hit/len(starts),2)
-    hist_second_first_pct=round(100*second_hit/len(starts),2)
-    hist_stop_first_pct=round(100*stops_first/len(starts),2)
-    # Important: maximum future high ignores stop-before-target sequencing.
-    # Compare actual realizable returns of the two historical exit barriers.
+    opens=x.Open.to_numpy(dtype=float)
+    entries=close[starts]
+    stop_levels=entries*(1-stop_fraction)
     def historical_net(target_fraction):
-        result=[]
-        for i in starts:
-            entry=close[i]
-            s=entry*(1-stop_fraction)
-            take=entry*(1+target_fraction)
-            price=close[i+horizon]
-            for j in range(i+1,i+horizon+1):
-                if float(x.Open.iloc[j])<=s:
-                    price=float(x.Open.iloc[j]);break
-                if float(x.Open.iloc[j])>=take:
-                    price=float(x.Open.iloc[j]);break
-                if lows[j]<=s:
-                    price=s;break
-                if highs[j]>=take:
-                    price=take;break
-            result.append(100*(price/entry-1)-0.35)
-        return np.asarray(result,dtype=float)
-    net50=historical_net(q50)
-    net75=historical_net(q75)
-    # Wider take profit needs 0.25 percentage point historic net advantage
-    # over median target to avoid shifting exits on marginal differences.
+        take_levels=entries*(1+target_fraction)
+        exits=close[starts+horizon].copy()
+        result=np.full(len(starts),"time",dtype="U5")
+        active=np.ones(len(starts),dtype=bool)
+        for step in range(1,horizon+1):
+            ix=starts+step
+            op=opens[ix];lo=lows[ix];hi=highs[ix]
+            sg=op<=stop_levels
+            tg=(~sg)&(op>=take_levels)
+            ss=(~sg)&(~tg)&(lo<=stop_levels)
+            ts=(~sg)&(~tg)&(~ss)&(hi>=take_levels)
+            hit=active&(sg|tg|ss|ts)
+            exits=np.where(hit,np.where(sg|tg,op,np.where(ss,stop_levels,take_levels)),exits)
+            result=np.where(hit,np.where(sg|ss,"stop","take"),result)
+            active=active&(~hit)
+            if not active.any():break
+        pnl=100*(exits/entries-1)-0.35
+        return pnl,round(float(100*np.mean(result=="take")),2),round(float(100*np.mean(result=="stop")),2)
+    net50,hit50,stop50=historical_net(q50)
+    net75,hit75,stop75=historical_net(q75)
     use75=bool(net75.mean()>=net50.mean()+0.25)
     net_expectancy=float(net75.mean() if use75 else net50.mean())
-    # If 75th-percentile take is chosen, first-take rate refers to that
-    # same exit barrier, not the unused 50th-percentile barrier.
-    if use75:
-        hist_target_first_pct=hist_second_first_pct
+    hist_target_first_pct=hit75 if use75 else hit50
+    hist_second_first_pct=hit75
+    hist_stop_first_pct=stop75 if use75 else stop50
     target=p*(1+(q75 if use75 else q50))
     second=p*(1+q75)
     t1=target if target>p else None
