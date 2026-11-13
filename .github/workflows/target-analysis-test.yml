@@ -2,7 +2,7 @@ name: Integrated target algorithm tests
 on:
   push:
     branches: [main]
-    paths: ["engine.py", "app.py", "providers.py", "test_quote_verify.py", ".github/workflows/target-analysis-test.yml"]
+    paths: ["engine.py", "trade_plan.py", "test_trade_plan.py", "app.py", "providers.py", "test_quote_verify.py", ".github/workflows/target-analysis-test.yml"]
   workflow_dispatch:
 permissions:
   contents: write
@@ -92,6 +92,8 @@ jobs:
           PY
       - name: Test secondary quote-date and discrepancy guards
         run: python test_quote_verify.py
+      - name: Test risk-first take-profit framework
+        run: python test_trade_plan.py
       - name: Commit verification artifact
         if: success()
         run: |
