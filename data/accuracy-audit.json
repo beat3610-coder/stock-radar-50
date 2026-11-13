@@ -1,0 +1,217 @@
+{
+  "as_of_utc": "2026-11-13T12:32:49.622430+00:00",
+  "status": "diagnostic_only",
+  "method": "Yahoo close vs first available primary public feed; exact trading-date match; <=0.5% tolerance",
+  "backtest": {
+    "method": "walk-forward historical snapshots, 10-session close-to-close",
+    "scope": "7 selected currently popular tickers only; market-wide inference is invalid",
+    "no_historical_investor_flows": true,
+    "transaction_costs_included": false,
+    "survivorship_bias": true,
+    "results_by_ticker": {
+      "KR:005930": {
+        "observations": 43,
+        "by_signal": {
+          "target_hold": {
+            "observations": 15,
+            "mean_return_10d_pct": 4.174,
+            "win_rate_10d_pct": 60.0
+          },
+          "other": {
+            "observations": 28,
+            "mean_return_10d_pct": 3.759,
+            "win_rate_10d_pct": 71.43
+          }
+        }
+      },
+      "KR:000660": {
+        "observations": 43,
+        "by_signal": {
+          "other": {
+            "observations": 35,
+            "mean_return_10d_pct": 6.123,
+            "win_rate_10d_pct": 65.71
+          },
+          "target_hold": {
+            "observations": 8,
+            "mean_return_10d_pct": 10.97,
+            "win_rate_10d_pct": 75.0
+          }
+        }
+      },
+      "KQ:196170": {
+        "observations": 43,
+        "by_signal": {
+          "other": {
+            "observations": 35,
+            "mean_return_10d_pct": -0.548,
+            "win_rate_10d_pct": 40.0
+          },
+          "target_hold": {
+            "observations": 8,
+            "mean_return_10d_pct": -5.625,
+            "win_rate_10d_pct": 37.5
+          }
+        }
+      },
+      "KQ:086520": {
+        "observations": 43,
+        "by_signal": {
+          "other": {
+            "observations": 38,
+            "mean_return_10d_pct": 2.656,
+            "win_rate_10d_pct": 39.47
+          },
+          "target_hold": {
+            "observations": 5,
+            "mean_return_10d_pct": -3.14,
+            "win_rate_10d_pct": 20.0
+          }
+        }
+      },
+      "US:NVDA": {
+        "observations": 46,
+        "by_signal": {
+          "other": {
+            "observations": 46,
+            "mean_return_10d_pct": 0.471,
+            "win_rate_10d_pct": 45.65
+          }
+        }
+      },
+      "US:MSFT": {
+        "observations": 46,
+        "by_signal": {
+          "other": {
+            "observations": 46,
+            "mean_return_10d_pct": -0.044,
+            "win_rate_10d_pct": 43.48
+          }
+        }
+      },
+      "US:SOXL": {
+        "observations": 46,
+        "by_signal": {
+          "other": {
+            "observations": 46,
+            "mean_return_10d_pct": 6.354,
+            "win_rate_10d_pct": 58.7
+          }
+        }
+      }
+    },
+    "pooled_selected_sample": {
+      "target_hold": {
+        "observations": 36,
+        "mean_return_10d_pct": 2.491,
+        "win_rate_10d_pct": 52.78
+      },
+      "other": {
+        "observations": 274,
+        "mean_return_10d_pct": 2.603,
+        "win_rate_10d_pct": 51.09
+      }
+    },
+    "total_observations": 310
+  },
+  "quote_comparisons": [
+    {
+      "market": "KR",
+      "ticker": "005930",
+      "primary_source": "FinanceDataReader NAVER:005930",
+      "independent_source": "Yahoo 005930.KS",
+      "comparison": {
+        "status": "mismatch",
+        "date": "2026-11-13",
+        "primary_close": 209000.0,
+        "secondary_close": 206000.0,
+        "relative_difference_pct": 1.4563,
+        "tolerance_pct": 0.5
+      }
+    },
+    {
+      "market": "KR",
+      "ticker": "000660",
+      "primary_source": "FinanceDataReader NAVER:000660",
+      "independent_source": "Yahoo 000660.KS",
+      "comparison": {
+        "status": "mismatch",
+        "date": "2026-11-13",
+        "primary_close": 1233000.0,
+        "secondary_close": 1216000.0,
+        "relative_difference_pct": 1.398,
+        "tolerance_pct": 0.5
+      }
+    },
+    {
+      "market": "KQ",
+      "ticker": "196170",
+      "primary_source": "FinanceDataReader NAVER:196170",
+      "independent_source": "Yahoo 196170.KQ",
+      "comparison": {
+        "status": "mismatch",
+        "date": "2026-11-13",
+        "primary_close": 177200.0,
+        "secondary_close": 176200.0,
+        "relative_difference_pct": 0.5675,
+        "tolerance_pct": 0.5
+      }
+    },
+    {
+      "market": "KQ",
+      "ticker": "086520",
+      "primary_source": "FinanceDataReader NAVER:086520",
+      "independent_source": "Yahoo 086520.KQ",
+      "comparison": {
+        "status": "mismatch",
+        "date": "2026-11-13",
+        "primary_close": 73400.0,
+        "secondary_close": 72700.0,
+        "relative_difference_pct": 0.9629,
+        "tolerance_pct": 0.5
+      }
+    },
+    {
+      "market": "US",
+      "ticker": "NVDA",
+      "primary_source": "FinanceDataReader NVDA",
+      "independent_source": "Yahoo NVDA",
+      "comparison": {
+        "status": "agree_within_tolerance",
+        "date": "2026-11-12",
+        "primary_close": 166.19000244140625,
+        "secondary_close": 166.19000244140625,
+        "relative_difference_pct": 0.0,
+        "tolerance_pct": 0.5
+      }
+    },
+    {
+      "market": "US",
+      "ticker": "MSFT",
+      "primary_source": "FinanceDataReader MSFT",
+      "independent_source": "Yahoo MSFT",
+      "comparison": {
+        "status": "agree_within_tolerance",
+        "date": "2026-11-12",
+        "primary_close": 523.0,
+        "secondary_close": 523.0,
+        "relative_difference_pct": 0.0,
+        "tolerance_pct": 0.5
+      }
+    },
+    {
+      "market": "US",
+      "ticker": "SOXL",
+      "primary_source": "FinanceDataReader SOXL",
+      "independent_source": "Yahoo SOXL",
+      "comparison": {
+        "status": "agree_within_tolerance",
+        "date": "2026-11-12",
+        "primary_close": 65.52999877929688,
+        "secondary_close": 65.52999877929688,
+        "relative_difference_pct": 0.0,
+        "tolerance_pct": 0.5
+      }
+    }
+  ]
+}
