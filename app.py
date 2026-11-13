@@ -66,8 +66,14 @@ def to_row(item,with_flow=True,market_rank=None):
       "OBV":"매수 우세" if r["obv_up"] else "우세 아님" if r["volume_available"] else "자료 없음",
       "52주 고점":round(r["hi52"],2) if r["hi52"] else None,
       "52주 저점":round(r["lo52"],2) if r["lo52"] else None,
-      "손절 참고":round(r["stop"],2) if r["stop"] else None,
-      "목표 참고":round(r["target"],2) if r["target"] else None,
+      "손절 참고":round(r["stop"],2) if r["stop"] is not None else None,
+      "1차 저항 목표":round(r["target1"],2) if r["target1"] is not None else None,
+      "2차 저항 목표":round(r["target2"],2) if r["target2"] is not None else None,
+      "2R 손익비 목표":round(r["target"],2) if r["target"] is not None else None,
+      "1차 저항 근거":r["target1_basis"],
+      "2차 저항 근거":r["target2_basis"],
+      "1차 기대손익비(R)":round(r["target1_r"],2) if r["target1_r"] is not None else None,
+      "2차 기대손익비(R)":round(r["target2_r"],2) if r["target2_r"] is not None else None,
       "시세 출처":src}
 
 def fmt(v):return "—" if v is None else f"{v:,.2f}"
@@ -122,7 +128,7 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v5_"+mkt
+    key="results_v6_"+mkt
     if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
     state=st.session_state[key]
     left,right=st.columns([3,1])
@@ -217,11 +223,20 @@ with detail_tab:
                 fig.update_layout(height=840,xaxis_rangeslider_visible=False,margin=dict(l=8,r=8,t=18,b=8))
                 st.plotly_chart(fig,use_container_width=True)
                 m1,m2,m3,m4=st.columns(4)
-                m1.metric("20일 지지",fmt(r["support"]))
-                m2.metric("20일 저항",fmt(r["resistance"]))
-                m3.metric("손절 참고",fmt(r["stop"]))
-                m4.metric("2R 목표",fmt(r["target"]))
-                if code=="SOXL":st.error("SOXL은 일일 3배 레버리지 ETF로 장기 보유 시 기초지수 수익률의 3배와 달라질 수 있습니다.")
+                m1.metric("손절 참고",fmt(r["stop"]))
+                m2.metric("1차 저항 목표",fmt(r["target1"]))
+                m3.metric("2차 저항 목표",fmt(r["target2"]))
+                m4.metric("2R 손익비 목표",fmt(r["target"]))
+                st.caption("1차 저항 근거: "+(r["target1_basis"] or "현재가 위의 확인된 저항 없음")+
+                           " | 2차 저항 근거: "+(r["target2_basis"] or "추가 저항 미확인"))
+                st.caption("1·2차 목표는 과거 고점 중 현재가보다 높은 저항대입니다. 2R은 손절폭의 두 배를 더한 시나리오로 실제 상승 예측이 아닙니다.")
+                if r["target1_r"] is not None:
+                    st.caption(f'1차 저항까지 손익비: {r["target1_r"]:.2f}R'+
+                               (f' | 2차 저항까지: {r["target2_r"]:.2f}R' if r["target2_r"] is not None else ""))
+                if code=="SOXL":
+                    st.warning("SOXL은 일일 3배 레버리지 ETF입니다. 변동성이 크므로 과거 저항이 쉽게 무너질 수 있고 장기 보유 수익률은 기초지수의 단순 3배가 아닙니다.")
+                if code in ("472150","0262B0"):
+                    st.info("커버드콜 ETF의 저항 목표는 주가 기준입니다. 분배금을 포함한 총수익 목표가 아니며 분배락·분배정책을 별도로 고려해야 합니다.")
             except Exception as e:st.error(f"실제 시세 조회 실패: {e}")
     else:st.error("이 시장의 목록 데이터가 없습니다.")
 
@@ -253,5 +268,10 @@ with guide_tab:
 - **국내 수급 출처:** [K-Export Stars 외국인·기관 파생 집계](https://github.com/james-brand/korea-market-data), CC BY 4.0. 한국투자증권 API 기반 가공자료이며 원자료와 별개입니다. 공개 기준일이 7일 넘게 오래되면 자동으로 사용을 거절합니다. ETF는 집계 대상에서 제외될 수 있습니다.
 - 수급 누락 시 **기술점수(80점 만점)를 100점으로 환산**해 표시하되, 점수 기준에 **기술환산(수급 제외)**이라고 구분합니다. 종합점수와 직접 비교하지 마세요.
 - 변동성 보조: 볼린저밴드, ATR. 200일 가격·거래량 자료 부족 시 기술점수도 유보합니다.
+
+**목표가 해석**
+- **1·2차 저항 목표:** 과거 20·60·120·252일 고점 및 확인된 국소 고점 중 현재가보다 높은 가격만 선택합니다. 0.5% 또는 ATR의 0.25배 이내의 가까운 가격은 하나의 저항대로 간주합니다. 저항이 없으면 공란으로 둡니다.
+- **2R 손익비 목표:** ATR과 20일선을 참고해 정한 손절폭의 두 배를 현재가에 더한 값입니다. 실제 도달 가능성을 예측한 값이 아닙니다.
+- **ETF 주의:** SOXL의 3배 레버리지와 TIGER 커버드콜 ETF의 분배금·분배락은 저항 목표 산식에 반영되지 않습니다.
 
 **주의사항:** 이 점수는 백테스트로 수익률이 입증되지 않은 규칙 기반 분석입니다. 무료 호스팅과 외부 데이터 공급자의 사정으로 일부 종목 조회가 실패할 수 있으며, 실시간 시세/정시 자동 갱신/자동매매 기능은 없습니다.""")
