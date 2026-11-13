@@ -16,7 +16,7 @@ LAST_SIGNAL = "2026-11-01"
 WARMUP = 270
 STEP = 5
 OLD_BUY = {"매수 검토","강한 매수 검토","기술매수 후보·수급 미확인"}
-NEW_BUY = {"연구용 매수 후보·실거래 미승인"}
+NEW_BUY = {"연구용 매수 후보·실거래 미승인", "연구용 후보·위험조건 미충족"}
 HORIZON=10
 
 def one_market(items,market):
