@@ -46,6 +46,31 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
     q50=max(0,float(np.quantile(favorable,0.50)))
     q75=max(q50,float(np.quantile(favorable,0.75)))
     risk=p-stop
+    # At a historical entry price, test which barrier is reached FIRST.
+    # Stop is assumed first when both prices touch in one daily bar.
+    stop_fraction=risk/p
+    first_hit=second_hit=stops_first=0
+    for i in starts:
+        first_outcome=second_outcome=None
+        entry=close[i]
+        for bar in range(i+1,i+horizon+1):
+            hit_stop=lows[bar]<=entry*(1-stop_fraction)
+            hit_first=highs[bar]>=entry*(1+q50)
+            hit_second=highs[bar]>=entry*(1+q75)
+            if first_outcome is None:
+                if hit_stop:first_outcome="stop"
+                elif hit_first:first_outcome="take"
+            if second_outcome is None:
+                if hit_stop:second_outcome="stop"
+                elif hit_second:second_outcome="take"
+            if first_outcome is not None and second_outcome is not None:
+                break
+        first_hit+=(first_outcome=="take")
+        second_hit+=(second_outcome=="take")
+        stops_first+=(first_outcome=="stop")
+    hist_target_first_pct=round(100*first_hit/len(starts),2)
+    hist_second_first_pct=round(100*second_hit/len(starts),2)
+    hist_stop_first_pct=round(100*stops_first/len(starts),2)
     target=p*(1+q50)
     second=p*(1+q75)
     t1=target if target>p else None
@@ -57,6 +82,9 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
             "positive_rate_pct":round(100*np.mean(favorable>0),2),
             "downside_p75_pct":round(100*np.quantile(adverse,0.75),2),
             "stop_risk_pct":round(100*risk/p,2),
+            "historical_target_first_pct":hist_target_first_pct,
+            "historical_second_first_pct":hist_second_first_pct,
+            "historical_stop_first_pct":hist_stop_first_pct,
             "basis":f"과거 같은 추세의 완료된 {horizon}거래일 경로 {len(starts)}개 / 유리변동 중앙값·75백분위 (미래 수익 확률 아님)"}
 
 def decide_trade(signal, plan, score=None, min_rr=1.2, min_upside=2.0,
