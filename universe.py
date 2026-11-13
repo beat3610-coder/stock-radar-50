@@ -30,9 +30,9 @@ def kospi_top100():
             df[cap]=pd.to_numeric(df[cap],errors="coerce")
             df[ticker]=df[ticker].astype(str).str.strip().str.zfill(6)
             # Ordinary company stocks only; remove preferred shares (last 1/5/7/9), ETFs and SPACs.
-            df=df[df[ticker].str.fullmatch(r"\\d{6}") & df[cap].gt(0)]
+            df=df[df[ticker].str.fullmatch(r"\d{6}") & df[cap].gt(0)]
             df=df[~df[name].astype(str).str.contains("스팩|SPAC|ETF|ETN|우선주",case=False,na=False)]
-            df=df[~df[ticker].str[-1].isin(list("1579"))]
+            df=df[~df[name].astype(str).str.contains(r"우$|우B$|우C$|우\\d|우선",regex=True,na=False)]
             df=df.sort_values(cap,ascending=False).drop_duplicates(ticker)
             rows=[(str(row[ticker]),str(row[name]),"코스피 시총 상위") for _,row in df.head(100).iterrows()]
             if len(rows)!=100:raise ValueError(f"코스피 종목 부족: {len(rows)}/100")
