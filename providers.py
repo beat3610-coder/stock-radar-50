@@ -98,10 +98,57 @@ def _get_krx_flows(code,end_date):
     if not ins or not foreign:raise ValueError(f"KRX 투자자별 컬럼 누락: {list(data.columns)}")
     return _summarize_flow(data,ins,foreign,"KRX pykrx 투자자별 순매매")
 
+from functools import lru_cache
+import time
+from io import StringIO
+
+@lru_cache(maxsize=3)
+def _public_flow_snapshot(three_hour_slot):
+    """CC BY 4.0 derived settled KRX/KIS share-flow aggregates; one fetch per 3 hours."""
+    import requests
+    url="https://raw.githubusercontent.com/james-brand/korea-market-data/main/data/foreign-flows-aggregates.csv"
+    response=requests.get(url,timeout=12,headers={"User-Agent":"StockRadar200/1.0"})
+    response.raise_for_status()
+    if len(response.content)<10000:raise ValueError("수급 집계 파일 크기 이상")
+    first=response.text.splitlines()[0]
+    import re
+    date_match=re.search(r"\bas of (\d{4}-\d{2}-\d{2})\b",first,flags=re.I)
+    if not date_match:raise ValueError("수급 파일 기준일을 확인할 수 없음")
+    as_of=date_match.group(1)
+    age=(dt.date.today()-dt.date.fromisoformat(as_of)).days
+    if age<0 or age>7:raise ValueError(f"수급 파일 기준일 {as_of} (현재 대비 {age}일) - 오래된 자료")
+    df=pd.read_csv(StringIO(response.text),comment="#",dtype={"ticker":str})
+    required={"ticker","f_1d_sh","f_5d_sh","f_20d_sh","i_1d_sh","i_5d_sh","i_20d_sh"}
+    if not required.issubset(df.columns):raise ValueError(f"수급 컬럼 누락: {sorted(required-set(df.columns))}")
+    if len(df)<1000:raise ValueError(f"수급 종목이 비정상적으로 적음: {len(df)}")
+    df["ticker"]=df["ticker"].astype(str).str.strip().str.zfill(6)
+    for col in required-{"ticker"}:
+        df[col]=pd.to_numeric(df[col],errors="coerce")
+    frame=df.set_index("ticker")
+    return frame,as_of
+
+def _get_public_aggregated_flows(code):
+    frame,as_of=_public_flow_snapshot(int(time.time()//10800))
+    code=str(code).zfill(6)
+    if code not in frame.index:
+        raise ValueError(f"종목 {code}은 제3자 수급집계 대상 밖(ETF 등)")
+    row=frame.loc[code]
+    mapping={"기관":("i_1d_sh","i_5d_sh","i_20d_sh"),
+             "외국인":("f_1d_sh","f_5d_sh","f_20d_sh")}
+    result={"date":as_of,
+            "source":"K-Export Stars/KIS 기반 일별 집계 (CC BY 4.0)",
+            "source_url":"https://github.com/james-brand/korea-market-data"}
+    for label,cols in mapping.items():
+        nums=[row[col] for col in cols]
+        if not all(pd.notna(v) for v in nums):raise ValueError(f"{label}: 1·5·20일 수급 누락")
+        result[label]={"1일":int(nums[0]),"5일":int(nums[1]),"20일":int(nums[2]),
+                       "연속 순매수일":None}
+    return result
+
 def get_flows(code,end_date):
     """Try visible retail market data first, then KRX; require aligned latest date."""
     errors=[]
-    for provider in (_get_naver_flows,lambda symbol:_get_krx_flows(symbol,end_date)):
+    for provider in (_get_public_aggregated_flows,_get_naver_flows,lambda symbol:_get_krx_flows(symbol,end_date)):
         try:
             result=provider(code)
             gap=abs((pd.Timestamp(end_date)-pd.Timestamp(result["date"])).days)
@@ -109,7 +156,7 @@ def get_flows(code,end_date):
                 raise ValueError(f"가격일 {end_date} 대비 수급 기준일 {result['date']} ({gap}일 차이)")
             return result
         except Exception as exc:
-            errors.append(f"{'네이버' if provider==_get_naver_flows else 'KRX'}: {str(exc)[:165]}")
+            errors.append(f"{'공개 집계' if provider==_get_public_aggregated_flows else '네이버' if provider==_get_naver_flows else 'KRX'}: {str(exc)[:165]}")
     import logging
     logging.getLogger("stock_radar.flows").warning(
         "Investor flow failed %s %s: %s",code,end_date," | ".join(errors))
