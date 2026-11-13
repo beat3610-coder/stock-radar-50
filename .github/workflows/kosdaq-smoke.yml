@@ -1,0 +1,69 @@
+name: KOSDAQ universe and live price smoke test
+on:
+  push:
+    branches: [main]
+    paths:
+      - "universe.py"
+      - "providers.py"
+      - "engine.py"
+      - "app.py"
+      - ".github/workflows/kosdaq-smoke.yml"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pandas finance-datareader yfinance pykrx requests lxml html5lib beautifulsoup4 plotly streamlit
+      - name: Verify KOSDAQ capitalization ranking and live data
+        run: |
+          python - <<'PY'
+          import ast,json,datetime
+          for filename in ("universe.py","providers.py","engine.py","app.py"):
+              ast.parse(open(filename,encoding="utf-8").read())
+          from universe import kosdaq_top100
+          from providers import get_prices
+          from engine import compute,evaluate
+          result={"time":datetime.datetime.now(datetime.timezone.utc).isoformat()}
+          try:
+              rows,source=kosdaq_top100()
+              assert len(rows)==100 and len({r[0] for r in rows})==100
+              result["kosdaq"]={"count":len(rows),"source":source,"sample":[list(x) for x in rows[:5]]}
+          except Exception as e:
+              result["kosdaq_error"]=str(e)
+          if result.get("kosdaq"):
+              samples=[]
+              for code,name,sector in rows[:4]:
+                  try:
+                      px,src=get_prices(code,"KQ")
+                      score=evaluate(compute(px),market="KQ",flow=None)
+                      samples.append({"code":code,"name":name,"source":src,
+                          "close":score["price"],"signal":score["signal"],
+                          "score":score["score"],"target":score["integrated_target"],
+                          "upside":score["upside_pct"],"rr":score["entry_rr"],
+                          "gate":score["entry_reason"]})
+                  except Exception as e:
+                      samples.append({"code":code,"error":str(e)[:240]})
+              result["sample_quotes"]=samples
+          import os
+          os.makedirs("data",exist_ok=True)
+          with open("data/kosdaq-smoke.json","w",encoding="utf8") as fp:
+              json.dump(result,fp,ensure_ascii=False,indent=2)
+          print(json.dumps(result,ensure_ascii=False))
+          if not result.get("kosdaq"):raise RuntimeError("KOSDAQ top100 retrieval failed")
+          PY
+      - name: Commit results
+        if: always()
+        run: |
+          if [ -f data/kosdaq-smoke.json ]; then
+            git config user.name "stock-radar-diagnostics"
+            git config user.email "stock-radar-diagnostics@users.noreply.github.com"
+            git add data/kosdaq-smoke.json
+            git diff --cached --quiet || (git commit -m "Record KOSDAQ universe smoke result [skip ci]" && git push)
+          fi
