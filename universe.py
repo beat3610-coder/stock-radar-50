@@ -34,7 +34,28 @@ def kospi_top100():
             df=df[~df[name].astype(str).str.contains("스팩|SPAC|ETF|ETN|우선주",case=False,na=False)]
             df=df[~df[name].astype(str).str.contains(r"우$|우B$|우C$|우\\d|우선",regex=True,na=False)]
             df=df.sort_values(cap,ascending=False).drop_duplicates(ticker)
-            rows=[(str(row[ticker]),str(row[name]),"코스피 시총 상위") for _,row in df.head(100).iterrows()]
+            # Industry must come from listing metadata, never from the index-selection description.
+            industry=next((key for key in df.columns if key.lower() in
+                           ("sector","industry","업종","업종명","sectorname","industryname")),None)
+            industry_lookup={}
+            if industry is None:
+                try:
+                    meta=fdr.StockListing("KRX")
+                    meta.columns=[str(key).strip() for key in meta.columns]
+                    mk=next((key for key in meta if key.lower() in ("code","symbol","ticker")),None)
+                    sk=next((key for key in meta if key.lower() in
+                             ("sector","industry","업종","업종명","sectorname","industryname")),None)
+                    if mk and sk:
+                        industry_lookup=dict(zip(meta[mk].astype(str).str.strip().str.zfill(6),
+                                                 meta[sk].fillna("").astype(str)))
+                except Exception:
+                    pass
+            def industry_for(row):
+                value=row[industry] if industry else industry_lookup.get(str(row[ticker]),"")
+                if pd.isna(value) or str(value).strip().lower() in ("","nan","none","-"):
+                    return "업종 미확인"
+                return str(value).strip()
+            rows=[(str(row[ticker]),str(row[name]),industry_for(row)) for _,row in df.head(100).iterrows()]
             if len(rows)!=100:raise ValueError(f"코스피 종목 부족: {len(rows)}/100")
             return rows,f"FinanceDataReader {market} 시총순 정렬 / 조회일 {dt.date.today().isoformat()}"
         except Exception as e:attempts.append(f"{market}: {str(e)[:170]}")
