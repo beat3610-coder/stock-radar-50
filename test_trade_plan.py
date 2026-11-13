@@ -39,6 +39,9 @@ assert decide_trade("하락 추세·매수 보류",plan)[0]=="하락 추세·매
 assert decide_trade("매수 검토",{"target":None,"planned_rr":None})[0]=="상승 신호·매수 유보"
 assert decide_trade("매수 검토",plan)[0] in ("매수 검토","상승 신호·매수 유보")
 actual=evaluate(x,market="US",flow=None)
+assert isinstance(actual["medium_long_trend_rising"],bool)
+if actual["signal"] in ("매수 검토","강한 매수 검토","기술매수 후보·수급 미확인"):
+    assert actual["medium_long_trend_rising"]
 assert actual["trade_target"]==scenario_from_history(x,actual["stop"])["target"]
 assert actual["upside_pct"]==scenario_from_history(x,actual["stop"])["expected_upside_pct"]
 assert actual["entry_rr"]==scenario_from_history(x,actual["stop"])["planned_rr"]
