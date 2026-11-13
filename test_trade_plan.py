@@ -14,6 +14,14 @@ assert plan["history_samples"]>=50,plan
 assert plan["target"]>float(x.Close.iloc[-1])
 assert plan["target2"]>=plan["target"]
 assert plan["planned_rr"]>0
+assert plan["historical_target_choice"] in ("50th","75th")
+assert isinstance(plan["historical_net_expectancy_pct"],float)
+assert plan["historical_net_expectancy_pct"]==(
+    plan["historical_net_75th_pct"] if plan["historical_target_choice"]=="75th"
+    else plan["historical_net_50th_pct"])
+assert decide_trade("매수 검토",{
+    "target":110,"planned_rr":2.0,"expected_upside_pct":10,
+    "historical_net_expectancy_pct":-2,"stop_risk_pct":5})[0]=="상승 신호·매수 유보"
 assert 0<=plan["historical_target_first_pct"]<=100
 assert 0<=plan["historical_second_first_pct"]<=plan["historical_target_first_pct"]
 assert 0<=plan["historical_stop_first_pct"]<=100
