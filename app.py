@@ -53,6 +53,7 @@ def to_row(item,with_flow=True,market_rank=None):
       "종가":round(r["price"],2),"전일대비 %":round(r["change"],2),
       "점수":r["score"],"점수 기준":r["score_basis"],"기술점수":r["technical_score"],"기술만점":r["technical_max"],
       "매매 판단":r["signal"],
+      "기술 판단(목표 검증 전)":r["technical_signal_before_gate"],
       "목표 상승여력 %":round(r["upside_pct"],2) if r["upside_pct"] is not None else None,
       "기대손익비(R)":round(r["entry_rr"],2) if r["entry_rr"] is not None else None,
       "매매 판단 근거":r["entry_reason"],
@@ -144,11 +145,11 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v17_"+mkt
+    key="results_v18_"+mkt
     if key not in st.session_state:
         st.session_state[key]={"rows":{},"errors":{},"batches":[]}
     state=st.session_state[key]
-    page_key="result_batch_page_v17_"+mkt
+    page_key="result_batch_page_v18_"+mkt
     left,right=st.columns([3,1])
     remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
     if left.button("▶ 다음 50종목 실제 시세 분석",key="run"+mkt,type="primary",
@@ -170,6 +171,14 @@ def ranking_page(mkt):
         st.rerun()
     success=len(state["rows"]); fail=len(state["errors"])
     st.progress((success+fail)/len(ordered),text=f"분석 진행: {success+fail}/{len(ordered)} (정상 {success} · 오류 {fail})")
+    if success:
+        checked=list(state["rows"].values())
+        approved=sum(x.get("매매 판단") in ("매수 검토","강한 매수 검토") for x in checked)
+        gated=sum(x.get("매매 판단")=="상승 신호·매수 유보" for x in checked)
+        st.caption(f"분석 완료 기준 신규 매수 검토 {approved}개 · 상승 신호지만 목표가·손익비로 유보 {gated}개 · 기타 {success-approved-gated}개")
+        if approved==0 and gated>0:
+            st.info("현재 결과에서 매수 검토가 없는 주요 원인 중 하나는 목표가 상승여력 3%·기대손익비 1.5R의 필터입니다. "
+                    "기술 판단(목표 검증 전) 및 매매 판단 근거 열을 함께 확인하세요. 이는 수익률이 검증된 예측모형이 아닙니다.")
     if success:
         df=pd.DataFrame(list(state["rows"].values()))
         df["_market_order"]=df["코드"].map(order_index)
@@ -264,6 +273,8 @@ with detail_tab:
                 e.metric("52주 고점",fmt(r["hi52"]))
                 st.subheader("종합 판단: "+r["signal"])
                 st.write(r["reason"] or "강한 매수 조건 미충족")
+                if r["technical_signal_before_gate"]!=r["signal"]:
+                    st.caption("목표가·손익비 적용 전 기술 판단: "+r["technical_signal_before_gate"])
                 if r["signal"]=="상승 신호·매수 유보":
                     st.warning("매수 유보 사유: "+r["entry_reason"])
                 else:
