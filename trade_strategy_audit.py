@@ -58,6 +58,51 @@ def execute_path(df, i, entry, stop_pct, take_pct):
     return {"net_return_pct":gross-TRADING_COST_PCT,"exit_reason":reason,
             "gross_return_pct":gross}
 
+def execute_variant(df, i, entry, stop, take, mode):
+    """Fixed variants evaluated with identical entries, gaps and costs.
+
+    HOLD_10: hold 10 sessions.
+    STOP_10: fixed historical stop, exit otherwise at 10th close.
+    TAKE_STOP: existing take-first or stop-first strategy.
+    HALF_TRAIL: half exit at target; remaining half trailing stop based only
+    on completed bar closes (next day's stop effective), or time exit.
+    """
+    if mode=="TAKE_STOP":
+        return execute_path(df,i,entry,100*(entry-stop)/entry,
+                            100*(take-entry)/entry)["net_return_pct"]
+    if mode=="HOLD_10":
+        return 100*(float(df.Close.iloc[i+HORIZON])/entry-1)-TRADING_COST_PCT
+    if mode=="STOP_10":
+        for j in range(i+1,i+HORIZON+1):
+            b=df.iloc[j]
+            if b.Open<=stop:return 100*(float(b.Open)/entry-1)-TRADING_COST_PCT
+            if b.Low<=stop:return 100*(stop/entry-1)-TRADING_COST_PCT
+        return 100*(float(df.Close.iloc[i+HORIZON])/entry-1)-TRADING_COST_PCT
+    if mode=="HALF_TRAIL":
+        active_stop=stop
+        first_half=None
+        remaining=None
+        trail_fraction=(entry-stop)/entry
+        for j in range(i+1,i+HORIZON+1):
+            b=df.iloc[j]
+            if b.Open<=active_stop:
+                remaining=float(b.Open)
+                if first_half is None:first_half=remaining
+                break
+            if b.Low<=active_stop:
+                remaining=active_stop
+                if first_half is None:first_half=remaining
+                break
+            if first_half is None and b.High>=take:
+                first_half=take
+            # No same-bar upward trailing stop: update from completed close only.
+            if first_half is not None:
+                active_stop=max(active_stop,float(b.Close)*(1-trail_fraction))
+        if remaining is None:remaining=float(df.Close.iloc[i+HORIZON])
+        if first_half is None:first_half=remaining
+        return 100*((first_half+remaining)/(2*entry)-1)-TRADING_COST_PCT
+    raise ValueError("Unknown mode")
+
 def test_ticker(market, code):
     df,_=get_prices(code,market)
     x=compute(df)
@@ -90,9 +135,11 @@ def test_ticker(market, code):
         if not (0<stop_pct<=12 and take_pct>0):continue
         fill=execute_path(x,i,entry,stop_pct,take_pct)
         hold=(float(x.Close.iloc[i+HORIZON])/entry-1)*100-TRADING_COST_PCT
+        scenarios={m:execute_variant(x,i,entry,r["stop"],r["trade_target"],m)
+                   for m in ("TAKE_STOP","HOLD_10","STOP_10","HALF_TRAIL")}
         samples.append({"as_of":str(x.index[i].date()),"signal":signal,
                         "exit":fill["exit_reason"],"net_return_pct":fill["net_return_pct"],
-                        "hold_net_pct":hold})
+                        "hold_net_pct":hold,"variants":scenarios})
     direction={}
     for group in ("BUY","HOLD","SELL"):
         vals=[o["forward_10d_net_pct"] for o in snapshots if o["group"]==group]
@@ -100,7 +147,8 @@ def test_ticker(market, code):
                           "positive_10d":int(sum(v>0 for v in vals)),
                           "negative_10d":int(sum(v<0 for v in vals)),
                           "sum_forward_net_pct":round(float(sum(vals)),6)}
-    audit={"historical_decisions":len(snapshots),"direction_counts":direction}
+    audit={"historical_decisions":len(snapshots),"direction_counts":direction,
+           "trade_samples":samples}
     if not samples:
         return {"trades":0,"reason":"유효한 매수 검토 신호가 없음",**audit}
     r=np.array([s["net_return_pct"] for s in samples])
@@ -197,6 +245,33 @@ def run():
                  "mean_forward_10d_net_pct":round(total/n,3) if n else None}
         report["per_market"][market]["signal_direction_audit"]=market_directions
     report["historical_decision_count"]=sum(v.get("historical_decisions",0) for v in report["tickers"].values())
+    # Chronological holdout: no parameter is selected using the test window.
+    # The variants are frozen above; report both eras side by side.
+    trades_all=[]
+    for key,v in report["tickers"].items():
+        for trade in v.get("trade_samples",[]):
+            trades_all.append({"market":key.split(":",1)[0],"ticker":key,
+                               **trade})
+    if trades_all:
+        dates=sorted({t["as_of"] for t in trades_all})
+        split_date=dates[max(0,int(len(dates)*0.7)-1)]
+        summary_by_split={}
+        for subset,selected in (
+            ("development",[t for t in trades_all if t["as_of"]<=split_date]),
+            ("holdout",[t for t in trades_all if t["as_of"]>split_date])):
+            stats={}
+            for variant in ("TAKE_STOP","HOLD_10","STOP_10","HALF_TRAIL"):
+                values=[t["variants"][variant] for t in selected]
+                stats[variant]={"n":len(values),
+                    "mean_net_return_pct":round(float(np.mean(values)),3) if values else None,
+                    "win_rate_pct":round(float(100*np.mean(np.array(values)>0)),2) if values else None}
+            summary_by_split[subset]=stats
+        report["variant_holdout_audit"]={
+            "split_date":split_date,
+            "predefined_variants":["TAKE_STOP","HOLD_10","STOP_10","HALF_TRAIL"],
+            "selection_warning":"Comparisons are descriptive, not optimized for test outcomes",
+            "results":summary_by_split}
+    else:report["variant_holdout_audit"]={"error":"no trades"}
     report["verification_complete"]=(report["analysed_tickers"]==300)
     return report
 
