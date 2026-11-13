@@ -172,10 +172,47 @@ def evaluate(x, market="US", flow=None):
     if ready and ok("ADX") and r.ADX>=25 and ok("PDI") and ok("MDI") and r.MDI>r.PDI and p<r.MA20:
         signal="하락 추세·매수 보류"
 
+    # Targets are distinct concepts:
+    # resistance targets = previously observed levels ABOVE the latest close;
+    # 2R = risk-management scenario, NOT predicted future share price.
     stop=target=None
     if ok("ATR") and r.ATR>0:
         stop=max(0.01,min(float(r.MA20),p-2*r.ATR) if ok("MA20") and p>r.MA20 else p-2*r.ATR)
         if stop<p:target=p+2*(p-stop)
+
+    observed=x.iloc[:-1].tail(252)
+    levels=[]
+    if len(observed)>=20:
+        for period in (20,60,120,252):
+            if len(observed)>=period:
+                value=observed.High.iloc[-period:].max()
+                if finite(value):
+                    levels.append((float(value),f"직전 {period}일 고점"))
+        # Local swing highs based only on historical candles: 3 trading sessions on
+        # each side. They complement broad period highs where those overlap.
+        highs=observed.High.astype(float)
+        if len(highs)>=7:
+            left=highs.shift(1).rolling(3,min_periods=3).max()
+            right=highs.iloc[::-1].shift(1).rolling(3,min_periods=3).max().iloc[::-1]
+            peaks=observed.loc[(highs>left)&(highs>=right)].tail(24)
+            for _,bar in peaks.iterrows():
+                value=float(bar.High)
+                if finite(value):
+                    levels.append((value,"과거 국소 고점"))
+    # Reject levels at/below today's price. Nearby highs are one resistance zone;
+    # don't show two virtually identical levels as 1st and 2nd targets.
+    minimum_gap=max(p*0.005,float(r.ATR)*0.25 if ok("ATR") and r.ATR>0 else 0.0)
+    usable=sorted((price,label) for price,label in levels if price>p+minimum_gap)
+    distinct=[]
+    for price,label in usable:
+        if not distinct or price-distinct[-1][0]>=minimum_gap:
+            distinct.append((price,label))
+    target1=distinct[0][0] if distinct else None
+    target2=distinct[1][0] if len(distinct)>1 else None
+    target1_basis=distinct[0][1] if distinct else None
+    target2_basis=distinct[1][1] if len(distinct)>1 else None
+    target1_r=(target1-p)/(p-stop) if target1 is not None and stop is not None and p>stop else None
+    target2_r=(target2-p)/(p-stop) if target2 is not None and stop is not None and p>stop else None
     return {"date":str(pd.Timestamp(x.index[-1]).date()),"price":p,
         "change":(p/float(prev.Close)-1)*100,"score":score,"technical_score":technical_score,
         "technical_max":tech_max,"score_basis":score_basis,"signal":signal,"reason":" · ".join(details),
@@ -190,4 +227,6 @@ def evaluate(x, market="US", flow=None):
         "hi52":num(r.H52),"lo52":num(r.L52),"ma20":num(r.MA20),
         "ma60":num(r.MA60),"ma120":num(r.MA120),"ma200":num(r.MA200),
         "volratio":volratio,"support":num(r.SUP),"resistance":num(r.RES),
-        "stop":stop,"target":target,"days":len(x)}
+        "stop":stop,"target":target,"target1":target1,"target2":target2,
+        "target1_basis":target1_basis,"target2_basis":target2_basis,
+        "target1_r":target1_r,"target2_r":target2_r,"days":len(x)}
