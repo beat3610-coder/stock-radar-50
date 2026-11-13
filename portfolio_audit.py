@@ -50,18 +50,6 @@ def replay(trades, frames, *, start="2026-04-01", initial_cash=INITIAL_CASH,
             if date in s.index:
                 price=float(s.loc[date])
                 if np.isfinite(price) and price>0:last[ticker]=price
-        # Existing exits at their actual stop/take/time fill, including gaps.
-        for ticker,item in list(holdings.items()):
-            if date>=item["exit_date"]:
-                cash+=item["shares"]*item["exit_price"]*(1-cost/2)
-                gross=item["shares"]*(item["exit_price"]-item["entry"])
-                fees=item["shares"]*(item["entry"]+item["exit_price"])*cost/2
-                executions.append({"ticker":ticker,"entry_date":str(item["entry_date"].date()),
-                                   "exit_date":str(date.date()),"shares":item["shares"],
-                                   "net_cash":round(gross-fees,2),
-                                   "net_pct":round(100*(item["exit_price"]*(1-cost/2)/
-                                                       (item["entry"]*(1+cost/2))-1),3)})
-                del holdings[ticker]
         # Only admit trades whose next-open entry is today. Use the signal
         # score for fixed deterministic priority, never future returns.
         todo=sorted(entries.get(date,[]),key=lambda t:(-float(t.get("score") or 0),str(t["ticker"])))
@@ -91,6 +79,21 @@ def replay(trades, frames, *, start="2026-04-01", initial_cash=INITIAL_CASH,
                                    "exit_date":str(date.date()),"shares":shares,
                                    "net_cash":round(shares*((ep-op)-cost*(ep+op)/2),2),
                                    "net_pct":round(100*(ep*(1-cost/2)/(op*(1+cost/2))-1),3)})
+        # IMPORTANT: sell prior positions AFTER entry allocation. Daily OHLC
+        # doesn't justify using an intraday stop/take sale to fund an OPEN buy.
+        # Deliberately conservative, including gap exits.
+        # Existing exits at their actual stop/take/time fill, including gaps.
+        for ticker,item in list(holdings.items()):
+            if date>=item["exit_date"]:
+                cash+=item["shares"]*item["exit_price"]*(1-cost/2)
+                gross=item["shares"]*(item["exit_price"]-item["entry"])
+                fees=item["shares"]*(item["entry"]+item["exit_price"])*cost/2
+                executions.append({"ticker":ticker,"entry_date":str(item["entry_date"].date()),
+                                   "exit_date":str(date.date()),"shares":item["shares"],
+                                   "net_cash":round(gross-fees,2),
+                                   "net_pct":round(100*(item["exit_price"]*(1-cost/2)/
+                                                       (item["entry"]*(1+cost/2))-1),3)})
+                del holdings[ticker]
         value=cash+sum(item["shares"]*last.get(k,item["entry"]) for k,item in holdings.items())
         curve.append((str(date.date()),float(value)))
     vals=np.array([v for _,v in curve],dtype=float)
