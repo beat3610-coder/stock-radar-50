@@ -130,7 +130,8 @@ def to_row(item,with_flow=True,market_rank=None):
       "종가 차이 %":r["quote_check"]["difference_pct"],
       "교차검증 설명":r["quote_check"]["reason"]}
 
-def fmt(v):return "—" if v is None else f"{v:,.0f}"
+def fmt(v,market="KR"):
+    return "—" if v is None else (f"{v:,.2f}" if market=="US" else f"{v:,.0f}")
 
 with st.sidebar:
     st.header("조회 설정")
@@ -284,7 +285,7 @@ def ranking_page(mkt):
         price_cols=("종가","20일선","60일선","120일선","200일선",
                     "52주 고점","52주 저점","손절 참고","통합 목표가","2차 익절 참고","과거 저항 참고",
                     "1차 저항 목표","2차 저항 목표","2R 손익비 목표")
-        number_formats={col:"{:,.0f}" for col in price_cols if col in shown.columns}
+        number_formats={col:("{:,.2f}" if mkt=="US" else "{:,.0f}") for col in price_cols if col in shown.columns}
         for col in ("점수","기술점수","기술만점","목표 분석점수"):
             if col in shown.columns:
                 number_formats[col]="{:.0f}"
@@ -366,7 +367,7 @@ with candidate_tab:
         columns=[col for col in columns if col in candidates]
         st.caption(f"조건에 해당하는 종목 {len(candidates)}개")
         if len(candidates):
-            fmt_cols={col:"{:,.0f}" for col in ("종가","통합 목표가","손절 참고","점수") if col in columns}
+            fmt_cols={col:("{:,.2f}" if active=="US" and col!="점수" else "{:,.0f}") for col in ("종가","통합 목표가","손절 참고","점수") if col in columns}
             fmt_cols.update({col:"{:.2f}" for col in ("목표 상승여력 %","손절폭 %","기대손익비(R)","과거 1차 익절 우선 %") if col in columns})
             st.dataframe(candidates[columns].style.format(fmt_cols,na_rep="—"),
                          hide_index=True,use_container_width=True,height=520)
@@ -389,12 +390,12 @@ with detail_tab:
                 data,src,r,flow_data,flow_error=analyze_item((code,name,mkt,""),with_flow=with_flow)
                 st.caption(f'가격 기준일: {r["date"]} | 공급처: {src} | 통화: {"KRW" if mkt in ("KR","KQ") else "USD"}')
                 a,b,c,d,e=st.columns(5)
-                a.metric("종가",fmt(r["price"]),f'{r["change"]:+.2f}%')
+                a.metric("종가",fmt(r["price"],mkt),f'{r["change"]:+.2f}%')
                 b.metric("분석 점수",r["score"] if r["score"] is not None else "시세 부족")
                 st.caption("점수 유형: "+r["score_basis"])
                 c.metric("RSI14",fmt(r["rsi"]),f'{r["rsi_delta5"]:+.1f}p/5일' if r["rsi_delta5"] is not None else None)
                 d.metric("ADX14",fmt(r["adx"]))
-                e.metric("52주 고점",fmt(r["hi52"]))
+                e.metric("52주 고점",fmt(r["hi52"],mkt))
                 qc=r["quote_check"]
                 if qc["status"]=="mismatch":
                     st.warning(f'보조 공급처 종가 차이 {qc["difference_pct"]:.2f}% — 2% 초과 시 매수 판단 유보, 소폭 차이는 참고 표시')
@@ -441,12 +442,17 @@ with detail_tab:
                 for column,label,color in [("ADX","ADX","#30c5b8"),("PDI","+DI","#6fcb6f"),("MDI","-DI","#df7373")]:
                     fig.add_trace(go.Scatter(x=v.index,y=v[column],name=label,line=dict(color=color)),row=4,col=1)
                 fig.add_hline(y=25,row=4,col=1,line_dash="dash")
+                for key,label,color in (("stop","손절 참고","#d94848"),("trade_target","1차 익절","#14885c"),
+                                        ("trade_target2","2차 익절","#3476a1")):
+                    if r[key] is not None:
+                        fig.add_hline(y=r[key],row=1,col=1,line_dash="dot",line_color=color,
+                                      annotation_text=label,annotation_position="top left")
                 fig.update_layout(height=840,xaxis_rangeslider_visible=False,margin=dict(l=8,r=8,t=18,b=8))
                 st.plotly_chart(fig,use_container_width=True)
                 st.subheader("익절·손절 매매 계획 (과거 10거래일 경로 기준)")
                 p1,p2,p3,p4=st.columns(4)
-                p1.metric("1차 익절 참고",fmt(r["trade_target"]))
-                p2.metric("2차 익절 참고",fmt(r["trade_target2"]))
+                p1.metric("1차 익절 참고",fmt(r["trade_target"],mkt))
+                p2.metric("2차 익절 참고",fmt(r["trade_target2"],mkt))
                 p3.metric("손절폭",f'{r["stop_risk_pct"]:.2f}%' if r["stop_risk_pct"] is not None else "—")
                 p4.metric("익절·손절 손익비",f'{r["entry_rr"]:.2f}R' if r["entry_rr"] is not None else "—")
                 st.caption("익절 산정: "+r["trade_plan_basis"])
@@ -467,21 +473,22 @@ with detail_tab:
                                             risk_fraction=risk_percent/100)
                     s1,s2,s3,s4=st.columns(4)
                     s1.metric("참고 매수수량",f'{sizing["shares"]:,}주')
-                    s2.metric("예상 투자원금",f'{sizing["cost"]:,.0f} {unit}')
+                    s2.metric("예상 투자원금",f'{sizing["cost"]:,.2f} {unit}' if unit=="달러"
+                              else f'{sizing["cost"]:,.0f} {unit}')
                     s3.metric("손절 시 계획손실",f'-{sizing["planned_loss"]:,.0f} {unit}'
                               if sizing["planned_loss"] is not None else "산정 불가")
                     s4.metric("1차 익절 시 계획수익",f'+{sizing["planned_profit"]:,.0f} {unit}'
                               if sizing["planned_profit"] is not None else "산정 불가")
                     st.caption("종가 진입·손절 참고가 체결을 가정한 계획 금액입니다. "
                                "수수료·세금·호가 차이 및 갭 손실은 미반영이며 실제 손실액이 더 커질 수 있습니다.")
-                st.caption("과거 저항 참고: "+fmt(r["integrated_target"])+" / 종합 근거: "+(r["target_evidence"] or "분석 가능한 자료 없음"))
+                st.caption("과거 저항 참고: "+fmt(r["integrated_target"],mkt)+" / 종합 근거: "+(r["target_evidence"] or "분석 가능한 자료 없음"))
                 st.caption("과거 매물대 분석 방식: "+(r["volume_profile"] or "자료 부족")+
                            " | 외국인·기관: "+r["target_inputs"])
                 m1,m2,m3,m4=st.columns(4)
-                m1.metric("손절 참고",fmt(r["stop"]))
-                m2.metric("1차 저항 목표",fmt(r["target1"]))
-                m3.metric("2차 저항 목표",fmt(r["target2"]))
-                m4.metric("2R 손익비 참고",fmt(r["target"]))
+                m1.metric("손절 참고",fmt(r["stop"],mkt))
+                m2.metric("1차 저항 목표",fmt(r["target1"],mkt))
+                m3.metric("2차 저항 목표",fmt(r["target2"],mkt))
+                m4.metric("2R 손익비 참고",fmt(r["target"],mkt))
                 st.caption("1차 저항 근거: "+(r["target1_basis"] or "현재가 위의 확인된 저항 없음")+
                            " | 2차 저항 근거: "+(r["target2_basis"] or "추가 저항 미확인"))
                 st.caption("익절 참고가는 과거에 관찰된 10거래일 유리변동의 중앙값·75백분위이고, 저항 목표와는 별개입니다. "
