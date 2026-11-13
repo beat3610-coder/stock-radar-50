@@ -10,8 +10,17 @@ def normalize(data):
     x.columns=[str(c).title() for c in x.columns]
     if not all(c in x for c in NEEDED): raise ValueError("OHLCV 항목 누락")
     x=x[NEEDED].apply(pd.to_numeric,errors="coerce").dropna()
-    x=x[(x.Close>0)&(x.High>=x.Low)&(x.Volume>=0)]
+    x=x[(x.Close>0)&(x.Open>0)&(x.Low>0)&(x.High>=x.Low)&(x.Volume>=0)]
     x=x.loc[~x.index.duplicated(keep="last")].sort_index()
+    # Raw (not dividend-adjusted) OHLC must be internally consistent.
+    # Do not silently trade on malformed latest bars.
+    invalid=~(x.Open.between(x.Low*0.999,x.High*1.001) &
+              x.Close.between(x.Low*0.999,x.High*1.001))
+    if len(x) and bool(invalid.iloc[-1]):
+        raise ValueError("최신 OHLC 종가·시가가 고가/저가 범위를 벗어남 — 시세 공급처 확인 필요")
+    if len(x) and float(invalid.mean())>0.02:
+        raise ValueError("과거 OHLC 이상 비중 2% 초과 — 지표 계산 보류")
+    x=x.loc[~invalid]
     if len(x)<2: raise ValueError(f"가격 계산에 필요한 최소 거래일 부족: {len(x)}일")
     return x
 
