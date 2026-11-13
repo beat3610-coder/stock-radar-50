@@ -19,6 +19,30 @@ enforce_access(st)
 st.markdown("<style>.block-container{padding-top:1.4rem;max-width:1560px}.stMetric{padding:12px;border:1px solid #64748b44;border-radius:12px}</style>",unsafe_allow_html=True)
 st.title("📈 STOCK RADAR")
 st.error("⚠️ 현재 전략은 독립 수익 검증 미통과 상태입니다. 표시되는 매수 후보는 연구용이며 실전 매수 권고가 아닙니다.")
+readiness_path=Path("data/live-readiness-summary.json")
+if readiness_path.exists():
+    try:
+        readiness=json.loads(readiness_path.read_text(encoding="utf-8"))
+        if readiness.get("release_status")!="LIVE_APPROVED":
+            st.warning("실전 투자 검증: 미승인 · 계좌 손익·최대낙폭·신뢰도 기준을 충족하지 못했습니다.")
+        with st.expander("🧪 실전 투자 합격 검증표 · 실제 계좌 시뮬레이션 결과"):
+            st.caption("이 자료는 과거 일봉으로 산정한 가상 계좌 결과입니다. 실제 증권사 체결 내역이 아닙니다.")
+            details=[]
+            for k,name in (("KR","코스피"),("KQ","코스닥"),("US","나스닥")):
+                row=readiness.get("markets",{}).get(k,{})
+                p=row.get("portfolio_base",{})
+                stress=row.get("portfolio_stress",{})
+                details.append({"시장":name,"가격자료":f'{row.get("loaded","—")}/{row.get("requested","—")}',
+                    "검증 거래 수":row.get("holdout_trades"),"검증 승률 %":row.get("holdout_win_rate_pct"),
+                    "거래당 순손익 %":row.get("holdout_mean_net_pct"),
+                    "계좌 누적수익 %":p.get("total_return_pct"),
+                    "계좌 최대낙폭 %":p.get("max_drawdown_pct"),
+                    "거래비용 2배 수익 %":stress.get("total_return_pct")})
+            st.dataframe(pd.DataFrame(details),hide_index=True,use_container_width=True)
+            st.error("실전 합격: 미통과 · 더 많은 독립 표본과 실제 미래 모의매매 기록이 필요합니다.")
+    except Exception as ex:
+        st.warning("검증표 파일 읽기 오류: "+str(ex)[:120])
+
 if access_mode()!="private":
     st.caption("공개 베타 · 비상업용 평가 버전 | 공식 시세 라이선스·결제·회원 운영 미연결")
 else:
