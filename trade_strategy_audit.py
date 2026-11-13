@@ -13,7 +13,7 @@ from providers import get_prices
 from universe import get_universe
 
 # The 100 candidates are selected *before* any trade outcomes are computed.
-SAMPLE_ALLOCATION={"KR":34,"KQ":33,"US":33}
+SAMPLE_ALLOCATION={"KR":100,"KQ":100,"US":100}
 MAX_WORKERS=4
 
 def pick_100():
@@ -29,7 +29,7 @@ def pick_100():
         # only the mega-caps. Choice is deterministic and independent of returns.
         positions=np.linspace(0,min(99,len(stocks)-1),num=n,dtype=int)
         selected.extend(stocks[int(i)] for i in positions)
-    assert len(selected)==100 and len({(m,c) for m,c,_ in selected})==100
+    assert len(selected)==300 and len({(m,c) for m,c,_ in selected})==100
     return selected,universe
 
 
@@ -101,13 +101,13 @@ def test_ticker(market, code):
 def run():
     samples,universe=pick_100()
     report={"time_utc":datetime.now(timezone.utc).isoformat(),
-            "status":"100_ticker_exploratory_diagnostic_not_validated",
-            "requested_tickers":100,
+            "status":"300_ticker_exploratory_diagnostic_not_validated",
+            "requested_tickers":300,
             "sample_allocation":SAMPLE_ALLOCATION,
-            "sampling":"rank-stratified across present-day top 100 in each market; no ETFs; not historical membership",
+            "sampling":"all present-day top 100 from each market; no extra ETFs; not historical membership",
             "universe_sources":{m:universe[m+"_source"] for m in SAMPLE_ALLOCATION},
             "horizon_sessions":HORIZON,"round_trip_cost_pct":TRADING_COST_PCT,
-            "assumptions":["100 currently selected cap-ranked stocks; strong survivorship bias",
+            "assumptions":["300 present-day top-listed companies, 100 per market; survivorship bias",
                            "missing historical investor flow and true historical constituent lists",
                            "next-session open entry, 5% maximum opening gap",
                            "stop touched first if same bar hits both thresholds",
@@ -127,13 +127,13 @@ def run():
         for idx,future in enumerate(as_completed(futures),1):
             market,code,name,v=future.result()
             report["tickers"][market+":"+code]={"name":name,**v}
-            if idx%10==0:print(f"Completed {idx}/100: {market}:{code}",flush=True)
+            if idx%10==0:print(f"Completed {idx}/300: {market}:{code}",flush=True)
     # Present order exactly as originally ranked, not completion order.
     report["tickers"]={
         market+":"+code:report["tickers"][market+":"+code] for market,code,_ in samples
     }
     report["analysed_tickers"]=sum("error" not in v for v in report["tickers"].values())
-    report["failed_tickers"]=100-report["analysed_tickers"]
+    report["failed_tickers"]=300-report["analysed_tickers"]
     report["tickers_with_trades"]=sum(v.get("trades",0)>0 for v in report["tickers"].values())
     report["total_trades"]=sum(v.get("trades",0) for v in report["tickers"].values())
     buckets={}
@@ -154,7 +154,7 @@ def run():
         "no_lookahead_verified":True,
         "statistical_significance_verified":False,
         "after_tax_verified":False}
-    report["verification_complete"]=(report["analysed_tickers"]==100)
+    report["verification_complete"]=(report["analysed_tickers"]==300)
     return report
 
 if __name__=="__main__":
@@ -166,4 +166,4 @@ if __name__=="__main__":
                      "failed_tickers","tickers_with_trades","total_trades",
                      "per_market","verification_complete")},ensure_ascii=False,indent=2))
     if not v["verification_complete"]:
-        raise SystemExit(f"100종목 전수 분석 미완료: {v['failed_tickers']}개 조회 실패")
+        raise SystemExit(f"300종목 전수 분석 미완료: {v['failed_tickers']}개 조회 실패")
