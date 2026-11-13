@@ -80,9 +80,13 @@ def ranking_page(mkt):
         st.error("현재 종목 목록을 조회할 수 없습니다.")
         return
     st.subheader(("코스피 시총 100 + TIGER ETF 2종" if mkt=="KR" else "Nasdaq-100 기업 100 + SOXL"))
-    st.caption("필수 상품은 상단에 고정 표시됩니다. 전체 종목 분석은 서버 부하를 줄이기 위해 50종목씩 실행합니다.")
+    st.caption("국내 TIGER 2종 / 미국 SOXL 상단 고정, 이후 시가총액 내림차순. 분석 점수는 순위 정렬에 사용하지 않습니다. 50종목씩 조회합니다.")
     mandatories={"472150","0262B0"} if mkt=="KR" else {"SOXL"}
+    # The universe is pre-ranked by exchange market cap. Keep this stable order.
     ordered=[t for t in items if t[0] in mandatories]+[t for t in items if t[0] not in mandatories]
+    order_index={code:i for i,(code,_,_,_) in enumerate(ordered)}
+    if mkt=="US" and not listing.get("US_cap_sorted",False):
+        st.warning("나스닥 시가총액 자료 조회가 실패하여 현재 표시 순서는 정확한 시총순이 아닙니다. 시총 확인 시에만 시총순으로 표시합니다.")
     st.caption(f"현재 목록 {len(ordered)}개: "+", ".join(t[1] for t in ordered if t[0] in mandatories))
     key="results_"+mkt
     if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
@@ -101,8 +105,8 @@ def ranking_page(mkt):
     st.progress((success+fail)/len(ordered),text=f"분석 진행: {success+fail}/{len(ordered)} (정상 {success} · 오류 {fail})")
     if success:
         df=pd.DataFrame(list(state["rows"].values()))
-        df["_priority"]=df["코드"].isin(mandatories).map({True:0,False:1})
-        df=df.sort_values(["_priority","점수"],ascending=[True,False],na_position="last").drop(columns="_priority")
+        df["_market_order"]=df["코드"].map(order_index)
+        df=df.sort_values("_market_order",ascending=True).drop(columns="_market_order")
         # Display at most 50 analyzed rows at once; preserve full CSV download.
         pages=max(1,(len(df)+49)//50)
         page=st.selectbox("분석 결과 페이지 (50개씩)",list(range(1,pages+1)),key="result_page_"+mkt,
