@@ -96,8 +96,7 @@ def fmt(v):return "—" if v is None else f"{v:,.0f}"
 with st.sidebar:
     st.header("조회 설정")
     st.info("코스피 100 + 코스닥 100 + 나스닥100을 시장별로 분석합니다. 필수 ETF 3개는 기존 시장에 추가됩니다.")
-    market=st.radio("분석 시장",["🇰🇷 코스피 100 + TIGER 2개","🇰🇷 코스닥 100","🇺🇸 나스닥100 + SOXL"])
-    active="KR" if "코스피" in market else "KQ" if "코스닥" in market else "US"
+    st.caption("시장 전환은 메인 화면의 시장 선택 버튼으로 합니다. 결과표와 상세 차트가 함께 전환됩니다.")
     if st.button("🔄 종목·시세 갱신",use_container_width=True):
         st.cache_data.clear()
         for k in list(st.session_state):
@@ -109,6 +108,12 @@ with st.sidebar:
     st.caption("서버 데이터 캐시: 시세 6시간, 종목 구성 24시간. 원격 무료 서버 첫 접속은 느릴 수 있습니다.")
     st.warning("자동매매 없음 · 점수는 사전 검증되지 않은 참고 규칙입니다.")
 
+MARKET_LABELS={"KR":"🇰🇷 코스피 100 + TIGER 2개","KQ":"🇰🇷 코스닥 100","US":"🇺🇸 나스닥100 + SOXL"}
+active=st.segmented_control("분석할 시장 선택",options=list(MARKET_LABELS),
+    default="KR",format_func=lambda key:MARKET_LABELS[key],
+    selection_mode="single",key="active_market")
+if active is None:active="KR"
+st.caption("현재 선택: "+MARKET_LABELS[active]+" — 결과표·상세 차트·시장별 수급 조회 대상에 함께 적용")
 entries=listing[active]
 st.caption("국내 구성 출처: "+listing["KR_source"])
 st.caption("코스닥 구성 출처: "+listing["KQ_source"])
@@ -125,7 +130,7 @@ summaryB.metric("코스닥 상위 기업 수",listing["KQ_index_count"])
 summaryC.metric("나스닥100 기업 수",listing["US_index_count"])
 summaryD.metric("필수 별도 상품",3)
 
-kr_tab,kq_tab,us_tab,detail_tab,flow_tab,guide_tab=st.tabs(["🇰🇷 코스피 100","🇰🇷 코스닥 100","🇺🇸 나스닥 100","📊 상세 차트","🏦 국내 수급","ℹ️ 분석 기준"])
+ranking_tab,detail_tab,flow_tab,guide_tab=st.tabs(["📋 선택 시장 분석","📊 상세 차트","🏦 국내 수급","ℹ️ 분석 기준"])
 
 def ranking_page(mkt):
     items=listing[mkt]
@@ -255,20 +260,18 @@ def ranking_page(mkt):
         page_items=ordered[(listing_page-1)*50:listing_page*50]
         st.dataframe(pd.DataFrame([{"구분":(f"코스피 {market_rank[c]}위" if mkt=="KR" else f"코스닥 {market_rank[c]}위" if mkt=="KQ" else f"나스닥 {market_rank[c]}위") if c in market_rank else ("국내 ETF" if mkt=="KR" else "미국 ETF"),"코드":c,"종목":n,"업종":s} for c,n,_,s in page_items]),use_container_width=True,hide_index=True,height=360)
 
-with kr_tab:ranking_page("KR")
-with kq_tab:ranking_page("KQ")
-with us_tab:ranking_page("US")
+with ranking_tab:ranking_page(active)
 
 with detail_tab:
     st.subheader("종목별 기술적 분석")
     current=listing[active]
     options={f'{name} ({code})':(code,name,m) for code,name,m,_ in current}
     if options:
-        selected=st.selectbox("종목 검색 · 선택",list(options),key="detail_select")
+        selected=st.selectbox("종목 검색 · 선택",list(options),key="detail_select_"+active)
         code,name,mkt=options[selected]
         if st.button("📈 차트 및 매매 판단 조회",key="getchart",type="primary"):
-            st.session_state["detail_ticker"]=selected
-        if st.session_state.get("detail_ticker")==selected:
+            st.session_state["detail_ticker_"+active]=selected
+        if st.session_state.get("detail_ticker_"+active)==selected:
             try:
                 data,src,r,flow_data,flow_error=analyze_item((code,name,mkt,""),with_flow=with_flow)
                 st.caption(f'가격 기준일: {r["date"]} | 공급처: {src} | 통화: {"KRW" if mkt in ("KR","KQ") else "USD"}')
@@ -349,20 +352,23 @@ with detail_tab:
 
 with flow_tab:
     st.subheader("국내 기관·외국인 순매수")
-    kr_entries=listing["KR"]+listing["KQ"]
-    if kr_entries:
-        sel=st.selectbox("국내 종목",range(len(kr_entries)),format_func=lambda i:f"{kr_entries[i][1]} ({kr_entries[i][0]})")
+    kr_entries=listing[active] if active in ("KR","KQ") else []
+    if active=="US":
+        st.info("미국 시장은 국내식 외국인·기관 순매수 집계를 적용하지 않습니다. 코스피 또는 코스닥을 선택하세요.")
+    elif kr_entries:
+        sel=st.selectbox("국내 종목",range(len(kr_entries)),key="flow_select_"+active,
+                         format_func=lambda i:f"{kr_entries[i][1]} ({kr_entries[i][0]})")
         code=kr_entries[sel][0]
-        if st.button("🏦 순매수 조회",key="flows"):
+        if st.button("🏦 순매수 조회",key="flows_"+active):
             try:
-                data,src=priced(code,"KQ" if any(t[0]==code for t in listing["KQ"]) else "KR")
+                data,src=priced(code,active)
                 result=flows(code,str(data.index[-1].date()))
                 st.caption("KRX 수급 기준일 "+result["date"])
                 flow_df=pd.DataFrame([{"구분":investor,**stats} for investor,stats in result.items() if investor in ("기관","외국인")])
                 flow_cols={col:"{:,.0f}" for col in ("1일","5일","20일","연속 순매수일") if col in flow_df.columns}
                 st.dataframe(flow_df.style.format(flow_cols,na_rep="—"),hide_index=True,use_container_width=True)
             except Exception as e:st.error(f"공개 수급 자료 조회 불가: {e}")
-    else:st.warning("코스피 구성 조회 실패. 다음에 새로고침해 주세요.")
+    elif active!="US":st.warning("이 국내 시장의 종목 구성을 조회하지 못했습니다.")
 
 with guide_tab:
     st.markdown("""**종목 선정**
