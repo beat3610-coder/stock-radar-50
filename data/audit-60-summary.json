@@ -1,0 +1,75 @@
+{
+  "audit_date_utc": "2026-11-13",
+  "source": "Render runtime AUDIT60_RESULT 2026-11-13T14:12:18.724Z",
+  "status": "FAIL_OR_INSUFFICIENT",
+  "data_coverage": {
+    "KR": "20/20",
+    "KQ": "20/20",
+    "US": "20/20"
+  },
+  "total_trades": 91,
+  "holdout_trades": 25,
+  "round_trip_cost_pct": 0.35,
+  "assumptions": [
+    "signal generated at close; next session open entry",
+    "intraday ambiguous stop-before-target",
+    "current top-20 constituent lists; survivorship bias",
+    "KR historical investor flow excluded",
+    "holdout is last 30% of trade entry dates for each market",
+    "MDD in initial run invalid due to metric bug; excluded pending rerun"
+  ],
+  "markets": {
+    "KR": {
+      "loaded": 20,
+      "split": "2026-02-10",
+      "train": {
+        "trades": 37,
+        "win_rate_pct": 59.46,
+        "mean_net_pct": 1.883,
+        "profit_factor": 1.61
+      },
+      "holdout": {
+        "trades": 13,
+        "win_rate_pct": 53.85,
+        "mean_net_pct": 3.67,
+        "profit_factor": 2.141
+      },
+      "status": "FAIL_OR_INSUFFICIENT"
+    },
+    "KQ": {
+      "loaded": 20,
+      "split": "2026-01-13",
+      "train": {
+        "trades": 16,
+        "win_rate_pct": 50,
+        "mean_net_pct": 0.871,
+        "profit_factor": 1.235
+      },
+      "holdout": {
+        "trades": 6,
+        "win_rate_pct": 83.33,
+        "mean_net_pct": 9.243,
+        "profit_factor": 5.535
+      },
+      "status": "FAIL_OR_INSUFFICIENT"
+    },
+    "US": {
+      "loaded": 20,
+      "split": "2026-02-20",
+      "train": {
+        "trades": 13,
+        "win_rate_pct": 38.46,
+        "mean_net_pct": -0.394,
+        "profit_factor": 0.877
+      },
+      "holdout": {
+        "trades": 6,
+        "win_rate_pct": 33.33,
+        "mean_net_pct": -1.197,
+        "profit_factor": 0.615
+      },
+      "status": "FAIL_OR_INSUFFICIENT"
+    }
+  },
+  "limitation": "This exploratory test is not a validated profitable trading system. Sample sizes small; contemporary constituent lists introduce survival bias; no portfolio time-synchronization or broker fill guarantee."
+}
