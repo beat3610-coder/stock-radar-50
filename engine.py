@@ -12,7 +12,7 @@ def normalize(data):
     x=x[NEEDED].apply(pd.to_numeric,errors="coerce").dropna()
     x=x[(x.Close>0)&(x.High>=x.Low)&(x.Volume>=0)]
     x=x.loc[~x.index.duplicated(keep="last")].sort_index()
-    if len(x)<25: raise ValueError(f"자료 부족: {len(x)}거래일")
+    if len(x)<2: raise ValueError(f"가격 계산에 필요한 최소 거래일 부족: {len(x)}일")
     return x
 
 def compute(data):
