@@ -5,9 +5,9 @@ from strategy_lab import (train_choice,_interval,qualifying,TRAIN_END,VALID_END,
 
 class StrategyLabTests(unittest.TestCase):
     def test_train_never_looks_at_test(self):
-        earlier=[{"entry_date":"2025-08-11","net_pct":1.2,
+        earlier=[{"entry_date":"2025-08-11","exit_date":"2025-08-20","net_pct":1.2,
                  "ticker":"A"} for _ in range(30)]
-        test=[{"entry_date":"2026-07-11","net_pct":-20.,
+        test=[{"entry_date":"2026-07-11","exit_date":"2026-07-20","net_pct":-20.,
                "ticker":"B"} for _ in range(100)]
         leader1,score1=train_choice({"trend_breakout":earlier,
                                     "trend_pullback":[]})
@@ -16,8 +16,10 @@ class StrategyLabTests(unittest.TestCase):
         self.assertEqual(leader1,leader2)
         self.assertEqual(score1,score2)
     def test_fixed_periods_disjoint(self):
-        r=[{"entry_date":"2025-10-31"},{"entry_date":TRAIN_END},
-           {"entry_date":"2026-03-31"},{"entry_date":VALID_END}]
+        r=[{"entry_date":"2025-10-29","exit_date":"2025-10-30"},
+           {"entry_date":TRAIN_END,"exit_date":"2025-11-10"},
+           {"entry_date":"2026-03-20","exit_date":"2026-03-25"},
+           {"entry_date":VALID_END,"exit_date":"2026-04-15"}]
         parts=[_interval(r,z) for z in ("train","validate","test")]
         self.assertEqual([len(x) for x in parts],[1,2,1])
     def test_unsupported_variant_cannot_signal(self):
