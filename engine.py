@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from trade_plan import scenario_from_history,decide_trade
+from risk_guard import screen_candidate
 
 NEEDED = ["Open", "High", "Low", "Close", "Volume"]
 
@@ -405,6 +406,22 @@ def evaluate(x, market="US", flow=None):
     if signal in ("매수 검토","강한 매수 검토","기술매수 후보·수급 미확인") and not trend_rising:
         signal="중장기 추세 미확인·매수 유보"
         entry_reason="60일선이 200일선 위이고 200일선이 최근 20거래일간 상승해야 신규 매수 후보 인정"
+    # Market-specific risk overlay. Passing the screen is *research-only*;
+    # an unvalidated historical strategy is never marketed as a live BUY.
+    signal_before_risk=signal
+    if signal in ("매수 검토","강한 매수 검토","기술매수 후보·수급 미확인"):
+        signal, risk_reason, regime=screen_candidate(
+            signal,market=market,price=p,score=score,stop=stop,
+            target=plan["target"],plan=plan,rsi=num(r.RSI),atr=num(r.ATR),
+            trend_ok=bool(trend_rising),ma20=num(r.MA20),ma60=num(r.MA60),
+            ma200=num(r.MA200),
+            previous_ma200=(float(x.MA200.iloc[-21]) if len(x)>=221
+                            and finite(x.MA200.iloc[-21]) else None),
+            macdh=num(r.MACDH),adx=num(r.ADX),pdi=num(r.PDI),mdi=num(r.MDI))
+        entry_reason=entry_reason+" / "+risk_reason
+    else:
+        regime=("하락" if finite(r.MA200) and p<float(r.MA200) else
+                "상승" if bool(trend_rising) else "횡보/불명")
     trade_target=plan["target"]
     upside_pct=plan["expected_upside_pct"]
     entry_rr=plan["planned_rr"]
@@ -412,6 +429,8 @@ def evaluate(x, market="US", flow=None):
         "change":(p/float(prev.Close)-1)*100,"score":score,"technical_score":technical_score,
         "technical_max":tech_max,"score_basis":score_basis,"signal":signal,
         "technical_signal_before_gate":technical_signal_before_gate,
+        "risk_regime":regime,"signal_before_risk":signal_before_risk,
+        "live_strategy_approved":False,
         "reason":" · ".join(details),"entry_reason":entry_reason,
         "medium_long_trend_rising":bool(trend_rising),
         "upside_pct":upside_pct,"entry_rr":entry_rr,
