@@ -50,7 +50,7 @@ def _get_naver_flows(code):
         url=f"https://finance.naver.com/item/frgn.naver?code={code}&page={page}"
         response=session.get(url,timeout=7)
         response.raise_for_status()
-        response.encoding=response.apparent_encoding if not response.encoding else response.encoding
+        response.encoding=response.apparent_encoding
         soup=BeautifulSoup(response.text,"html.parser")
         found=0
         for tr in soup.select("table tr"):
