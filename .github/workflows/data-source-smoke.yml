@@ -60,6 +60,27 @@ jobs:
                                        "body":brief(obj) if obj else rr.text[:350]}
           except Exception as ex:
               result["new_naver_api"]={"error":str(ex)[:350]}
+          result["alternative_data_sources"]={}
+          tests={
+            "github_aggregates":"https://raw.githubusercontent.com/james-brand/korea-market-data/main/data/foreign-flows-aggregates.csv",
+            "naver_mobile_front":"https://m.stock.naver.com/front-api/stock/domestic/integration?code=005930",
+            "naver_mobile_legacy":"https://m.stock.naver.com/api/stock/005930/integration"
+          }
+          for key,url in tests.items():
+              try:
+                  rsp=requests.get(url,headers={"User-Agent":"Mozilla/5.0","Accept":"application/json,text/plain,*/*"},timeout=12)
+                  record={"status":rsp.status_code,"url":rsp.url,"bytes":len(rsp.content),"content_type":rsp.headers.get("content-type")}
+                  if key=="github_aggregates":
+                      record["sample"]=rsp.text[:400]
+                  else:
+                      try:
+                          val=rsp.json()
+                          record["sample"]=str(val)[:950]
+                      except Exception:
+                          record["sample"]=rsp.text[:300]
+                  result["alternative_data_sources"][key]=record
+              except Exception as ex:
+                  result["alternative_data_sources"][key]={"error":str(ex)[:220]}
           print(json.dumps(result,ensure_ascii=False,indent=2))
           import os
           os.makedirs("data",exist_ok=True)
