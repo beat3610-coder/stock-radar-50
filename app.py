@@ -53,6 +53,9 @@ def to_row(item,with_flow=True,market_rank=None):
       "종가":round(r["price"],2),"전일대비 %":round(r["change"],2),
       "점수":r["score"],"점수 기준":r["score_basis"],"기술점수":r["technical_score"],"기술만점":r["technical_max"],
       "매매 판단":r["signal"],
+      "목표 상승여력 %":round(r["upside_pct"],2) if r["upside_pct"] is not None else None,
+      "기대손익비(R)":round(r["entry_rr"],2) if r["entry_rr"] is not None else None,
+      "매매 판단 근거":r["entry_reason"],
       "외국인 5일 순매수(주)":foreign.get("5일"),"외국인 20일 순매수(주)":foreign.get("20일"),
       "기관 5일 순매수(주)":institution.get("5일"),"기관 20일 순매수(주)":institution.get("20일"),
       "RSI":round(r["rsi"],1) if r["rsi"] is not None else None,
@@ -136,7 +139,7 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v14_"+mkt
+    key="results_v15_"+mkt
     if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
     state=st.session_state[key]
     left,right=st.columns([3,1])
@@ -186,11 +189,13 @@ def ranking_page(mkt):
             if col in shown.columns:
                 number_formats[col]=lambda v: f"{v:.1f}".rstrip("0").rstrip(".")
         for col in ("거래량/20일 평균","1차 기대손익비(R)",
-                    "2차 기대손익비(R)","통합목표 손익비(R)"):
+                    "2차 기대손익비(R)","통합목표 손익비(R)","기대손익비(R)"):
             if col in shown.columns:
                 number_formats[col]=lambda v: f"{v:.2f}".rstrip("0").rstrip(".")
         if "전일대비 %" in shown.columns:
             number_formats["전일대비 %"]="{:.2f}"
+        if "목표 상승여력 %" in shown.columns:
+            number_formats["목표 상승여력 %"]="{:.2f}"
         styled=shown.style.format(number_formats,na_rep="—")
         st.dataframe(styled,hide_index=True,use_container_width=True,height=510)
         st.download_button("📥 분석 결과 CSV 저장",df.to_csv(index=False).encode("utf-8-sig"),f"STOCK_RADAR200_{mkt}.csv","text/csv",key="csv"+mkt)
@@ -231,6 +236,13 @@ with detail_tab:
                 e.metric("52주 고점",fmt(r["hi52"]))
                 st.subheader("종합 판단: "+r["signal"])
                 st.write(r["reason"] or "강한 매수 조건 미충족")
+                if r["signal"]=="상승 신호·매수 유보":
+                    st.warning("매수 유보 사유: "+r["entry_reason"])
+                else:
+                    st.caption("매수 목표 검증: "+r["entry_reason"])
+                if r["upside_pct"] is not None:
+                    st.caption(f'통합 목표가까지 상승 여력: {r["upside_pct"]:.2f}%'+
+                               (f' | 손절가 대비 기대손익비: {r["entry_rr"]:.2f}R' if r["entry_rr"] is not None else ""))
                 if r["score"] is None:
                     st.warning("200일 시세·거래량 등 기술분석 기초 자료가 부족하여 점수 계산을 유보합니다.")
                 elif mkt=="KR" and r["flow_status"]!="정상":
@@ -326,6 +338,7 @@ with guide_tab:
 - **통합 목표 선택:** 위 조건이 강하고 거래량 돌파까지 확인되면 2차 저항을 선택할 수 있으며, 그렇지 않으면 가까운 1차 저항을 선택합니다. 기준은 **개발자가 정한 휴리스틱**으로, 실제 목표 달성 확률·적정주가를 의미하지 않습니다.
 - **매물대 제한:** 거래량 집중 가격대는 일봉 대표가격에 하루 거래량을 배정한 **근사치**입니다. 실제 가격별 체결량·매물대 분석과 동일하지 않습니다.
 - **2R 손익비 목표:** ATR과 20일선을 참고해 정한 손절폭의 두 배를 현재가에 더한 값입니다. 통합 목표가와 별개입니다.
+- **신규 매수 검증:** 종합점수상 매수 검토 신호여도 (1) 통합 목표까지 상승 여력이 최소 3.0%, (2) 손절 참고가 대비 손익비가 최소 1.5R이어야 **매수 검토**를 유지합니다. 하나라도 부족하거나 목표가·손절가가 없으면 **상승 신호·매수 유보**로 표시합니다. 기존의 과열·하락 경고는 우선 유지합니다. 3%·1.5R은 백테스트 전 잠정 운영 기준입니다.
 - **ETF 주의:** SOXL의 3배 레버리지와 TIGER 커버드콜 ETF의 분배금·분배락은 저항 목표 산식에 반영되지 않습니다.
 
 **주의사항:** 이 점수는 백테스트로 수익률이 입증되지 않은 규칙 기반 분석입니다. 무료 호스팅과 외부 데이터 공급자의 사정으로 일부 종목 조회가 실패할 수 있으며, 실시간 시세/정시 자동 갱신/자동매매 기능은 없습니다.""")
