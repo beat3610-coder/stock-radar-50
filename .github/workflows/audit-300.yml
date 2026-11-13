@@ -10,6 +10,8 @@ on:
 jobs:
   audit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
@@ -21,10 +23,21 @@ jobs:
       - name: Unit test conservative execution
         run: python -m unittest -v test_audit_300.py
       - name: Audit current constituents, no artificial pass
-        run: python audit_300.py
+        run: python audit_300.py --per-market 20 --output data/audit-60.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: three-hundred-audit
-          path: data/three-hundred-audit.json
+          name: sixty-stock-audit
+          path: data/audit-60.json
           if-no-files-found: warn
+
+      - name: Commit audit report for review
+        if: always()
+        run: |
+          if [ -f data/audit-60.json ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data/audit-60.json
+            git diff --cached --quiet || git commit -m "Record 60-stock historical audit results [skip ci]"
+            git push
+          fi
