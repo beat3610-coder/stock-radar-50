@@ -59,11 +59,10 @@ def analyze_item(item,with_flow=True):
     r=evaluate(data,market=market,flow=flow_data)
     qc=quote_check(code,market,str(data.index[-1].date()),float(data.Close.iloc[-1]),src)
     r["quote_check"]=qc
-    if qc["status"]=="mismatch":
-        r["signal"]="시세 불일치·매수 보류"
-        r["entry_reason"]=qc["reason"]
-    elif qc["status"]=="unverified" and r["signal"] in ("매수 검토","강한 매수 검토","기술매수 후보·수급 미확인"):
-        r["signal"]="시세 미검증·매수 유보"
+    # A modest secondary-feed closing discrepancy is a review flag, not the
+    # economic entry criterion; extremely divergent prices still fail closed.
+    if qc["status"]=="mismatch" and qc["difference_pct"] is not None and qc["difference_pct"]>2.0:
+        r["signal"]="시세 큰 차이·매수 보류"
         r["entry_reason"]=qc["reason"]
     return data,src,r,flow_data,flow_error
 
@@ -98,7 +97,12 @@ def to_row(item,with_flow=True,market_rank=None):
       "52주 고점":round(r["hi52"],2) if r["hi52"] else None,
       "52주 저점":round(r["lo52"],2) if r["lo52"] else None,
       "손절 참고":round(r["stop"],2) if r["stop"] is not None else None,
-      "통합 목표가":round(r["integrated_target"],2) if r["integrated_target"] is not None else None,
+      "손절폭 %":round(r["stop_risk_pct"],2) if r["stop_risk_pct"] is not None else None,
+      "통합 목표가":round(r["trade_target"],2) if r["trade_target"] is not None else None,
+      "2차 익절 참고":round(r["trade_target2"],2) if r["trade_target2"] is not None else None,
+      "과거 저항 참고":round(r["integrated_target"],2) if r["integrated_target"] is not None else None,
+      "과거 경로 표본":r["historical_samples"],
+      "익절 산정 근거":r["trade_plan_basis"],
       "목표 여건":r["target_grade"],
       "목표 분석점수":r["target_signal_points"],
       "목표 수급반영":r["target_inputs"],
@@ -115,7 +119,10 @@ def to_row(item,with_flow=True,market_rank=None):
       "매물대 분석":r["volume_profile"],
       "시세 출처":src,
       "종가 교차검증":("보조 시세 일치(공식값 미검증)" if r["quote_check"]["status"]=="agree"
-                       else "종가 불일치·매수 보류" if r["quote_check"]["status"]=="mismatch"
+                       else "종가 차이 큼·매수 보류" if r["quote_check"]["status"]=="mismatch"
+                            and r["quote_check"]["difference_pct"] is not None
+                            and r["quote_check"]["difference_pct"]>2.0
+                       else "종가 소폭 차이·참고" if r["quote_check"]["status"]=="mismatch"
                        else "교차검증 불가"),
       "종가 차이 %":r["quote_check"]["difference_pct"],
       "교차검증 설명":r["quote_check"]["reason"]}
@@ -182,11 +189,11 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v22_"+mkt+("_flow" if with_flow else "_tech")
+    key="results_v23_"+mkt+("_flow" if with_flow else "_tech")
     if key not in st.session_state:
         st.session_state[key]={"rows":{},"errors":{},"batches":[]}
     state=st.session_state[key]
-    page_key="result_batch_page_v22_"+mkt+("_flow" if with_flow else "_tech")
+    page_key="result_batch_page_v23_"+mkt+("_flow" if with_flow else "_tech")
     left,right=st.columns([3,1])
     remaining=[t for t in ordered if t[0] not in state["rows"] and t[0] not in state["errors"]]
     if left.button("▶ 다음 50종목 실제 시세 분석",key="run"+mkt,type="primary",
@@ -225,11 +232,11 @@ def ranking_page(mkt):
     st.progress((success+fail)/len(ordered),text=f"분석 진행: {success+fail}/{len(ordered)} (정상 {success} · 오류 {fail})")
     if success:
         checked=list(state["rows"].values())
-        disagreement=sum(x.get("종가 교차검증")=="종가 불일치·매수 보류" for x in checked)
+        disagreement=sum(x.get("종가 교차검증")=="종가 차이 큼·매수 보류" for x in checked)
         not_verified=sum(x.get("종가 교차검증")=="교차검증 불가" for x in checked)
         if disagreement or not_verified:
-            st.warning(f"종가 확인: 공급처 불일치 {disagreement}개, 교차검증 불가 {not_verified}개. "
-                       "종가 차이 %와 교차검증 설명을 확인하세요. 공식 종가 확정 전 신규 매수 신호를 신뢰하지 마세요.")
+            st.caption(f"보조 시세 검토: 큰 차이(2% 초과) {disagreement}개 · 교차검증 불가 {not_verified}개. "
+                       "작은 공급처 차이보다 상승여력·손절폭·손익비를 우선해서 비교하세요.")
         approved=sum(x.get("매매 판단") in ("매수 검토","강한 매수 검토") for x in checked)
         technical_only=sum(x.get("매매 판단")=="기술매수 후보·수급 미확인" for x in checked)
         gated=sum("매수 유보" in str(x.get("매매 판단","")) and
@@ -239,7 +246,7 @@ def ranking_page(mkt):
                    f"· 목표가·손익비로 유보 {gated}개 · 기타 {success-approved-technical_only-gated}개")
         if approved==0:
             st.info("매수 검토 0개는 매수할 주식이 없다는 뜻이 아닙니다. "
-                    "수급 미확인 시에는 기술적 매수 후보로만 분류하며, 목표가 3%·손익비 1.5R 필터로 추가 유보될 수 있습니다. "
+                    "수급 미확인 시에는 기술적 매수 후보로 분류하고, 과거 10거래일 경로·손절 위험으로 추가 유보될 수 있습니다. "
                     "기술 판단(목표 검증 전) 열과 매매 판단 근거를 확인하세요. 백테스트 검증 전 참고 신호입니다.")
     if success:
         df=pd.DataFrame(list(state["rows"].values()))
@@ -260,7 +267,8 @@ def ranking_page(mkt):
         # Prioritize actionable prices and the trading decision in the horizontal table.
         primary_cols=("구분","종목","코드","업종","거래일","통화",
                       "매매 판단","종가","통합 목표가","손절 참고",
-                      "52주 고점","52주 저점")
+                      "목표 상승여력 %","손절폭 %","기대손익비(R)",
+                      "2차 익절 참고","52주 고점","52주 저점")
         first=[col for col in primary_cols if col in df.columns]
         df=df[first+[col for col in df.columns if col not in first]]
         batch_codes=set(state["batches"][page-1])
@@ -271,7 +279,7 @@ def ranking_page(mkt):
         # Display thousands separators for every price/target/MA field,
         # without converting stored numeric values or changing CSV data.
         price_cols=("종가","20일선","60일선","120일선","200일선",
-                    "52주 고점","52주 저점","손절 참고","통합 목표가",
+                    "52주 고점","52주 저점","손절 참고","통합 목표가","2차 익절 참고","과거 저항 참고",
                     "1차 저항 목표","2차 저항 목표","2R 손익비 목표")
         number_formats={col:"{:,.0f}" for col in price_cols if col in shown.columns}
         for col in ("점수","기술점수","기술만점","목표 분석점수"):
@@ -294,6 +302,8 @@ def ranking_page(mkt):
             number_formats["전일대비 %"]="{:.2f}"
         if "목표 상승여력 %" in shown.columns:
             number_formats["목표 상승여력 %"]="{:.2f}"
+        if "손절폭 %" in shown.columns:
+            number_formats["손절폭 %"]="{:.2f}"
         if "종가 차이 %" in shown.columns:
             number_formats["종가 차이 %"]="{:.2f}"
         styled=shown.style.format(number_formats,na_rep="—")
@@ -316,7 +326,7 @@ with ranking_tab:ranking_page(active)
 with candidate_tab:
     st.subheader("투자 후보 탐색 — "+MARKET_LABELS[active])
     st.caption("실제 분석된 종목만 표시합니다. 기술 상승 신호·수급·종가 검증을 별도로 구분해 비교합니다.")
-    result_key="results_v22_"+active+("_flow" if with_flow else "_tech")
+    result_key="results_v23_"+active+("_flow" if with_flow else "_tech")
     result_state=st.session_state.get(result_key,{"rows":{}})
     if not result_state.get("rows"):
         st.info("선택 시장 분석 탭에서 먼저 50종목 실제 분석을 실행하세요.")
@@ -343,13 +353,13 @@ with candidate_tab:
                               key="candidate_sort_"+active)
         candidates=candidates.sort_values(sort_col,ascending=False,na_position="last")
         columns=["구분","종목","코드","매매 판단","기술 판단(목표 검증 전)",
-                 "종가","통합 목표가","손절 참고","목표 상승여력 %",
+                 "종가","통합 목표가","손절 참고","목표 상승여력 %","손절폭 %",
                  "기대손익비(R)","점수","종가 교차검증","매매 판단 근거","거래일"]
         columns=[col for col in columns if col in candidates]
         st.caption(f"조건에 해당하는 종목 {len(candidates)}개")
         if len(candidates):
             fmt_cols={col:"{:,.0f}" for col in ("종가","통합 목표가","손절 참고","점수") if col in columns}
-            fmt_cols.update({col:"{:.2f}" for col in ("목표 상승여력 %","기대손익비(R)") if col in columns})
+            fmt_cols.update({col:"{:.2f}" for col in ("목표 상승여력 %","손절폭 %","기대손익비(R)") if col in columns})
             st.dataframe(candidates[columns].style.format(fmt_cols,na_rep="—"),
                          hide_index=True,use_container_width=True,height=520)
             st.download_button("📥 조건별 후보 CSV",candidates.to_csv(index=False).encode("utf-8-sig"),
@@ -379,7 +389,7 @@ with detail_tab:
                 e.metric("52주 고점",fmt(r["hi52"]))
                 qc=r["quote_check"]
                 if qc["status"]=="mismatch":
-                    st.error(f'시세 공급처 불일치: 차이 {qc["difference_pct"]:.2f}% — 공식 종가 확인 전 매매 판단을 이용하지 마세요.')
+                    st.warning(f'보조 공급처 종가 차이 {qc["difference_pct"]:.2f}% — 2% 초과 시 매수 판단 유보, 소폭 차이는 참고 표시')
                 elif qc["status"]=="unverified":
                     st.warning("종가 독립 검증 불가: "+qc["reason"])
                 else:
@@ -425,13 +435,14 @@ with detail_tab:
                 fig.add_hline(y=25,row=4,col=1,line_dash="dash")
                 fig.update_layout(height=840,xaxis_rangeslider_visible=False,margin=dict(l=8,r=8,t=18,b=8))
                 st.plotly_chart(fig,use_container_width=True)
-                st.subheader("통합 기술·수급 목표가")
+                st.subheader("익절·손절 매매 계획 (과거 10거래일 경로 기준)")
                 p1,p2,p3,p4=st.columns(4)
-                p1.metric("통합 목표가",fmt(r["integrated_target"]))
-                p2.metric("목표 달성 여건",r["target_grade"])
-                p3.metric("목표 근거 점수",f'{r["target_signal_points"]}/100' if r["target_signal_points"] is not None else "자료 부족")
-                p4.metric("통합목표 손익비",f'{r["target_r"]:.2f}R' if r["target_r"] is not None else "—")
-                st.caption("종합 근거: "+(r["target_evidence"] or "분석 가능한 자료 없음"))
+                p1.metric("1차 익절 참고",fmt(r["trade_target"]))
+                p2.metric("2차 익절 참고",fmt(r["trade_target2"]))
+                p3.metric("손절폭",f'{r["stop_risk_pct"]:.2f}%' if r["stop_risk_pct"] is not None else "—")
+                p4.metric("익절·손절 손익비",f'{r["entry_rr"]:.2f}R' if r["entry_rr"] is not None else "—")
+                st.caption("익절 산정: "+r["trade_plan_basis"])
+                st.caption("과거 저항 참고: "+fmt(r["integrated_target"])+" / 종합 근거: "+(r["target_evidence"] or "분석 가능한 자료 없음"))
                 st.caption("과거 매물대 분석 방식: "+(r["volume_profile"] or "자료 부족")+
                            " | 외국인·기관: "+r["target_inputs"])
                 m1,m2,m3,m4=st.columns(4)
@@ -441,7 +452,8 @@ with detail_tab:
                 m4.metric("2R 손익비 참고",fmt(r["target"]))
                 st.caption("1차 저항 근거: "+(r["target1_basis"] or "현재가 위의 확인된 저항 없음")+
                            " | 2차 저항 근거: "+(r["target2_basis"] or "추가 저항 미확인"))
-                st.caption("통합 목표가는 확인된 1·2차 저항대에서 거래량 돌파·이평선·RSI·MACD·수급의 상승 여건을 반영해 선택합니다. 2R은 별개이며 목표가 도달 확률을 뜻하지 않습니다.")
+                st.caption("익절 참고가는 과거에 관찰된 10거래일 유리변동의 중앙값·75백분위이고, 저항 목표와는 별개입니다. "
+                           "고가 도달이 실제 매매 수익이나 목표 달성 확률을 보장하지 않습니다. 손절 주문도 갭 하락 시 지정 금액으로 체결되지 않을 수 있습니다.")
                 if r["target1_r"] is not None:
                     st.caption(f'1차 저항까지 손익비: {r["target1_r"]:.2f}R'+
                                (f' | 2차 저항까지: {r["target2_r"]:.2f}R' if r["target2_r"] is not None else ""))
