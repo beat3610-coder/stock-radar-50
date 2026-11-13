@@ -10,6 +10,9 @@ from universe import get_universe
 from engine import compute,evaluate
 from providers import get_prices,get_flows,verify_recent_close
 
+import audit_runtime
+audit_runtime.ensure_started()
+
 st.set_page_config(page_title="STOCK RADAR | 투자분석",page_icon="📈",layout="wide")
 # Gate before loading universe or any third-party data for private customers.
 enforce_access(st)
