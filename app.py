@@ -251,7 +251,7 @@ def ranking_page(mkt):
             st.caption(f"보조 시세 검토: 큰 차이(2% 초과) {disagreement}개 · 교차검증 불가 {not_verified}개. "
                        "작은 공급처 차이보다 상승여력·손절폭·손익비를 우선해서 비교하세요.")
         approved=sum(x.get("매매 판단") in ("매수 검토","강한 매수 검토") for x in checked)
-        technical_only=sum(x.get("매매 판단")=="연구용 매수 후보·실거래 미승인" for x in checked)
+        technical_only=sum(x.get("매매 판단") in ("연구용 매수 후보·실거래 미승인","연구용 후보·위험조건 미충족") for x in checked)
         gated=sum("매수 유보" in str(x.get("매매 판단","")) and
                   str(x.get("기술 판단(목표 검증 전)","")).startswith(("매수 검토","강한 매수 검토","기술매수 후보"))
                   for x in checked)
@@ -354,20 +354,20 @@ with candidate_tab:
         st.caption(f'현재 분석 자료 {len(candidates)}개 — 전체 {len(listing[active])}개 종목 중 조회된 결과')
         groups={
             "전체":"전체",
-            "연구용 위험필터 통과":"연구용 위험필터 통과",
+            "연구용 후보(경고 포함)":"연구용 후보(경고 포함)",
             "기술적 상승 신호":"기술적 상승 신호",
             "종가 확인 필요":"종가 확인 필요",
             "매수 유보·관찰":"매수 유보·관찰"}
         filter_choice=st.selectbox("후보 필터",list(groups),key="candidate_filter_"+active)
-        if filter_choice=="연구용 위험필터 통과":
-            candidates=candidates[candidates["매매 판단"]=="연구용 매수 후보·실거래 미승인"]
+        if filter_choice=="연구용 후보(경고 포함)":
+            candidates=candidates[candidates["매매 판단"].isin(("연구용 매수 후보·실거래 미승인","연구용 후보·위험조건 미충족"))]
         elif filter_choice=="기술적 상승 신호":
             candidates=candidates[candidates["기술 판단(목표 검증 전)"].isin(
                 ("매수 검토","강한 매수 검토","기술매수 후보·수급 미확인"))]
         elif filter_choice=="종가 확인 필요":
             candidates=candidates[candidates["종가 교차검증"]!="보조 시세 일치(공식값 미검증)"]
         elif filter_choice=="매수 유보·관찰":
-            candidates=candidates[candidates["매매 판단"]!="연구용 매수 후보·실거래 미승인"]
+            candidates=candidates[~candidates["매매 판단"].isin(("연구용 매수 후보·실거래 미승인","연구용 후보·위험조건 미충족"))]
         sort_col=st.selectbox("정렬 기준",["점수","목표 상승여력 %","기대손익비(R)"],
                               key="candidate_sort_"+active)
         candidates=candidates.sort_values(sort_col,ascending=False,na_position="last")
