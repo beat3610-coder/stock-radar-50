@@ -46,6 +46,19 @@ class PortfolioAuditTests(unittest.TestCase):
         r=replay([prev,next_trade],{"X":f,"Y":f},max_positions=1)
         self.assertEqual(r["trades_executed"],1)
         self.assertEqual(r["executions"][0]["ticker"],"X")
+    def test_entry_sizing_does_not_read_future_same_day_close(self):
+        x=history();y=history();volatile=x.copy()
+        volatile.iloc[1,volatile.columns.get_loc("Close")]=1000.
+        d=[str(z.date()) for z in x.index[:5]]
+        a={"ticker":"X","entry_date":d[0],"exit_date":d[3],
+           "entry":100.,"exit_price":100.,"stop":95.,"take":110.,"score":90}
+        b={"ticker":"Y","entry_date":d[1],"exit_date":d[4],
+           "entry":100.,"exit_price":100.,"stop":95.,"take":110.,"score":80}
+        clean=replay([a,b],{"X":x,"Y":y})
+        changed=replay([a,b],{"X":volatile,"Y":y})
+        n1=next(t["shares"] for t in clean["executions"] if t["ticker"]=="Y")
+        n2=next(t["shares"] for t in changed["executions"] if t["ticker"]=="Y")
+        self.assertEqual(n1,n2)
     def test_no_data_fails(self):
         self.assertFalse(replay([],{})["valid"])
     def test_certification_cannot_approve_unobserved_paper(self):
