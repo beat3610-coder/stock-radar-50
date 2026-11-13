@@ -53,10 +53,19 @@ def evaluate(x):
     add(finite(r.MA200) and r.MA60>r.MA200,15,"60일선 > 200일선")
     add(finite(r.MA200) and p>r.MA200,10,"200일선 위")
     add(finite(r.MACDH) and r.MACDH>0,10,"MACD 상승")
-    add(finite(r.RSI) and 45<=r.RSI<=68,10,"RSI 상승 구간")
-    add(finite(r.VOL20) and r.VOL20>0 and r.Volume>1.5*r.VOL20 and p>prev.Close,10,"거래량 동반 상승")
+    # RSI level and 5-session momentum are separate signals. Volume confirms momentum.
+    rsi_previous=x.RSI.iloc[-6] if len(x)>=6 else np.nan
+    rsi_delta=float(r.RSI-rsi_previous) if finite(r.RSI) and finite(rsi_previous) else None
+    rsi_up=rsi_delta is not None and rsi_delta>=3 and 35<=r.RSI<=70
+    volume_confirm=finite(r.VOL20) and r.VOL20>0 and r.Volume>=1.2*r.VOL20 and p>=prev.Close
+    add(finite(r.RSI) and 45<=r.RSI<=68,5,"RSI 45~68")
+    add(rsi_up,5,"RSI 5거래일 상승세")
+    add(finite(r.VOL20) and r.VOL20>0 and r.Volume>1.5*r.VOL20 and p>prev.Close,5,"거래량 동반 상승")
+    add(rsi_up and volume_confirm,5,"RSI 상승 + 거래량 확인")
     add(finite(r.RES) and p>r.RES,10,"20일 고점 돌파")
     add(len(x)>25 and finite(x.MA20.iloc[-6]) and r.MA20>x.MA20.iloc[-6],10,"20일선 상승")
+    if rsi_delta is not None and rsi_delta<=-5:
+        score-=5;details.append("RSI 5거래일 약화")
     if finite(r.RSI) and r.RSI>75: score-=15; details.append("RSI 과열")
     if finite(r.MA200) and p<r.MA200:score-=10;details.append("200일선 하회")
     ready=len(x)>=200 and finite(r.MA200) and finite(r.MACDH)
@@ -71,6 +80,9 @@ def evaluate(x):
     def num(v):return float(v) if finite(v) else None
     return {"date":str(pd.Timestamp(x.index[-1]).date()),"price":p,"change":(p/float(prev.Close)-1)*100,
        "score":max(0,min(100,score)) if ready else None,"signal":signal,"reason":" · ".join(details),
-       "rsi":num(r.RSI),"hi52":num(r.H52),"lo52":num(r.L52),"ma20":num(r.MA20),
+       "rsi":num(r.RSI),"rsi_delta5":rsi_delta,
+       "rsi_direction":("상승" if rsi_delta>=3 else "하락" if rsi_delta<=-3 else "횡보") if rsi_delta is not None else "데이터 부족",
+       "rsi_volume_confirmed":bool(rsi_up and volume_confirm),
+       "hi52":num(r.H52),"lo52":num(r.L52),"ma20":num(r.MA20),
        "ma60":num(r.MA60),"ma200":num(r.MA200),"volratio":num(r.Volume/r.VOL20) if finite(r.VOL20) and r.VOL20>0 else None,
        "support":num(r.SUP),"resistance":num(r.RES),"stop":stop,"target":target,"days":len(x)}
