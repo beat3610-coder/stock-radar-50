@@ -1,0 +1,7 @@
+{
+  "tested_at_utc": "2026-11-13T09:58:54.717827+00:00",
+  "ticker": "005930",
+  "source": "Naver investor daily",
+  "success": false,
+  "error": "ValueError: 네이버 20거래일 조회 실패 [p1:200/0일/137288B; p2:200/0일/137288B; p3:200/0일/137288B; p4:200/0일/137288B]"
+}
