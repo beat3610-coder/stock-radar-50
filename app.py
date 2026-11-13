@@ -51,8 +51,10 @@ def to_row(item,with_flow=True,market_rank=None):
       "종목":name,"코드":code,"업종":sector,
       "거래일":r["date"],"통화":"KRW" if market=="KR" else "USD",
       "종가":round(r["price"],2),"전일대비 %":round(r["change"],2),
-      "점수":r["score"],"기술점수":r["technical_score"],"기술만점":r["technical_max"],
+      "점수":r["score"],"점수 기준":r["score_basis"],"기술점수":r["technical_score"],"기술만점":r["technical_max"],
       "매매 판단":r["signal"],"수급 상태":r["flow_status"] if market=="KR" else "미국은 수급 점수 미적용",
+      "수급 조회 오류":flow_error if market=="KR" else None,
+      "수급 출처":flow_data.get("source") if flow_data else None,
       "외국인 5일 순매수(주)":foreign.get("5일"),"외국인 20일 순매수(주)":foreign.get("20일"),
       "기관 5일 순매수(주)":institution.get("5일"),"기관 20일 순매수(주)":institution.get("20일"),
       "RSI":round(r["rsi"],1) if r["rsi"] is not None else None,
@@ -83,7 +85,7 @@ with st.sidebar:
             if k.startswith("results_"):st.session_state.pop(k,None)
         st.rerun()
     with_flow=st.checkbox("국내 외국인·기관 순매수 포함(조회가 느릴 수 있음)",value=True)
-    st.caption("수급 조회 실패는 0점 처리하지 않으며 국내 종합점수를 유보합니다.")
+    st.caption("수급 조회가 실패해도 기술점수(80점 만점)를 100점으로 환산해 표시합니다. 점수 기준 열에서 기술환산과 종합을 구분합니다.")
     st.caption("서버 데이터 캐시: 시세 6시간, 종목 구성 24시간. 원격 무료 서버 첫 접속은 느릴 수 있습니다.")
     st.warning("자동매매 없음 · 점수는 사전 검증되지 않은 참고 규칙입니다.")
 
@@ -121,7 +123,7 @@ def ranking_page(mkt):
         unknown=sum(t[3]=="업종 확인 불가" for t in ordered)
         if unknown:
             st.warning(f"업종 조회 실패 {unknown}개: 국내 구성 출처·조회 오류를 확인하세요.")
-    key="results_v3_"+mkt
+    key="results_v4_"+mkt
     if key not in st.session_state:st.session_state[key]={"rows":{},"errors":{}}
     state=st.session_state[key]
     left,right=st.columns([3,1])
@@ -178,14 +180,17 @@ with detail_tab:
                 st.caption(f'가격 기준일: {r["date"]} | 공급처: {src} | 통화: {"KRW" if mkt=="KR" else "USD"}')
                 a,b,c,d,e=st.columns(5)
                 a.metric("종가",fmt(r["price"]),f'{r["change"]:+.2f}%')
-                b.metric("종합 점수",r["score"] if r["score"] is not None else "수급/자료 부족")
+                b.metric("분석 점수",r["score"] if r["score"] is not None else "시세 부족")
+                st.caption("점수 유형: "+r["score_basis"])
                 c.metric("RSI14",fmt(r["rsi"]),f'{r["rsi_delta5"]:+.1f}p/5일' if r["rsi_delta5"] is not None else None)
                 d.metric("ADX14",fmt(r["adx"]))
                 e.metric("52주 고점",fmt(r["hi52"]))
                 st.subheader("종합 판단: "+r["signal"])
                 st.write(r["reason"] or "강한 매수 조건 미충족")
                 if r["score"] is None:
-                    st.warning("종합점수 유보: 200일 가격·거래량 또는 국내 기관/외국인 수급 자료가 부족합니다. 자료를 0점으로 처리하지 않습니다.")
+                    st.warning("200일 시세·거래량 등 기술분석 기초 자료가 부족하여 점수 계산을 유보합니다.")
+                elif mkt=="KR" and r["flow_status"]!="정상":
+                    st.info("수급 조회 실패: 이 점수는 외국인·기관 점수를 제외한 기술분석 환산점수입니다. 종합점수와 직접 비교하지 마세요.")
                 st.caption(f'기술점수: {r["technical_score"] if r["technical_score"] is not None else "—"}/{r["technical_max"]}점 | 국내 수급 상태: {r["flow_status"]}')
                 if mkt=="KR":
                     if flow_data:
@@ -246,7 +251,7 @@ with guide_tab:
 - **국내 100점:** 20·60·120·200일선 추세 25점, RSI/MACD 25점, ADX/DI 15점, 거래량·OBV 15점, 외국인·기관 5·20거래일 누적 순매수 20점
 - **미국 100점:** 20·60·120·200일선 추세 25점, RSI/MACD 25점, ADX/DI 20점, 거래량·OBV 30점. 국내식 외국인·기관 수급은 적용하지 않습니다.
 - **국내 수급 가점:** 외국인 5일·20일 누적, 기관 5일·20일 누적 순매수가 각각 양수이면 5점씩(총 20점). 음수와 실제 0은 0점, 자료 누락은 평가 불가
-- 자료 누락 시 국내 종합 100점 점수는 유보하며, **기술점수(80점 만점)**는 별도로 제공합니다.
+- 수급 누락 시 **기술점수(80점 만점)를 100점으로 환산**해 표시하되, 점수 기준에 **기술환산(수급 제외)**이라고 구분합니다. 종합점수와 직접 비교하지 마세요.
 - 변동성 보조: 볼린저밴드, ATR. 200일 가격·거래량 자료 부족 시 기술점수도 유보합니다.
 
 **주의사항:** 이 점수는 백테스트로 수익률이 입증되지 않은 규칙 기반 분석입니다. 무료 호스팅과 외부 데이터 공급자의 사정으로 일부 종목 조회가 실패할 수 있으며, 실시간 시세/정시 자동 갱신/자동매매 기능은 없습니다.""")
