@@ -1,0 +1,77 @@
+{
+  "type": "paired_fixed_calendar_diagnostic",
+  "date_utc": "2026-11-13",
+  "server_log_timestamp": "2026-11-13T14:41:02.082Z",
+  "start_holdout": "2026-04-01",
+  "latest_signal": "2026-11-01",
+  "step_sessions": 5,
+  "caveats": [
+    "Baseline reconstructed from signal_before_risk in the CURRENT engine and is not a literal old-code replay",
+    "Survivorship bias: current market-cap constituent selection",
+    "Selected after previous analysis, so not untouched out-of-sample evidence",
+    "Overlapping across tickers and trade sequence MDD is not real portfolio MDD",
+    "Small holdout trade counts; no investment-grade evidence"
+  ],
+  "markets": {
+    "KR": {
+      "candidate_decisions": 158,
+      "rejected_by_risk": 133,
+      "rr_flagged": 133,
+      "stop_pct_flagged": 78,
+      "score_flagged": 60,
+      "baseline_total_trades": 78,
+      "risk_total_trades": 16,
+      "baseline_holdout": {
+        "n": 12,
+        "win_pct": 75,
+        "mean_net_pct": 6.092,
+        "profit_factor": 3.53
+      },
+      "risk_holdout": {
+        "n": 1,
+        "win_pct": 0,
+        "mean_net_pct": -5.804,
+        "profit_factor": 0
+      }
+    },
+    "KQ": {
+      "candidate_decisions": 59,
+      "rejected_by_risk": 59,
+      "rr_flagged": 59,
+      "stop_pct_flagged": 58,
+      "score_flagged": 32,
+      "baseline_total_trades": 26,
+      "risk_total_trades": 0,
+      "baseline_holdout": {
+        "n": 4,
+        "win_pct": 50,
+        "mean_net_pct": -4.304,
+        "profit_factor": 0.244
+      },
+      "risk_holdout": {
+        "n": 0
+      }
+    },
+    "US": {
+      "candidate_decisions": 49,
+      "rejected_by_risk": 49,
+      "rr_flagged": 49,
+      "stop_pct_flagged": 19,
+      "score_flagged": 43,
+      "baseline_total_trades": 34,
+      "risk_total_trades": 0,
+      "baseline_holdout": {
+        "n": 13,
+        "win_pct": 53.85,
+        "mean_net_pct": 2.036,
+        "profit_factor": 1.973
+      },
+      "risk_holdout": {
+        "n": 0
+      }
+    }
+  },
+  "root_cause": "Unvalidated conjunctive thresholds including reward-to-risk >= 1.5/1.8/2.0 rejected 133/158 KR and 100% of KQ and US candidate dates. Trade-dependent original holdout split invalidated previous before-after win-rate comparison.",
+  "fix": "Holdout cutoff fixed at 2026-04-01 in audit_300.py; risk_guard.py converts heuristic score, RR, ATR, RSI and suggested stop percentages into explicitly labeled research warnings; retains hard safety blocks; live trading approval stays false.",
+  "validation": "Paired diagnostic actually ran on Render (per-market 20 tickers, no provider errors); revised post-fix warning policy does NOT yet have a new profitable out-of-sample backtest."
+}
