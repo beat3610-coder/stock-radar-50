@@ -1,5 +1,5 @@
 {
-  "tested_at_utc": "2026-11-13T10:04:54.380305+00:00",
+  "tested_at_utc": "2026-11-13T10:06:04.133430+00:00",
   "ticker": "005930",
   "source": "Naver investor daily",
   "html_diagnostic": {
@@ -34,9 +34,9 @@
     "naver_mobile_legacy": {
       "status": 200,
       "url": "https://m.stock.naver.com/api/stock/005930/integration",
-      "bytes": 9236,
+      "bytes": 9233,
       "content_type": "application/json;charset=UTF-8",
-      "sample": "{'stockEndType': 'stock', 'itemCode': '005930', 'reutersCode': '005930', 'stockName': '삼성전자', 'totalInfos': [{'code': 'lastClosePrice', 'key': '전일', 'value': '208,000'}, {'code': 'openPrice', 'key': '시가', 'value': '209,500', 'compareToPreviousPrice': {'code': '2', 'text': '상승', 'name': 'RISING'}}, {'code': 'highPrice', 'key': '고가', 'value': '216,000', 'compareToPreviousPrice': {'code': '2', 'text': '상승', 'name': 'RISING'}}, {'code': 'lowPrice', 'key': '저가', 'value': '205,000', 'compareToPreviousPrice': {'code': '5', 'text': '하락', 'name': 'FALLING'}}, {'code': 'accumulatedTradingVolume', 'key': '거래량', 'value': '20,450,667'}, {'code': 'accumulatedTradingValue', 'key': '대금', 'value': '4조 2,932억'}, {'code': 'marketValue', 'key': '시총', 'value': '1,210조 1,797억'}, {'code': 'foreignRate', 'key': '외인소진율', 'value': '46.07%'}, {'code': 'highPriceOf52Weeks', 'key': '52주 최고', 'value': '380,000'}, {'code': 'lowPriceOf52Weeks', 'key': '52주 최저', 'value"
+      "sample": "{'stockEndType': 'stock', 'itemCode': '005930', 'reutersCode': '005930', 'stockName': '삼성전자', 'totalInfos': [{'code': 'lastClosePrice', 'key': '전일', 'value': '208,000'}, {'code': 'openPrice', 'key': '시가', 'value': '209,500', 'compareToPreviousPrice': {'code': '2', 'text': '상승', 'name': 'RISING'}}, {'code': 'highPrice', 'key': '고가', 'value': '216,000', 'compareToPreviousPrice': {'code': '2', 'text': '상승', 'name': 'RISING'}}, {'code': 'lowPrice', 'key': '저가', 'value': '205,000', 'compareToPreviousPrice': {'code': '5', 'text': '하락', 'name': 'FALLING'}}, {'code': 'accumulatedTradingVolume', 'key': '거래량', 'value': '20,451,599'}, {'code': 'accumulatedTradingValue', 'key': '대금', 'value': '4조 2,934억'}, {'code': 'marketValue', 'key': '시총', 'value': '1,213조 1,028억'}, {'code': 'foreignRate', 'key': '외인소진율', 'value': '46.07%'}, {'code': 'highPriceOf52Weeks', 'key': '52주 최고', 'value': '380,000'}, {'code': 'lowPriceOf52Weeks', 'key': '52주 최저', 'value"
     }
   },
   "verified_primary_source": {
