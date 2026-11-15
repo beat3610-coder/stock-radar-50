@@ -48,8 +48,8 @@ class DirectionTests(unittest.TestCase):
         future=[row(i+200,"2025-12-01","2025-12-15",LABELS[i%3]) for i in range(60)]
         report=score_directions(past+future)
         metrics=report["windows"]["validation"]
-        self.assertEqual(report["tuning"]["candidate_count"],75)
-        self.assertEqual(len(report["tuning"]["candidates"]),75)
+        self.assertEqual(report["tuning"]["candidate_count"],55)
+        self.assertEqual(len(report["tuning"]["candidates"]),55)
         self.assertFalse(report["tuning"]["diagnostic_used_for_selection"])
         self.assertEqual(metrics["total"],60)
         self.assertEqual(sum(metrics["actual"].values()),60)

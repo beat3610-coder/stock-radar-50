@@ -51,12 +51,13 @@ class OnlineDirectionModel:
     Learns signal-to-future-label relationship, never changing the input
     features based on outcome. Independent learner per market.
     """
-    def __init__(self,learning_rate=0.13,l2=0.06,prior_mix=0.15):
+    def __init__(self,learning_rate=0.13,l2=0.06,prior_mix=0.15,sideways_weight=1.0):
         self.weights=[[0.]*10 for _ in LABELS]
         self.grad_sq=[[4.]*10 for _ in LABELS]
         self.lr=learning_rate
         self.l2=l2
         self.prior_mix=max(0.,min(1.,float(prior_mix)))
+        self.sideways_weight=max(1.,float(sideways_weight))
         self.class_counts=[0]*3
         self.samples=0
     def prior(self):
@@ -77,7 +78,7 @@ class OnlineDirectionModel:
         old=stable_softmax([sum(w*x for w,x in zip(ws,vec)) for ws in self.weights])
         for k in range(3):
             for m,x in enumerate(vec):
-                grad=(old[k]-(1. if k==j else 0.))*x
+                grad=self.sideways_weight*(old[k]-(1. if k==j else 0.))*x if j==2 else (old[k]-(1. if k==j else 0.))*x
                 if m:grad+=self.l2*self.weights[k][m]
                 self.grad_sq[k][m]+=grad*grad
                 self.weights[k][m]-=self.lr*grad/math.sqrt(self.grad_sq[k][m])
@@ -134,7 +135,7 @@ def make_direction_rows(frame,ticker,market,*,end_date="2026-11-01",
 
 def _score_direction_candidate(trades,*,train_end="2025-11-01",
                      validation_end="2026-04-01",eval_end="2026-11-01",
-                     learning_rate=0.13,l2=0.06,prior_mix=0.15):
+                     learning_rate=0.13,l2=0.06,prior_mix=0.15,sideways_weight=1.0):
     """Prequential 3-class accuracy, precision/recall, Brier, baseline.
 
     For any prediction, only outcomes whose label_available_date < signal
@@ -144,7 +145,7 @@ def _score_direction_candidate(trades,*,train_end="2025-11-01",
     ordered=sorted(trades,key=lambda t:(t["signal_date"],t["ticker"]))
     completions=iter(sorted(trades,key=lambda t:(t["label_available_date"],t["ticker"])))
     next_done=next(completions,None)
-    model=OnlineDirectionModel(learning_rate=learning_rate,l2=l2,prior_mix=prior_mix)
+    model=OnlineDirectionModel(learning_rate=learning_rate,l2=l2,prior_mix=prior_mix,sideways_weight=sideways_weight)
     stats={k:{"total":0,"correct":0,"brier_sum":0.0,
               "baseline_brier_sum":0.0,
               "confusion":{t:{p:0 for p in LABELS} for t in LABELS},
@@ -205,19 +206,23 @@ def score_directions(trades,*,train_end="2025-11-01",
     Selection uses validation macro F1 across UP, DOWN, and SIDEWAYS, then accuracy, then Brier score.
     The already reviewed diagnostic window is never used to select a candidate.
     """
-    candidates=[]
-    for learning_rate in (0.03,0.06,0.10,0.13,0.20):
-        for l2 in (0.02,0.06,0.12):
-            for prior_mix in (0.0,0.15,0.30,0.50,1.0):
-                candidates.append({
-                    "name":f"lr{learning_rate:g}_l2{l2:g}_prior{prior_mix:g}",
-                    "learning_rate":learning_rate,"l2":l2,"prior_mix":prior_mix})
+    candidates=[{"name":"baseline_lr0.13_l20.06_prior0.15_side1",
+                  "learning_rate":0.13,"l2":0.06,"prior_mix":0.15,"sideways_weight":1.0}]
+    for learning_rate in (0.03,0.10,0.20):
+        for l2 in (0.02,0.12):
+            for prior_mix in (0.0,0.30,0.60):
+                for sideways_weight in (1.0,2.0,4.0):
+                    candidates.append({
+                        "name":f"lr{learning_rate:g}_l2{l2:g}_prior{prior_mix:g}_side{sideways_weight:g}",
+                        "learning_rate":learning_rate,"l2":l2,
+                        "prior_mix":prior_mix,"sideways_weight":sideways_weight})
     scored=[]
     for candidate in candidates:
         report=_score_direction_candidate(
             trades,train_end=train_end,validation_end=validation_end,
             eval_end=eval_end,learning_rate=candidate["learning_rate"],
-            l2=candidate["l2"],prior_mix=candidate["prior_mix"])
+            l2=candidate["l2"],prior_mix=candidate["prior_mix"],
+            sideways_weight=candidate["sideways_weight"])
         validation=report["windows"]["validation"]
         class_metrics=validation.get("class_metrics") or {}
         f1_scores=[]
@@ -235,7 +240,7 @@ def score_directions(trades,*,train_end="2025-11-01",
     eligible=[r for r in scored if r["validation_samples"]>=30 and
               r["validation_macro_f1_pct"] is not None]
     if not eligible:
-        chosen=next(r for r in scored if r["candidate"]["name"]=="lr0.13_l20.06_prior0.15")
+        chosen=next(r for r in scored if r["candidate"]["name"]=="baseline_lr0.13_l20.06_prior0.15_side1")
     else:
         chosen=max(eligible,key=lambda r:(
             r["validation_macro_f1_pct"],r["validation_accuracy_pct"],
