@@ -51,24 +51,35 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
                 "history_samples":int(len(starts)),"positive_rate_pct":None,
                 "downside_p75_pct":None,"stop_risk_pct":round(100*(p-stop)/p,2),
                 "basis":"다음날 시가 진입 및 갭 필터 적용 후 과거 표본 부족"}
-    entries=opens[starts+1]
-    favorable=np.array([highs[i+1:i+horizon+1].max()/opens[i+1]-1 for i in starts])
-    adverse=np.array([1-lows[i+1:i+horizon+1].min()/opens[i+1] for i in starts])
-    # Median opportunity as primary reference; 75th quantile as optimistic case.
-    q50=max(0,float(np.quantile(favorable,0.50)))
-    q75=max(q50,float(np.quantile(favorable,0.75)))
+    # Separate chronological calibration and holdout windows. Reported historical
+    # expectancy must not reuse the same trades used to select the target.
+    split=max(1,int(len(starts)*0.70))
+    if len(starts)-split<15:
+        return {"target":None,"target1":None,"target2":None,
+                "expected_upside_pct":None,"planned_rr":None,
+                "history_samples":int(len(starts)),"positive_rate_pct":None,
+                "downside_p75_pct":None,"stop_risk_pct":round(100*(p-stop)/p,2),
+                "basis":"독립 시간순 평가 구간 15개 미만"}
+    calibration=starts[:split]
+    holdout=starts[split:]
+    favorable_cal=np.array([highs[i+1:i+horizon+1].max()/opens[i+1]-1 for i in calibration])
+    favorable=np.array([highs[i+1:i+horizon+1].max()/opens[i+1]-1 for i in holdout])
+    adverse=np.array([1-lows[i+1:i+horizon+1].min()/opens[i+1] for i in holdout])
+    q50=max(0,float(np.quantile(favorable_cal,0.50)))
+    q75=max(q50,float(np.quantile(favorable_cal,0.75)))
     risk=p-stop
     # Vectorized stop-first historical executions, avoiding millions of .iloc
     # calls when the 300-symbol walk-forward test repeats this calculation.
     stop_fraction=risk/p
-    stop_levels=entries*(1-stop_fraction)
-    def historical_net(target_fraction):
+    def historical_net(target_fraction, sample_indices):
+        entries=opens[sample_indices+1]
+        stop_levels=entries*(1-stop_fraction)
         take_levels=entries*(1+target_fraction)
-        exits=close[starts+horizon].copy()
-        result=np.full(len(starts),"time",dtype="U5")
-        active=np.ones(len(starts),dtype=bool)
+        exits=close[sample_indices+horizon].copy()
+        result=np.full(len(sample_indices),"time",dtype="U5")
+        active=np.ones(len(sample_indices),dtype=bool)
         for step in range(1,horizon+1):
-            ix=starts+step
+            ix=sample_indices+step
             op=opens[ix];lo=lows[ix];hi=highs[ix]
             sg=op<=stop_levels
             tg=(~sg)&(op>=take_levels)
@@ -81,9 +92,11 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
             if not active.any():break
         pnl=100*(exits/entries-1)-0.35
         return pnl,round(float(100*np.mean(result=="take")),2),round(float(100*np.mean(result=="stop")),2)
-    net50,hit50,stop50=historical_net(q50)
-    net75,hit75,stop75=historical_net(q75)
-    use75=bool(net75.mean()>=net50.mean()+0.25)
+    calibration50,_,_=historical_net(q50,calibration)
+    calibration75,_,_=historical_net(q75,calibration)
+    use75=bool(calibration75.mean()>=calibration50.mean()+0.25)
+    net50,hit50,stop50=historical_net(q50,holdout)
+    net75,hit75,stop75=historical_net(q75,holdout)
     net_expectancy=float(net75.mean() if use75 else net50.mean())
     hist_target_first_pct=hit75 if use75 else hit50
     hist_second_first_pct=hit75
@@ -99,14 +112,14 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
             "historical_target_choice":"75th" if use75 else "50th",
             "historical_net_50th_pct":round(float(net50.mean()),3),
             "historical_net_75th_pct":round(float(net75.mean()),3),
-            "history_samples":len(starts),
+            "history_samples":len(holdout),
             "positive_rate_pct":round(100*np.mean(favorable>0),2),
             "downside_p75_pct":round(100*np.quantile(adverse,0.75),2),
             "stop_risk_pct":round(100*risk/p,2),
             "historical_target_first_pct":hist_target_first_pct,
             "historical_second_first_pct":hist_second_first_pct,
             "historical_stop_first_pct":hist_stop_first_pct,
-            "basis":f"다음 거래일 시가 진입·갭 2.5% 이내 과거 {horizon}거래일 경로 {len(starts)}개 / 중앙값·75백분위 목표의 손절 우선·왕복비용 포함 손익 비교 (선택: {'75백분위' if use75 else '중앙값'}, 과거 평균 {net_expectancy:+.2f}%; 미래 수익 확률 아님)"}
+            "basis":f"다음 거래일 시가 진입·갭 2.5% 이내 과거 {horizon}거래일 경로 학습 {len(calibration)}개·시간순 평가 {len(holdout)}개 / 중앙값·75백분위 목표의 손절 우선·왕복비용 포함 평가구간 손익 비교 (선택: {'75백분위' if use75 else '중앙값'}, 과거 평균 {net_expectancy:+.2f}%; 미래 수익 확률 아님)"}
 
 def decide_trade(signal, plan, score=None, min_rr=1.2, min_upside=2.0,
                  max_risk_pct=12.0):
