@@ -25,6 +25,7 @@ def run_direction3(per_market=100,previous=None):
             "type":"direction3_10session_3pct",
             "target_precision_pct_each":80,
             "target_buy_success_pct":TARGET_WIN_PCT,
+            "target_quality_requirements":{"mean_net_pct":"> 0","profit_factor":">= 1.1"},
             "fixed_horizon_sessions":HORIZON,"sideways_band_pct":BAND_PCT,
             "evaluation_as_of":cutoff,
             "learning_generation":generation,
@@ -99,10 +100,20 @@ def run_direction3(per_market=100,previous=None):
         diagnostic=(((data.get("adaptive_plans") or {}).get("windows") or {})
                     .get("diagnostic") or {})
         actual=diagnostic.get("actual_win_pct")
+        mean_net=diagnostic.get("mean_net_pct")
+        profit_factor=diagnostic.get("profit_factor")
         target_status[market]={
             "actual_win_pct":actual,
-            "mean_net_pct":diagnostic.get("mean_net_pct"),
-            "reached":actual is not None and actual>=TARGET_WIN_PCT}
+            "mean_net_pct":mean_net,
+            "profit_factor":profit_factor,
+            "win_rate_reached":actual is not None and actual>=TARGET_WIN_PCT,
+            "positive_net_reached":mean_net is not None and mean_net>0,
+            "profit_factor_reached":(
+                profit_factor is not None and profit_factor>=1.1),
+            "reached":(
+                actual is not None and actual>=TARGET_WIN_PCT
+                and mean_net is not None and mean_net>0
+                and profit_factor is not None and profit_factor>=1.1)}
     result["target_50_status"]=target_status
     result["target_50_all_markets"]=(
         bool(target_status) and all(x["reached"] for x in target_status.values()))
