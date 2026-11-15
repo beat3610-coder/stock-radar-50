@@ -1,0 +1,777 @@
+{
+  "verified_at_utc": "2026-11-15T13:32:37.127086831Z",
+  "run_commit": "12a7f1910f5d0b80e11e48bde7af4929e83c83dd",
+  "aggregate_buy_diagnostic": {
+    "total": 19834,
+    "wins": 8442,
+    "actual_success_pct": 42.563275184027425,
+    "mean_predicted_success_pct": 43.779798326106686,
+    "mean_net_pct": -0.46094786729857823
+  },
+  "created_utc": "2026-11-15T13:24:33.232237+00:00",
+  "type": "direction3_10session_3pct",
+  "target_precision_pct_each": 80,
+  "fixed_horizon_sessions": 10,
+  "sideways_band_pct": 3,
+  "research_only": true,
+  "live_approved": false,
+  "evaluation_warning": "Retrospective period already reviewed; not independent prospective evidence",
+  "markets": {
+    "KR": {
+      "loaded": 100,
+      "requested": 100,
+      "errors": [],
+      "labels_total": 15618,
+      "buy_labels_total": 15618,
+      "buy_success": {
+        "windows": {
+          "train": {
+            "count": 2967,
+            "wins": 1500,
+            "mean_predicted_success_pct": 45.5,
+            "actual_success_pct": 50.56,
+            "calibration_gap_pp": -5.05,
+            "brier_model": 0.272628,
+            "brier_baseline": 0.262105,
+            "mean_net_pct": 1.28,
+            "mean_predicted_net_pct": -0.057,
+            "profit_factor": 1.536
+          },
+          "validation": {
+            "count": 4971,
+            "wins": 2495,
+            "mean_predicted_success_pct": 53.21,
+            "actual_success_pct": 50.19,
+            "calibration_gap_pp": 3.02,
+            "brier_model": 0.267392,
+            "brier_baseline": 0.252335,
+            "mean_net_pct": 1.192,
+            "mean_predicted_net_pct": 1.425,
+            "profit_factor": 1.367
+          },
+          "diagnostic": {
+            "count": 6602,
+            "wins": 2578,
+            "mean_predicted_success_pct": 44.39,
+            "actual_success_pct": 39.05,
+            "calibration_gap_pp": 5.34,
+            "brier_model": 0.258339,
+            "brier_baseline": 0.247158,
+            "mean_net_pct": -1.223,
+            "mean_predicted_net_pct": 0.209,
+            "profit_factor": 0.767
+          }
+        },
+        "training_updates": 15116,
+        "trade_assumptions": {
+          "entry": "next_open",
+          "max_hold_sessions": 10,
+          "stop": "max(1.8*signal_ATR,2.5% of entry)",
+          "take": "1.8R from next open",
+          "roundtrip_cost_pct": 0.35,
+          "same_candle_stop_take": "stop_first"
+        },
+        "target_success_pct": 80,
+        "live_approved": false
+      },
+      "windows": {
+        "train": {
+          "total": 2967,
+          "correct": 1048,
+          "confusion": {
+            "UP": {
+              "UP": 296,
+              "DOWN": 296,
+              "SIDEWAYS": 588
+            },
+            "DOWN": {
+              "UP": 324,
+              "DOWN": 199,
+              "SIDEWAYS": 186
+            },
+            "SIDEWAYS": {
+              "UP": 269,
+              "DOWN": 256,
+              "SIDEWAYS": 553
+            }
+          },
+          "actual": {
+            "UP": 1180,
+            "DOWN": 709,
+            "SIDEWAYS": 1078
+          },
+          "predicted": {
+            "UP": 889,
+            "DOWN": 751,
+            "SIDEWAYS": 1327
+          },
+          "accuracy_pct": 35.32,
+          "multiclass_brier": 0.693818,
+          "prior_brier": 0.69188,
+          "mean_probabilities_pct": {
+            "UP": 33.87,
+            "DOWN": 29.94,
+            "SIDEWAYS": 36.18
+          },
+          "class_metrics": {
+            "UP": {
+              "precision_pct": 33.3,
+              "recall_pct": 25.08,
+              "correct": 296,
+              "predicted": 889,
+              "actual": 1180
+            },
+            "DOWN": {
+              "precision_pct": 26.5,
+              "recall_pct": 28.07,
+              "correct": 199,
+              "predicted": 751,
+              "actual": 709
+            },
+            "SIDEWAYS": {
+              "precision_pct": 41.67,
+              "recall_pct": 51.3,
+              "correct": 553,
+              "predicted": 1327,
+              "actual": 1078
+            }
+          }
+        },
+        "validation": {
+          "total": 4971,
+          "correct": 1934,
+          "confusion": {
+            "UP": {
+              "UP": 1195,
+              "DOWN": 368,
+              "SIDEWAYS": 470
+            },
+            "DOWN": {
+              "UP": 978,
+              "DOWN": 322,
+              "SIDEWAYS": 225
+            },
+            "SIDEWAYS": {
+              "UP": 710,
+              "DOWN": 286,
+              "SIDEWAYS": 417
+            }
+          },
+          "actual": {
+            "UP": 2033,
+            "DOWN": 1525,
+            "SIDEWAYS": 1413
+          },
+          "predicted": {
+            "UP": 2883,
+            "DOWN": 976,
+            "SIDEWAYS": 1112
+          },
+          "accuracy_pct": 38.91,
+          "multiclass_brier": 0.706871,
+          "prior_brier": 0.669057,
+          "mean_probabilities_pct": {
+            "UP": 43.28,
+            "DOWN": 26.76,
+            "SIDEWAYS": 29.96
+          },
+          "class_metrics": {
+            "UP": {
+              "precision_pct": 41.45,
+              "recall_pct": 58.78,
+              "correct": 1195,
+              "predicted": 2883,
+              "actual": 2033
+            },
+            "DOWN": {
+              "precision_pct": 32.99,
+              "recall_pct": 21.11,
+              "correct": 322,
+              "predicted": 976,
+              "actual": 1525
+            },
+            "SIDEWAYS": {
+              "precision_pct": 37.5,
+              "recall_pct": 29.51,
+              "correct": 417,
+              "predicted": 1112,
+              "actual": 1413
+            }
+          }
+        },
+        "diagnostic": {
+          "total": 6602,
+          "correct": 2713,
+          "confusion": {
+            "UP": {
+              "UP": 893,
+              "DOWN": 1135,
+              "SIDEWAYS": 76
+            },
+            "DOWN": {
+              "UP": 1041,
+              "DOWN": 1615,
+              "SIDEWAYS": 275
+            },
+            "SIDEWAYS": {
+              "UP": 657,
+              "DOWN": 705,
+              "SIDEWAYS": 205
+            }
+          },
+          "actual": {
+            "UP": 2104,
+            "DOWN": 2931,
+            "SIDEWAYS": 1567
+          },
+          "predicted": {
+            "UP": 2591,
+            "DOWN": 3455,
+            "SIDEWAYS": 556
+          },
+          "accuracy_pct": 41.09,
+          "multiclass_brier": 0.676499,
+          "prior_brier": 0.671704,
+          "mean_probabilities_pct": {
+            "UP": 35.55,
+            "DOWN": 38.95,
+            "SIDEWAYS": 25.5
+          },
+          "class_metrics": {
+            "UP": {
+              "precision_pct": 34.47,
+              "recall_pct": 42.44,
+              "correct": 893,
+              "predicted": 2591,
+              "actual": 2104
+            },
+            "DOWN": {
+              "precision_pct": 46.74,
+              "recall_pct": 55.1,
+              "correct": 1615,
+              "predicted": 3455,
+              "actual": 2931
+            },
+            "SIDEWAYS": {
+              "precision_pct": 36.87,
+              "recall_pct": 13.08,
+              "correct": 205,
+              "predicted": 556,
+              "actual": 1567
+            }
+          }
+        }
+      },
+      "skipped_warmup": 578,
+      "trained_outcomes": 15116,
+      "horizon_sessions": 10,
+      "band_pct": 3,
+      "target_precision_pct_each_direction": 80,
+      "note": "80% is a research target, NOT a verified result."
+    },
+    "KQ": {
+      "loaded": 100,
+      "requested": 100,
+      "errors": [],
+      "labels_total": 15367,
+      "buy_labels_total": 15364,
+      "buy_success": {
+        "windows": {
+          "train": {
+            "count": 2939,
+            "wins": 1516,
+            "mean_predicted_success_pct": 47.23,
+            "actual_success_pct": 51.58,
+            "calibration_gap_pp": -4.35,
+            "brier_model": 0.275141,
+            "brier_baseline": 0.262792,
+            "mean_net_pct": 2.205,
+            "mean_predicted_net_pct": 1.031,
+            "profit_factor": 1.693
+          },
+          "validation": {
+            "count": 4883,
+            "wins": 2342,
+            "mean_predicted_success_pct": 50.72,
+            "actual_success_pct": 47.96,
+            "calibration_gap_pp": 2.75,
+            "brier_model": 0.259044,
+            "brier_baseline": 0.251663,
+            "mean_net_pct": 1.644,
+            "mean_predicted_net_pct": 2.096,
+            "profit_factor": 1.354
+          },
+          "diagnostic": {
+            "count": 6470,
+            "wins": 2738,
+            "mean_predicted_success_pct": 42.07,
+            "actual_success_pct": 42.32,
+            "calibration_gap_pp": -0.24,
+            "brier_model": 0.275825,
+            "brier_baseline": 0.249821,
+            "mean_net_pct": -0.487,
+            "mean_predicted_net_pct": 0.118,
+            "profit_factor": 0.929
+          }
+        },
+        "training_updates": 14869,
+        "trade_assumptions": {
+          "entry": "next_open",
+          "max_hold_sessions": 10,
+          "stop": "max(1.8*signal_ATR,2.5% of entry)",
+          "take": "1.8R from next open",
+          "roundtrip_cost_pct": 0.35,
+          "same_candle_stop_take": "stop_first"
+        },
+        "target_success_pct": 80,
+        "live_approved": false
+      },
+      "windows": {
+        "train": {
+          "total": 2939,
+          "correct": 1116,
+          "confusion": {
+            "UP": {
+              "UP": 773,
+              "DOWN": 434,
+              "SIDEWAYS": 174
+            },
+            "DOWN": {
+              "UP": 527,
+              "DOWN": 230,
+              "SIDEWAYS": 79
+            },
+            "SIDEWAYS": {
+              "UP": 412,
+              "DOWN": 197,
+              "SIDEWAYS": 113
+            }
+          },
+          "actual": {
+            "UP": 1381,
+            "DOWN": 836,
+            "SIDEWAYS": 722
+          },
+          "predicted": {
+            "UP": 1712,
+            "DOWN": 861,
+            "SIDEWAYS": 366
+          },
+          "accuracy_pct": 37.97,
+          "multiclass_brier": 0.680743,
+          "prior_brier": 0.660422,
+          "mean_probabilities_pct": {
+            "UP": 41.22,
+            "DOWN": 31.8,
+            "SIDEWAYS": 26.97
+          },
+          "class_metrics": {
+            "UP": {
+              "precision_pct": 45.15,
+              "recall_pct": 55.97,
+              "correct": 773,
+              "predicted": 1712,
+              "actual": 1381
+            },
+            "DOWN": {
+              "precision_pct": 26.71,
+              "recall_pct": 27.51,
+              "correct": 230,
+              "predicted": 861,
+              "actual": 836
+            },
+            "SIDEWAYS": {
+              "precision_pct": 30.87,
+              "recall_pct": 15.65,
+              "correct": 113,
+              "predicted": 366,
+              "actual": 722
+            }
+          }
+        },
+        "validation": {
+          "total": 4883,
+          "correct": 1966,
+          "confusion": {
+            "UP": {
+              "UP": 1453,
+              "DOWN": 630,
+              "SIDEWAYS": 56
+            },
+            "DOWN": {
+              "UP": 1254,
+              "DOWN": 482,
+              "SIDEWAYS": 21
+            },
+            "SIDEWAYS": {
+              "UP": 689,
+              "DOWN": 267,
+              "SIDEWAYS": 31
+            }
+          },
+          "actual": {
+            "UP": 2139,
+            "DOWN": 1757,
+            "SIDEWAYS": 987
+          },
+          "predicted": {
+            "UP": 3396,
+            "DOWN": 1379,
+            "SIDEWAYS": 108
+          },
+          "accuracy_pct": 40.26,
+          "multiclass_brier": 0.668296,
+          "prior_brier": 0.646384,
+          "mean_probabilities_pct": {
+            "UP": 46.24,
+            "DOWN": 32.14,
+            "SIDEWAYS": 21.61
+          },
+          "class_metrics": {
+            "UP": {
+              "precision_pct": 42.79,
+              "recall_pct": 67.93,
+              "correct": 1453,
+              "predicted": 3396,
+              "actual": 2139
+            },
+            "DOWN": {
+              "precision_pct": 34.95,
+              "recall_pct": 27.43,
+              "correct": 482,
+              "predicted": 1379,
+              "actual": 1757
+            },
+            "SIDEWAYS": {
+              "precision_pct": 28.7,
+              "recall_pct": 3.14,
+              "correct": 31,
+              "predicted": 108,
+              "actual": 987
+            }
+          }
+        },
+        "diagnostic": {
+          "total": 6473,
+          "correct": 2550,
+          "confusion": {
+            "UP": {
+              "UP": 849,
+              "DOWN": 1591,
+              "SIDEWAYS": 0
+            },
+            "DOWN": {
+              "UP": 1352,
+              "DOWN": 1701,
+              "SIDEWAYS": 0
+            },
+            "SIDEWAYS": {
+              "UP": 447,
+              "DOWN": 533,
+              "SIDEWAYS": 0
+            }
+          },
+          "actual": {
+            "UP": 2440,
+            "DOWN": 3053,
+            "SIDEWAYS": 980
+          },
+          "predicted": {
+            "UP": 2648,
+            "DOWN": 3825,
+            "SIDEWAYS": 0
+          },
+          "accuracy_pct": 39.39,
+          "multiclass_brier": 0.693442,
+          "prior_brier": 0.63702,
+          "mean_probabilities_pct": {
+            "UP": 36.62,
+            "DOWN": 46.63,
+            "SIDEWAYS": 16.74
+          },
+          "class_metrics": {
+            "UP": {
+              "precision_pct": 32.06,
+              "recall_pct": 34.8,
+              "correct": 849,
+              "predicted": 2648,
+              "actual": 2440
+            },
+            "DOWN": {
+              "precision_pct": 44.47,
+              "recall_pct": 55.72,
+              "correct": 1701,
+              "predicted": 3825,
+              "actual": 3053
+            },
+            "SIDEWAYS": {
+              "precision_pct": null,
+              "recall_pct": 0,
+              "correct": 0,
+              "predicted": 0,
+              "actual": 980
+            }
+          }
+        }
+      },
+      "skipped_warmup": 582,
+      "trained_outcomes": 14872,
+      "horizon_sessions": 10,
+      "band_pct": 3,
+      "target_precision_pct_each_direction": 80,
+      "note": "80% is a research target, NOT a verified result."
+    },
+    "US": {
+      "loaded": 100,
+      "requested": 100,
+      "errors": [],
+      "labels_total": 16272,
+      "buy_labels_total": 16272,
+      "buy_success": {
+        "windows": {
+          "train": {
+            "count": 3525,
+            "wins": 1555,
+            "mean_predicted_success_pct": 47.08,
+            "actual_success_pct": 44.11,
+            "calibration_gap_pp": 2.97,
+            "brier_model": 0.249009,
+            "brier_baseline": 0.246555,
+            "mean_net_pct": 0.104,
+            "mean_predicted_net_pct": 0.345,
+            "profit_factor": 1.042
+          },
+          "validation": {
+            "count": 4925,
+            "wins": 2101,
+            "mean_predicted_success_pct": 43.95,
+            "actual_success_pct": 42.66,
+            "calibration_gap_pp": 1.29,
+            "brier_model": 0.261211,
+            "brier_baseline": 0.245965,
+            "mean_net_pct": -0.136,
+            "mean_predicted_net_pct": 0.052,
+            "profit_factor": 0.956
+          },
+          "diagnostic": {
+            "count": 6762,
+            "wins": 3126,
+            "mean_predicted_success_pct": 44.82,
+            "actual_success_pct": 46.23,
+            "calibration_gap_pp": -1.41,
+            "brier_model": 0.25695,
+            "brier_baseline": 0.24952,
+            "mean_net_pct": 0.308,
+            "mean_predicted_net_pct": 0.228,
+            "profit_factor": 1.092
+          }
+        },
+        "training_updates": 15684,
+        "trade_assumptions": {
+          "entry": "next_open",
+          "max_hold_sessions": 10,
+          "stop": "max(1.8*signal_ATR,2.5% of entry)",
+          "take": "1.8R from next open",
+          "roundtrip_cost_pct": 0.35,
+          "same_candle_stop_take": "stop_first"
+        },
+        "target_success_pct": 80,
+        "live_approved": false
+      },
+      "windows": {
+        "train": {
+          "total": 3525,
+          "correct": 1575,
+          "confusion": {
+            "UP": {
+              "UP": 310,
+              "DOWN": 42,
+              "SIDEWAYS": 758
+            },
+            "DOWN": {
+              "UP": 185,
+              "DOWN": 29,
+              "SIDEWAYS": 684
+            },
+            "SIDEWAYS": {
+              "UP": 235,
+              "DOWN": 46,
+              "SIDEWAYS": 1236
+            }
+          },
+          "actual": {
+            "UP": 1110,
+            "DOWN": 898,
+            "SIDEWAYS": 1517
+          },
+          "predicted": {
+            "UP": 730,
+            "DOWN": 117,
+            "SIDEWAYS": 2678
+          },
+          "accuracy_pct": 44.68,
+          "multiclass_brier": 0.650062,
+          "prior_brier": 0.655543,
+          "mean_probabilities_pct": {
+            "UP": 32.67,
+            "DOWN": 23.67,
+            "SIDEWAYS": 43.66
+          },
+          "class_metrics": {
+            "UP": {
+              "precision_pct": 42.47,
+              "recall_pct": 27.93,
+              "correct": 310,
+              "predicted": 730,
+              "actual": 1110
+            },
+            "DOWN": {
+              "precision_pct": 24.79,
+              "recall_pct": 3.23,
+              "correct": 29,
+              "predicted": 117,
+              "actual": 898
+            },
+            "SIDEWAYS": {
+              "precision_pct": 46.15,
+              "recall_pct": 81.48,
+              "correct": 1236,
+              "predicted": 2678,
+              "actual": 1517
+            }
+          }
+        },
+        "validation": {
+          "total": 4925,
+          "correct": 1681,
+          "confusion": {
+            "UP": {
+              "UP": 378,
+              "DOWN": 478,
+              "SIDEWAYS": 742
+            },
+            "DOWN": {
+              "UP": 573,
+              "DOWN": 363,
+              "SIDEWAYS": 648
+            },
+            "SIDEWAYS": {
+              "UP": 432,
+              "DOWN": 371,
+              "SIDEWAYS": 940
+            }
+          },
+          "actual": {
+            "UP": 1598,
+            "DOWN": 1584,
+            "SIDEWAYS": 1743
+          },
+          "predicted": {
+            "UP": 1383,
+            "DOWN": 1212,
+            "SIDEWAYS": 2330
+          },
+          "accuracy_pct": 34.13,
+          "multiclass_brier": 0.704961,
+          "prior_brier": 0.674878,
+          "mean_probabilities_pct": {
+            "UP": 32.38,
+            "DOWN": 31.17,
+            "SIDEWAYS": 36.45
+          },
+          "class_metrics": {
+            "UP": {
+              "precision_pct": 27.33,
+              "recall_pct": 23.65,
+              "correct": 378,
+              "predicted": 1383,
+              "actual": 1598
+            },
+            "DOWN": {
+              "precision_pct": 29.95,
+              "recall_pct": 22.92,
+              "correct": 363,
+              "predicted": 1212,
+              "actual": 1584
+            },
+            "SIDEWAYS": {
+              "precision_pct": 40.34,
+              "recall_pct": 53.93,
+              "correct": 940,
+              "predicted": 2330,
+              "actual": 1743
+            }
+          }
+        },
+        "diagnostic": {
+          "total": 6762,
+          "correct": 2439,
+          "confusion": {
+            "UP": {
+              "UP": 971,
+              "DOWN": 732,
+              "SIDEWAYS": 825
+            },
+            "DOWN": {
+              "UP": 1019,
+              "DOWN": 398,
+              "SIDEWAYS": 686
+            },
+            "SIDEWAYS": {
+              "UP": 669,
+              "DOWN": 392,
+              "SIDEWAYS": 1070
+            }
+          },
+          "actual": {
+            "UP": 2528,
+            "DOWN": 2103,
+            "SIDEWAYS": 2131
+          },
+          "predicted": {
+            "UP": 2659,
+            "DOWN": 1522,
+            "SIDEWAYS": 2581
+          },
+          "accuracy_pct": 36.07,
+          "multiclass_brier": 0.678994,
+          "prior_brier": 0.670999,
+          "mean_probabilities_pct": {
+            "UP": 35.86,
+            "DOWN": 30.58,
+            "SIDEWAYS": 33.56
+          },
+          "class_metrics": {
+            "UP": {
+              "precision_pct": 36.52,
+              "recall_pct": 38.41,
+              "correct": 971,
+              "predicted": 2659,
+              "actual": 2528
+            },
+            "DOWN": {
+              "precision_pct": 26.15,
+              "recall_pct": 18.93,
+              "correct": 398,
+              "predicted": 1522,
+              "actual": 2103
+            },
+            "SIDEWAYS": {
+              "precision_pct": 41.46,
+              "recall_pct": 50.21,
+              "correct": 1070,
+              "predicted": 2581,
+              "actual": 2131
+            }
+          }
+        }
+      },
+      "skipped_warmup": 570,
+      "trained_outcomes": 15684,
+      "horizon_sessions": 10,
+      "band_pct": 3,
+      "target_precision_pct_each_direction": 80,
+      "note": "80% is a research target, NOT a verified result."
+    }
+  }
+}
