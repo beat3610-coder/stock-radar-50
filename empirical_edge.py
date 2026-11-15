@@ -27,13 +27,23 @@ def posterior_from_completed(prior):
     win_probability=(wins+2)/(n+4)
     # Historical trade net returns already include round-trip cost.
     expected_net=(net+PSEUDO_COUNT*PSEUDO_MEAN_NET_PCT)/(n+PSEUDO_COUNT)
-    positive=bool(expected_net>MIN_SHRUNK_EXPECTANCY_PCT)
+    # A long average can mask a sudden regime reversal. Require both the
+    # long calibration pool and most recent 30 *completed* trades to retain
+    # a positive, conservatively shrunken cost-adjusted edge.
+    short=recent[-30:]
+    short_wins=sum(float(t["net_pct"])>0 for t in short)
+    short_expected=(sum(float(t["net_pct"]) for t in short)-0.35*10)/(len(short)+10)
+    short_win_probability=(short_wins+2)/(len(short)+4)
+    positive=bool(expected_net>MIN_SHRUNK_EXPECTANCY_PCT and short_expected>0.20)
     return {"eligible":positive,"sample_count":n,
+            "recent_sample_count":len(short),
+            "recent_expected_net_pct":round(short_expected,3),
+            "recent_win_probability_pct":round(100*short_win_probability,2),
             "win_probability_pct":round(100*win_probability,2),
             "stop_first_probability_pct":round(100*(stops+1)/(n+3),2),
             "take_first_probability_pct":round(100*(takes+1)/(n+3),2),
             "expected_net_pct":round(expected_net,3),
-            "reason":"비용 반영 보수적 기대수익 양수" if positive else "보수적 기대수익 기준 미달"}
+            "reason":"장·단기 기대수익 모두 양수" if positive else "최근 30건 또는 전체 표본의 기대수익 악화"}
 
 def walkforward_filter(trades):
     """Return prospective-compatible candidates and diagnostics.
