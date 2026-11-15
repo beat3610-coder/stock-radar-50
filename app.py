@@ -148,7 +148,11 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
     st.caption("100종목씩 과거 일봉을 평가한 보고서 기준: 코스피 34.92%(63건), 코스닥 26.67%(30건), 나스닥 0건. 이미 열람된 역사적 진단값입니다.")
     if rolling:
         st.markdown("**최근 순차학습 결과: 상승·하락·횡보와 매수 성공**")
-        st.caption(f"평가 기준일 {rolling.get('evaluation_as_of','확인 필요')} · 10거래일 뒤 실제 종가로 정답 확인 · 하루 4회 확인, 같은 날짜 데이터는 1회만 재학습 · 실전 승인 아님")
+        g1,g2,g3=st.columns(3)
+        g1.metric("누적 수식 세대",rolling.get("learning_generation","확인 필요"))
+        g2.metric("방향 후보/시장",((rolling.get("markets",{}).get("KR",{}).get("tuning") or {}).get("candidate_count","확인 필요")))
+        g3.metric("매수확률 후보/시장",((((rolling.get("markets",{}).get("KR",{}).get("buy_success") or {}).get("tuning") or {}).get("candidate_count","확인 필요")))
+        st.caption(f"평가 기준일 {rolling.get('evaluation_as_of','확인 필요')} · 학습세대 {rolling.get('learning_generation','확인 필요')} · 하루 4회 새 수식 변이 탐색 · 전체 과거를 반기별 순차 비교 · 실전 승인 아님")
         candidate_rows=[]
         rolling_rows=[]
         for key,name in names.items():
@@ -175,6 +179,13 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
                     c=item.get("candidate") or {}
                     candidate_rows.append({"시장":name,"모델":model_name,"후보":c.get("name"),
                       "학습률":c.get("learning_rate"),"정규화":c.get("l2"),"기준혼합":c.get("prior_mix"),"횡보가중치":c.get("sideways_weight"),
+                      "전기간 Macro F1(%)":item.get("whole_history_macro_f1_pct"),
+                      "최악기간 Macro F1(%)":item.get("worst_period_macro_f1_pct"),
+                      "전기간 정확도(%)":item.get("whole_history_accuracy_pct"),
+                      "전기간 Brier":item.get("whole_history_brier"),
+                      "최악기간 Brier":item.get("worst_period_brier"),
+                      "확률보정 오차(%p)":item.get("whole_history_calibration_gap_pp"),
+                      "분석 기간수":item.get("period_count"),
                       "검증 Macro F1(%)":item.get("validation_macro_f1_pct"),
                       "검증 정확도(%)":item.get("validation_accuracy_pct"),
                       "검증 Brier":item.get("validation_brier"),"기준 Brier":item.get("validation_baseline_brier"),
@@ -188,7 +199,7 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
             if search:
                 cf=cf[cf.astype(str).apply(lambda col:col.str.contains(search,case=False,regex=False)).any(axis=1)]
             st.dataframe(cf,hide_index=True,use_container_width=True,height=340)
-        st.warning("이 반복 진단은 새로 성숙한 과거 관측을 순차 학습합니다. 이미 공개된 진단기간의 성과는 독립 검증이 아닙니다. 새 공식은 별도 미래 구간에서 성능이 확인되기 전까지 자동 실전 적용하지 않습니다.")
+        st.warning("매 실행마다 이전 최적식 주변에 새 변이 수식을 만들고, 완료된 전체 과거를 반기별로 순차 학습·비교합니다. 모든 과거기간을 수식 선택에 사용하므로 표시 성과는 연구 적합도이며 실전 성공률 보장이 아닙니다.")
     if online:
         st.markdown("**온라인 순차학습 성능: 학습·검증·이미 확인된 진단 구간**")
         summary=[]; policies=[]
