@@ -8,6 +8,7 @@ on:
     paths:
       - "direction3.py"
       - "direction_audit.py"
+      - "buy_success.py"
       - ".github/workflows/rolling-learning.yml"
 concurrency:
   group: rolling-research-learning
