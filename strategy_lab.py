@@ -35,6 +35,10 @@ PARAMS={
  "trend_breakout":{"rr":2.0,"stop_atr":1.8},
  "trend_pullback":{"rr":1.7,"stop_atr":1.7},
  "momentum_reentry":{"rr":1.8,"stop_atr":1.8},
+ # Development-only exit hypotheses: the signal is unchanged; exits become
+ # moderately closer while the stop keeps room for ordinary ATR volatility.
+ "trend_pullback_balanced":{"rr":1.55,"stop_atr":1.9},
+ "momentum_reentry_balanced":{"rr":1.55,"stop_atr":1.9},
 }
 def _finite(*values):
     return all(v is not None and np.isfinite(v) for v in values)
@@ -60,18 +64,20 @@ def qualifying(row,prev,market,variant,prior_high):
         return False
     if p/float(row.MA20)>1.08:
         return False
+    # Match identical signal logic for the original and alternative exits.
+    signal_variant=variant.removesuffix("_balanced")
     # Determine buying conditions strictly from signal-day and prior bars.
-    if variant=="trend_breakout":
+    if signal_variant=="trend_breakout":
         return (p>row.MA20>row.MA60>row.MA200 and p>prior_high
             and 50<=row.RSI<=76 and row.MACDH>0
             and row.Volume/row.VOL20>=1.2)
-    if variant=="trend_pullback":
+    if signal_variant=="trend_pullback":
         return (p>row.MA60>row.MA200 and p>row.MA20
             and 43<=row.RSI<=68 and
             float(prev.Close)<=float(prev.MA20)*1.018
             and p>float(prev.Close) and row.MACDH>float(prev.MACDH)
             and row.PDI>row.MDI)
-    if variant=="momentum_reentry":
+    if signal_variant=="momentum_reentry":
         return (p>row.MA60>row.MA200 and
             45<=row.RSI<=72 and row.MACDH>0
             and float(prev.MACDH)<=0 and p>row.MA20 and row.PDI>row.MDI)
@@ -152,7 +158,7 @@ def train_choice(choices):
 def run(per_market=20):
     u=get_universe()
     res={"created_utc":datetime.now(timezone.utc).isoformat(),
-        "type":"research_lab_v2_empirical_probability",
+        "type":"research_lab_v3_exit_hypotheses",
         "method":"train-only selection, fixed validation screening, untouched-in-this-run diagnostic holdout",
         "train_end":TRAIN_END,"validation_end":VALID_END,"holdout_end":HOLDOUT_END,
         "selection_requires":{"train_trades":MIN_TRAIN_TRADES,"validation_trades":MIN_VALID_TRADES,
@@ -205,8 +211,11 @@ def run(per_market=20):
         # even if the validation rejection gate failed. That prevents a "0%
         # drawdown" no-trade record from hiding a losing strategy. Rejection
         # still blocks live approval.
-        selected=leader
+        selected=leader if accepted else None
         selected_trades=_interval(variants[selected],"test") if selected else []
+        # Rejected strategy is still scored for transparent diagnostics but
+        # NEVER replayed as if it were authorized portfolio trading.
+        rejected_diagnostic=_interval(variants[leader],"test") if leader and not accepted else []
         holdout_measures=metrics(selected_trades)
         # Diagnose actual loss mechanisms instead of reporting only win rate.
         loss_trades=[t for t in selected_trades if t.get("net_pct",0)<=0]
@@ -260,6 +269,8 @@ def run(per_market=20):
             "edge_calibration":edge_diagnostics,
             "evaluation_policy":"diagnostic_heldout_even_if_validation_rejected; never live approve",
             "selected_for_diagnostic":selected,
+            "rejected_candidate":leader if not accepted else None,
+            "rejected_candidate_diagnostic":metrics(rejected_diagnostic),
             "research_eligible":research_eligible,
             "live_approved":False,
             "train":train_metrics,"validation":validation_metrics,
