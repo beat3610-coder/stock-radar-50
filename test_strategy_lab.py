@@ -27,6 +27,20 @@ class StrategyLabTests(unittest.TestCase):
              "MACDH":1,"ADX":25,"PDI":25,"MDI":10,"ATR":2,
              "Volume":200,"VOL20":100})
         self.assertFalse(qualifying(r,r,"KR","made_up",101))
+    def test_balanced_exits_share_same_entry_signals(self):
+        row=pd.Series({"Close":105,"MA20":100,"MA60":98,"MA200":90,
+             "MA200_UP20":True,"RSI":55,"MACDH":1,"ADX":25,
+             "PDI":25,"MDI":10,"ATR":2,"Volume":200,"VOL20":100})
+        prev=row.copy()
+        prev["Close"]=100
+        prev["MACDH"]=0.5
+        self.assertEqual(qualifying(row,prev,"KR","trend_pullback",106),
+                         qualifying(row,prev,"KR","trend_pullback_balanced",106))
+        self.assertEqual(qualifying(row,prev,"KR","momentum_reentry",106),
+                         qualifying(row,prev,"KR","momentum_reentry_balanced",106))
+    def test_balanced_exit_parameters_not_optimized_on_holdout(self):
+        self.assertAlmostEqual(PARAMS["trend_pullback_balanced"]["rr"],1.55)
+        self.assertAlmostEqual(PARAMS["trend_pullback_balanced"]["stop_atr"],1.9)
     def test_params_finite(self):
         self.assertTrue(all(v["rr"]>1 and v["stop_atr"]>0 for v in PARAMS.values()))
 
