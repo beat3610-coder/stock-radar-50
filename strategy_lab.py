@@ -20,7 +20,7 @@ from universe import get_universe
 from audit_300 import simulate_exit, metrics
 from portfolio_audit import replay
 from trade_execution import entry_quality
-from empirical_edge import walkforward_filter
+from empirical_edge import walkforward_filter, walkforward_regime_filter
 
 TRAIN_END="2025-11-01"
 VALID_END="2026-04-01"
@@ -121,7 +121,10 @@ def candidates_from_frame(frame,ticker,market):
                 "entry":op,"stop":stop,"take":take,
                 "entry_net_rr":execution_check["net_rr"],
                 "entry_net_upside_pct":execution_check["net_upside_pct"],
-                "score":float(r.RSI),**outcome}
+                "score":float(r.RSI),
+                "signal_atr_pct":round(100*atr/close,3),
+                "signal_ma20_ma60_pct":round(100*(float(r.MA20)/float(r.MA60)-1),3),
+                **outcome}
             result[name].append(trade)
     # prevent same ticker stacking into its own previous trade
     for name in result:
@@ -158,9 +161,10 @@ def train_choice(choices):
 def run(per_market=20):
     u=get_universe()
     res={"created_utc":datetime.now(timezone.utc).isoformat(),
-        "type":"research_lab_v3_exit_hypotheses",
+        "type":"research_lab_v4_regime_probabilities",
         "method":"train-only selection, fixed validation screening, untouched-in-this-run diagnostic holdout",
         "train_end":TRAIN_END,"validation_end":VALID_END,"holdout_end":HOLDOUT_END,
+        "research_target_win_rate_pct":70,
         "selection_requires":{"train_trades":MIN_TRAIN_TRADES,"validation_trades":MIN_VALID_TRADES,
                               "train_pf":1.15,"validation_pf":1.30,"validation_min_win_rate_pct":50,"validation_mean_net_pct":0.25},
         "caveats":["Data from 2026 has been examined during earlier development; not truly independent",
@@ -195,7 +199,9 @@ def run(per_market=20):
         for original in tuple(PARAMS):
             filtered,report=walkforward_filter(variants[original])
             variants[original+"_prob_edge"]=filtered
-            edge_diagnostics[original]=report
+            high_confidence,high_confidence_report=walkforward_regime_filter(variants[original])
+            variants[original+"_regime_edge"]=high_confidence
+            edge_diagnostics[original]={**report,"regime_filter":high_confidence_report}
         leader,scores=train_choice(variants)
         train_metrics={k:metrics(_interval(v,"train")) for k,v in variants.items()}
         validation_metrics={k:metrics(_interval(v,"validate")) for k,v in variants.items()}
