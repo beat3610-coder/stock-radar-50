@@ -1,8 +1,8 @@
 {
-  "time": "2026-11-13T23:28:02.851610+00:00",
+  "time": "2026-11-15T08:50:33.219324+00:00",
   "kosdaq": {
     "count": 100,
-    "source": "FinanceDataReader KOSDAQ 코스닥 시총순 / 2026-11-13 / 업종 100/100 확인 (KIND 업종목록)",
+    "source": "FinanceDataReader KOSDAQ 코스닥 시총순 / 2026-11-15 / 업종 100/100 확인 (KIND 업종목록)",
     "sample": [
       [
         "196170",
