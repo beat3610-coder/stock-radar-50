@@ -22,6 +22,7 @@ from portfolio_audit import replay
 from trade_execution import entry_quality
 from empirical_edge import walkforward_filter, walkforward_regime_filter
 from predictive_model import walkforward_model_filter
+from broad_candidates import broad_candidates_from_computed
 
 TRAIN_END="2025-11-01"
 VALID_END="2026-04-01"
@@ -167,7 +168,7 @@ def train_choice(choices):
 def run(per_market=20):
     u=get_universe()
     res={"created_utc":datetime.now(timezone.utc).isoformat(),
-        "type":"research_lab_v5_prequential_prediction",
+        "type":"research_lab_v6_broad_pool_model",
         "method":"train-only selection, fixed validation screening, untouched-in-this-run diagnostic holdout",
         "train_end":TRAIN_END,"validation_end":VALID_END,"holdout_end":HOLDOUT_END,
         "research_target_win_rate_pct":70,
@@ -187,12 +188,15 @@ def run(per_market=20):
                ({"KR":{"472150","0262B0"},"KQ":set(),"US":{"SOXL"}}[market])][:per_market]
         frames={}
         variants={k:[] for k in PARAMS}
+        broad_training_pool=[]
         failures=[]
         for idx,(ticker,_,_,_) in enumerate(items,1):
             try:
                 raw,_=get_prices(ticker,market)
                 x,trades=candidates_from_frame(raw,ticker,market)
                 frames[ticker]=raw
+                broad_training_pool.extend(broad_candidates_from_computed(x,ticker,market,
+                     end_date=HOLDOUT_END,cost_pct=COST_PCT))
                 for k in variants:variants[k].extend(trades[k])
             except Exception as exc:
                 failures.append({"ticker":ticker,"error":str(exc)[:160]})
@@ -211,6 +215,13 @@ def run(per_market=20):
             variants[original+"_ml_edge"]=ml_filtered
             edge_diagnostics[original]={**report,"regime_filter":high_confidence_report,
                                         "predictive_model":ml_report}
+        broad_model_trades,broad_model_report=walkforward_model_filter(broad_training_pool)
+        variants["broad_market_ml"]=broad_model_trades
+        edge_diagnostics["broad_market_ml"]={"predictive_model":broad_model_report,
+            "base_population":len(broad_training_pool),
+            "population_train":metrics(_interval(broad_training_pool,"train")),
+            "population_validation":metrics(_interval(broad_training_pool,"validate")),
+            "population_holdout_diagnostic":metrics(_interval(broad_training_pool,"test"))}
         leader,scores=train_choice(variants)
         train_metrics={k:metrics(_interval(v,"train")) for k,v in variants.items()}
         validation_metrics={k:metrics(_interval(v,"validate")) for k,v in variants.items()}
