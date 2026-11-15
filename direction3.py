@@ -202,7 +202,7 @@ def score_directions(trades,*,train_end="2025-11-01",
                      validation_end="2026-04-01",eval_end="2026-11-01"):
     """Tune a small frozen hyperparameter menu on validation, then report all samples.
 
-    Selection uses validation accuracy, with Brier score as the tie-breaker.
+    Selection uses validation macro F1 across UP, DOWN, and SIDEWAYS, then accuracy, then Brier score.
     The already reviewed diagnostic window is never used to select a candidate.
     """
     candidates=[]
@@ -219,22 +219,31 @@ def score_directions(trades,*,train_end="2025-11-01",
             eval_end=eval_end,learning_rate=candidate["learning_rate"],
             l2=candidate["l2"],prior_mix=candidate["prior_mix"])
         validation=report["windows"]["validation"]
+        class_metrics=validation.get("class_metrics") or {}
+        f1_scores=[]
+        for label in LABELS:
+            item=class_metrics.get(label) or {}
+            precision=(item.get("precision_pct") or 0)/100
+            recall=(item.get("recall_pct") or 0)/100
+            f1_scores.append(2*precision*recall/(precision+recall) if precision+recall else 0.)
+        macro_f1_pct=round(100*sum(f1_scores)/len(LABELS),2)
         scored.append({"candidate":candidate,"report":report,
+            "validation_macro_f1_pct":macro_f1_pct,
             "validation_accuracy_pct":validation.get("accuracy_pct"),
             "validation_brier":validation.get("multiclass_brier"),
             "validation_samples":validation.get("total",0)})
     eligible=[r for r in scored if r["validation_samples"]>=30 and
-              r["validation_accuracy_pct"] is not None]
+              r["validation_macro_f1_pct"] is not None]
     if not eligible:
         chosen=next(r for r in scored if r["candidate"]["name"]=="lr0.13_l20.06_prior0.15")
     else:
         chosen=max(eligible,key=lambda r:(
-            r["validation_accuracy_pct"],
+            r["validation_macro_f1_pct"],r["validation_accuracy_pct"],
             -(r["validation_brier"] if r["validation_brier"] is not None else float("inf"))))
     result=chosen["report"]
     result["tuning"]={
         "selection_window":f"signal date < {validation_end}",
-        "selection_metric":"전체 3분류 정확도; 동률이면 multiclass Brier가 낮은 후보",
+        "selection_metric":"UP·DOWN·횡보 3개 클래스 Macro F1 최대화, 동률이면 전체정확도 후 Brier",
         "chosen":chosen["candidate"],
         "candidates":[{k:v for k,v in item.items() if k!="report"} for item in scored],
         "candidate_count":len(candidates),

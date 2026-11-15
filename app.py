@@ -158,6 +158,7 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
             c=item.get("candidate") or {}
             candidate_rows.append({"후보":c.get("name"),"학습률":c.get("learning_rate"),
               "정규화":c.get("l2"),"기준혼합":c.get("prior_mix"),
+              "검증 Macro F1(%)":item.get("validation_macro_f1_pct"),
               "검증 정확도(%)":item.get("validation_accuracy_pct"),
               "검증 Brier":item.get("validation_brier"),"검증 표본":item.get("validation_samples")})
         if candidate_rows:
