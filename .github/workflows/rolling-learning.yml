@@ -27,11 +27,11 @@ jobs:
         with:
           python-version: "3.11"
       - id: goal
-        name: Continue until every market reaches 50 percent actual plan wins
+        name: Continue until every market reaches meaningful 50 percent performance
         run: |
           REACHED="$(python -c 'import json,pathlib; p=pathlib.Path("data/direction3-rolling-latest.json"); j=json.loads(p.read_text()) if p.exists() else {}; print("true" if j.get("target_50_all_markets") else "false")')"
           echo "reached=$REACHED" >> "$GITHUB_OUTPUT"
-          echo "Previous generation all-market 50 percent status: $REACHED"
+          echo "Previous generation all-market 50 percent, positive net, PF 1.1 status: $REACHED"
       - name: Install market data and analysis dependencies
         if: steps.goal.outputs.reached != 'true'
         run: pip install -r requirements.txt
@@ -55,4 +55,4 @@ jobs:
           git push
       - name: Record target reached
         if: steps.goal.outputs.reached == 'true'
-        run: echo "All tracked markets already reached the 50 percent historical research target."
+        run: echo "All markets reached 50 percent wins with positive net return and profit factor at least 1.1."
