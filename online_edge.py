@@ -133,9 +133,13 @@ def score_stream(trades, market, *, db_path=None):
         next_exit=next(finished,None)
         model=RunningEdge()
         adaptive=OnlineLogistic()
+        # Fixed ex-ante probability policies. No per-market outcome tuning.
+        adaptive_thresholds={"adaptive_p50":0.50,"adaptive_p55":0.55}
         selected={k:[] for k in POLICIES}
+        selected.update({key:[] for key in adaptive_thresholds})
         diagnostics={"population":staged,"insufficient":0,"scored":0,
-                     "by_policy":{k:0 for k in POLICIES},
+                     "by_policy":{k:0 for k in selected},
+                     "adaptive_thresholds":adaptive_thresholds,
                      "brier_model_sum":0.0,"brier_market_baseline_sum":0.0,
                      "brier_adaptive_sum":0.0,"adaptive_scored":0,
                      "absolute_probability_error_sum":0.0,
@@ -162,6 +166,10 @@ def score_stream(trades, market, *, db_path=None):
             if p_adaptive is not None:
                 diagnostics["brier_adaptive_sum"]+=(p_adaptive-y)**2
                 diagnostics["adaptive_scored"]+=1
+                for policy,minimum_probability in adaptive_thresholds.items():
+                    if p_adaptive>=minimum_probability:
+                        selected[policy].append({**row,"adaptive_predicted_win_pct":round(100*p_adaptive,3)})
+                        diagnostics["by_policy"][policy]+=1
             diagnostics["brier_model_sum"]+=(forecast-y)**2
             diagnostics["brier_market_baseline_sum"]+=(baseline-y)**2
             diagnostics["absolute_probability_error_sum"]+=abs(forecast-y)
