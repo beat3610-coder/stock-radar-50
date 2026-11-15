@@ -25,12 +25,13 @@ def run_direction3(per_market=100,previous=None):
             "type":"direction3_10session_3pct",
             "target_precision_pct_each":80,
             "target_buy_success_pct":TARGET_WIN_PCT,
-            "target_quality_requirements":{"mean_net_pct":"> 0","profit_factor":">= 1.1"},
+            "target_quality_requirements":{"mean_net_pct":"> 0","profit_factor":">= 1.1",
+                "diagnostic_trades":">= 300","coverage_pct":">= 10"},
             "fixed_horizon_sessions":HORIZON,"sideways_band_pct":BAND_PCT,
             "evaluation_as_of":cutoff,
             "learning_generation":generation,
             "previous_report_created_utc":previous.get("created_utc"),
-            "search_scope":"전체 완료 과거기간 반기별 순차평가 + 방향·확률·손절·익절·보유기간 변이",
+            "search_scope":"전체 완료 과거기간 반기별 순차평가 + 허용 라이선스 표준지표 + 방향·확률·손절·익절·보유기간·거래선별 변이",
             "research_only":True,"live_approved":False,
             "independent_holdout":False,
             "evaluation_warning":"전체 과거 구간을 수식 선택에 사용한 연구 적합도이며 미래 성공률 보장이 아닙니다.",
@@ -88,6 +89,7 @@ def run_direction3(per_market=100,previous=None):
             "buy_labels_total":len(buy_rows),
             "buy_diagnostic":buy_metrics["windows"]["diagnostic"],
             "adaptive_plan_diagnostic":adaptive_plans["windows"]["diagnostic"],
+            "selective_challenger":adaptive_plans.get("selective_challenger"),
             "adaptive_plan_tuning":adaptive_plans["tuning"],
             "diagnostic":slim,
             "whole_history_direction":metrics["tuning"],
@@ -97,26 +99,43 @@ def run_direction3(per_market=100,previous=None):
 
     target_status={}
     for market,data in result["markets"].items():
-        diagnostic=(((data.get("adaptive_plans") or {}).get("windows") or {})
-                    .get("diagnostic") or {})
+        adaptive=data.get("adaptive_plans") or {}
+        challenger=adaptive.get("selective_challenger") or {}
+        diagnostic=((challenger
+                    .get("windows") or {}).get("diagnostic") or {})
         actual=diagnostic.get("actual_win_pct")
         mean_net=diagnostic.get("mean_net_pct")
         profit_factor=diagnostic.get("profit_factor")
+        trades=diagnostic.get("trades")
+        coverage=diagnostic.get("coverage_pct")
+        validation_eligible=bool(challenger.get("validation_eligible"))
         target_status[market]={
             "actual_win_pct":actual,
             "mean_net_pct":mean_net,
             "profit_factor":profit_factor,
+            "trades":trades,
+            "coverage_pct":coverage,
+            "validation_eligible":validation_eligible,
             "win_rate_reached":actual is not None and actual>=TARGET_WIN_PCT,
             "positive_net_reached":mean_net is not None and mean_net>0,
             "profit_factor_reached":(
                 profit_factor is not None and profit_factor>=1.1),
+            "sample_reached":trades is not None and trades>=300,
+            "coverage_reached":coverage is not None and coverage>=10,
+            "validation_reached":validation_eligible,
             "reached":(
-                actual is not None and actual>=TARGET_WIN_PCT
+                validation_eligible
+                and actual is not None and actual>=TARGET_WIN_PCT
                 and mean_net is not None and mean_net>0
-                and profit_factor is not None and profit_factor>=1.1)}
-    result["target_50_status"]=target_status
-    result["target_50_all_markets"]=(
+                and profit_factor is not None and profit_factor>=1.1
+                and trades is not None and trades>=300
+                and coverage is not None and coverage>=10)}
+    result["target_quality_status"]=target_status
+    result["target_quality_all_markets"]=(
         bool(target_status) and all(x["reached"] for x in target_status.values()))
+    # Compatibility aliases for older dashboard versions.
+    result["target_50_status"]=target_status
+    result["target_50_all_markets"]=result["target_quality_all_markets"]
     return result
 
 

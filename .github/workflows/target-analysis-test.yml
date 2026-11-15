@@ -2,7 +2,7 @@ name: Integrated target algorithm tests
 on:
   push:
     branches: [main]
-    paths: ["engine.py", "trade_plan.py", "test_trade_plan.py", "app.py", "providers.py", "test_quote_verify.py", ".github/workflows/target-analysis-test.yml"]
+    paths: ["engine.py", "reference_indicators.py", "test_reference_indicators.py", "trade_plan.py", "test_trade_plan.py", "app.py", "providers.py", "test_quote_verify.py", ".github/workflows/target-analysis-test.yml"]
   workflow_dispatch:
 permissions:
   contents: write

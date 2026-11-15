@@ -9,7 +9,7 @@ predictions always precede training on labels.
 import math
 import random
 import pandas as pd
-from direction3 import features
+from direction3 import features,FEATURE_COUNT
 from audit_300 import simulate_exit
 
 HOLD=10
@@ -18,8 +18,8 @@ TRAIN_MIN=90
 
 class OnlineBuySuccess:
     def __init__(self, lr=0.11, l2=0.065, prior_mix=0.15):
-        self.weights=[0.0]*10
-        self.adagrad=[4.0]*10
+        self.weights=[0.0]*FEATURE_COUNT
+        self.adagrad=[4.0]*FEATURE_COUNT
         self.lr=lr
         self.l2=l2
         self.prior_mix=max(0.,min(1.,float(prior_mix)))

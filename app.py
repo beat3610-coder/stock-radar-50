@@ -138,7 +138,16 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
     c1.metric("현재 학습 목표",f"{learning_target:g}%","순손익 > 0 · 손익비 ≥ 1.1")
     c2.metric("최신 온라인 학습 결과",str(online.get("created_utc","확인 필요"))[:10])
     c3.metric("실전·유료 승인","차단","독립 검증 및 운영 요건 미충족")
-    st.warning("50%는 승률만으로 합격하지 않습니다. 비용 반영 평균 순손익이 양수이고 손익비가 1.1 이상일 때만 목표 달성으로 기록합니다.")
+    st.warning(f"{learning_target:g}%는 승률만으로 합격하지 않습니다. 비용 반영 평균 순손익 양수, 손익비 1.1 이상, 진단거래 300건 이상, 신호 coverage 10% 이상을 모두 충족해야 합니다.")
+    with st.expander("📚 저작권 안전 오픈소스 참고 범위"):
+        st.markdown("""
+- **TA-Lib (BSD-3-Clause):** Wilder RSI·ATR·ADX의 공개 수학식 동작을 독립 구현
+- **ta (MIT):** CMF·Donchian·ROC·볼린저 폭 지표 목록과 공개 정의 참고
+- **QuantConnect LEAN (Apache-2.0)·Microsoft Qlib (MIT):** 지표·체결·평가 분리와 챌린저 비교 구조만 참고
+- 타사 코드를 그대로 복사하지 않으며 출처 불명, GPL/AGPL 직접 결합, 유료 사이트 역공학, 사용 허가 없는 TradingView 사용자 스크립트는 제외합니다.
+
+새 지표는 기존 수식을 자동 대체하지 않습니다. 검증구간에서 비용 후 순수익·손익비·표본·coverage를 통과하고, 이후 진단구간에서도 개선될 때만 후보로 기록합니다.
+""")
     names={"KR":"코스피","KQ":"코스닥","US":"나스닥"}
     results=[]
     for key,name in names.items():
@@ -168,7 +177,10 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
             m=(rolling.get("markets") or {}).get(key,{})
             d=(m.get("windows") or {}).get("diagnostic") or {}
             b=(((m.get("buy_success") or {}).get("windows") or {}).get("diagnostic") or {})
-            p=(((m.get("adaptive_plans") or {}).get("windows") or {}).get("diagnostic") or {})
+            adaptive=m.get("adaptive_plans") or {}
+            p=((adaptive.get("windows") or {}).get("diagnostic") or {})
+            selective=adaptive.get("selective_challenger") or {}
+            sp=((selective.get("windows") or {}).get("diagnostic") or {})
             dt=m.get("tuning") or {}
             bt=(m.get("buy_success") or {}).get("tuning") or {}
             dc=dt.get("chosen") or {}
@@ -181,10 +193,13 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
               "매수 실제 성공률(%)":b.get("actual_success_pct","확인 필요"),
               "매수 예측확률 평균(%)":b.get("mean_predicted_success_pct","확인 필요"),
               "매수 평균 순손익(%)":b.get("mean_net_pct","확인 필요"),
-              "적응형 청산 승률(%)":p.get("actual_win_pct","확인 필요"),
-              "적응형 순손익(%)":p.get("mean_net_pct","확인 필요"),
-              "적응형 손익비":p.get("profit_factor","확인 필요"),
-              "50% 품질목표":("달성" if ((rolling.get("target_50_status") or {}).get(key) or {}).get("reached") else "미달")})
+              "전체신호 청산 승률(%)":p.get("actual_win_pct","확인 필요"),
+              "선별 거래":sp.get("trades","확인 필요"),
+              "선별 coverage(%)":sp.get("coverage_pct","확인 필요"),
+              "선별 승률(%)":sp.get("actual_win_pct","확인 필요"),
+              "선별 순손익(%)":sp.get("mean_net_pct","확인 필요"),
+              "선별 손익비":sp.get("profit_factor","확인 필요"),
+              f"{learning_target:g}% 품질목표":("달성" if (((rolling.get("target_quality_status") or rolling.get("target_50_status") or {}).get(key) or {}).get("reached")) else "미달")})
             for model_name, tuning in (("방향",dt),("매수확률",bt)):
                 for item in tuning.get("candidates") or []:
                     c=item.get("candidate") or {}

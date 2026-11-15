@@ -6,6 +6,7 @@ formula search, so results are research fit rather than independent evidence.
 """
 import math
 import random
+import numpy as np
 import pandas as pd
 from buy_success import OnlineBuySuccess, COST_PCT, HOLD
 from audit_300 import simulate_exit
@@ -16,7 +17,12 @@ PLANS={
     "patient":(2.4,2.2),
 }
 MIN_HISTORY=90
-TARGET_WIN_PCT=50.0
+TARGET_WIN_PCT=55.0
+SELECTOR_QUANTILES=(0.50,0.60,0.70,0.80,0.90)
+SELECTOR_MIN_HISTORY=250
+SELECTOR_MIN_BUCKET=60
+SELECTOR_MIN_COVERAGE_PCT=10.0
+SELECTOR_MIN_DIAGNOSTIC_TRADES=300
 
 
 def _normalise_plans(plans=None):
@@ -102,8 +108,20 @@ class PlanLearner:
     def __init__(self,plans=None):
         self.plans=_normalise_plans(plans)
         self.learners={name:OnlineBuySuccess() for name in self.plans}
+        self.history={name:[] for name in self.plans}
+        self.profile_cache={}
+        self.profile_dirty=0
 
     def update(self,row):
+        snapshot=row.pop("_plan_prediction_snapshot",None)
+        if snapshot:
+            for name,(score,probability) in snapshot.items():
+                net=float(row["plan_net_pct"][name])
+                history=self.history[name]
+                history.append((float(score),float(probability),net))
+                if len(history)>2000:
+                    del history[:len(history)-2000]
+            self.profile_dirty+=1
         for name,model in self.learners.items():
             item={**row,"buy_net_pct":row["plan_net_pct"][name]}
             model.update(item)
@@ -113,6 +131,9 @@ class PlanLearner:
                      for name,model in self.learners.items()}
         if any(p is None for p in predictions.values()):
             return None
+        row["_plan_prediction_snapshot"]={
+            name:(prediction["expected_net_pct"],prediction["p_success"])
+            for name,prediction in predictions.items()}
         viable=[name for name,p in predictions.items()
                 if p["p_success"]>=TARGET_WIN_PCT/100
                 and p["expected_net_pct"]>=0]
@@ -122,6 +143,56 @@ class PlanLearner:
             predictions[name]["p_success"],
             -list(self.plans).index(name)))
         return pick,predictions[pick],predictions
+
+    def _refresh_profiles(self):
+        if self.profile_cache and self.profile_dirty<64:
+            return
+        cache={q:{} for q in SELECTOR_QUANTILES}
+        for name,history in self.history.items():
+            if len(history)<SELECTOR_MIN_HISTORY:
+                continue
+            values=np.asarray(history,dtype=float)
+            scores=values[:,0]
+            nets=values[:,2]
+            for quantile in SELECTOR_QUANTILES:
+                threshold=float(np.quantile(scores,quantile))
+                selected=nets[scores>=threshold]
+                if len(selected)<SELECTOR_MIN_BUCKET:
+                    continue
+                gains=float(selected[selected>0].sum())
+                losses=float(-selected[selected<0].sum())
+                cache[quantile][name]={
+                    "threshold":threshold,
+                    "samples":int(len(selected)),
+                    "win_pct":100*float((selected>0).mean()),
+                    "mean_net_pct":float(selected.mean()),
+                    "profit_factor":gains/losses if losses>0 else None,
+                }
+        self.profile_cache=cache
+        self.profile_dirty=0
+
+    def selective_choose(self,predictions,quantile):
+        """Choose only from causally profitable historical score buckets."""
+        self._refresh_profiles()
+        viable=[]
+        for name,prediction in predictions.items():
+            profile=(self.profile_cache.get(quantile) or {}).get(name)
+            if not profile:
+                continue
+            pf=profile.get("profit_factor") or 0
+            if (prediction["expected_net_pct"]<profile["threshold"]
+                    or prediction["p_success"]<0.50
+                    or profile["win_pct"]<50.0
+                    or profile["mean_net_pct"]<=0
+                    or pf<1.05):
+                continue
+            viable.append((name,profile))
+        if not viable:
+            return None
+        name,profile=max(viable,key=lambda item:(
+            item[1]["mean_net_pct"],item[1].get("profit_factor") or 0,
+            item[1]["win_pct"],predictions[item[0]]["expected_net_pct"]))
+        return name,predictions[name],profile
 
 
 def _blank_stats(plan_names):
@@ -133,6 +204,12 @@ def _blank_stats(plan_names):
             "plan_comparison":{k:{"wins":0,"net_sum":0.0,
                                   "positive":0.0,"negative":0.0}
                                for k in plan_names}}
+
+
+def _blank_selective_stats(plan_names):
+    result=_blank_stats(plan_names)
+    result["signals_seen"]=0
+    return result
 
 
 def _record_stats(stat,row,name,prediction,baseline_name):
@@ -181,6 +258,14 @@ def _finalize_stats(stat):
     stat.pop("baseline_net_sum")
 
 
+def _finalize_selective_stats(stat):
+    signals=stat.get("signals_seen",0)
+    _finalize_stats(stat)
+    trades=stat.get("trades",0)
+    stat["skipped_signals"]=max(0,signals-trades)
+    stat["coverage_pct"]=round(100*trades/signals,2) if signals else None
+
+
 def _period_key(signal_date):
     return signal_date[:4]+("-H1" if signal_date[5:7]<="06" else "-H2")
 
@@ -199,6 +284,9 @@ def score_plans(rows,*,train_end="2025-11-01",
     model=PlanLearner(specs)
     stats={part:_blank_stats(names)
            for part in ("train","validation","diagnostic")}
+    selective={q:{part:_blank_selective_stats(names)
+                  for part in ("train","validation","diagnostic")}
+               for q in SELECTOR_QUANTILES}
     periods={}
     for row in ordered:
         while nxt is not None and nxt["plan_label_available_date"]<row["signal_date"]:
@@ -209,10 +297,19 @@ def score_plans(rows,*,train_end="2025-11-01",
         picked=model.choose(row)
         if picked is None:
             continue
-        name,prediction,_=picked
+        name,prediction,predictions=picked
         part=("train" if row["signal_date"]<train_end else
               "validation" if row["signal_date"]<validation_end else "diagnostic")
         _record_stats(stats[part],row,name,prediction,baseline_name)
+        for quantile in SELECTOR_QUANTILES:
+            selective_stat=selective[quantile][part]
+            selective_stat["signals_seen"]+=1
+            selected=model.selective_choose(predictions,quantile)
+            if selected is None:
+                continue
+            selected_name,selected_prediction,_=selected
+            _record_stats(selective_stat,row,selected_name,
+                          selected_prediction,baseline_name)
         period=_period_key(row["signal_date"])
         if period not in periods:
             periods[period]=_blank_stats(names)
@@ -221,6 +318,33 @@ def score_plans(rows,*,train_end="2025-11-01",
         _finalize_stats(stat)
     for stat in periods.values():
         _finalize_stats(stat)
+    for policy in selective.values():
+        for stat in policy.values():
+            _finalize_selective_stats(stat)
+
+    policy_reports=[]
+    for quantile,windows in selective.items():
+        validation=windows["validation"]
+        policy_reports.append({
+            "quantile":quantile,"windows":windows,
+            "validation_eligible":(
+                validation.get("trades",0)>=200
+                and (validation.get("coverage_pct") or 0)>=SELECTOR_MIN_COVERAGE_PCT
+                and (validation.get("mean_net_pct") or 0)>0
+                and (validation.get("profit_factor") or 0)>=1.05),
+        })
+    eligible_policies=[p for p in policy_reports if p["validation_eligible"]]
+    pool=eligible_policies or [p for p in policy_reports
+                               if p["windows"]["validation"].get("trades",0)>=100]
+    if not pool:
+        pool=policy_reports
+    chosen_policy=max(pool,key=lambda p:(
+        (p["windows"]["validation"].get("actual_win_pct") or 0)
+            >=target_success_pct,
+        p["windows"]["validation"].get("mean_net_pct") or -999,
+        p["windows"]["validation"].get("profit_factor") or 0,
+        p["windows"]["validation"].get("actual_win_pct") or 0,
+        p["windows"]["validation"].get("coverage_pct") or 0))
 
     candidates=[]
     for name,spec in specs.items():
@@ -267,12 +391,15 @@ def score_plans(rows,*,train_end="2025-11-01",
             c["whole_history_win_pct"],
             c["worst_period_mean_net_pct"]))
 
-    diagnostic=stats["diagnostic"]
+    diagnostic=chosen_policy["windows"]["diagnostic"]
     goal_reached=(
-        diagnostic.get("actual_win_pct") is not None
+        chosen_policy["validation_eligible"]
+        and diagnostic.get("actual_win_pct") is not None
         and diagnostic["actual_win_pct"]>=target_success_pct
         and (diagnostic.get("mean_net_pct") or 0)>0
-        and (diagnostic.get("profit_factor") or 0)>=1.1)
+        and (diagnostic.get("profit_factor") or 0)>=1.1
+        and diagnostic.get("trades",0)>=SELECTOR_MIN_DIAGNOSTIC_TRADES
+        and (diagnostic.get("coverage_pct") or 0)>=SELECTOR_MIN_COVERAGE_PCT)
     return {"windows":stats,"periods":periods,
         "strategy":"generation-evolved delayed-label plan selection",
         "plans":specs,"cost_pct":COST_PCT,
@@ -280,12 +407,33 @@ def score_plans(rows,*,train_end="2025-11-01",
         "target_quality_requirements":{
             "actual_win_pct_min":target_success_pct,
             "mean_net_pct_min_exclusive":0,
-            "profit_factor_min":1.1},
+            "profit_factor_min":1.1,
+            "diagnostic_trades_min":SELECTOR_MIN_DIAGNOSTIC_TRADES,
+            "coverage_pct_min":SELECTOR_MIN_COVERAGE_PCT},
         "target_reached":goal_reached,
+        "selective_challenger":{
+            "selection_window":"validation only; diagnostic is not used to choose the policy",
+            "chosen_quantile":chosen_policy["quantile"],
+            "validation_eligible":chosen_policy["validation_eligible"],
+            "windows":chosen_policy["windows"],
+            "policies":[{
+                "quantile":p["quantile"],
+                "validation_eligible":p["validation_eligible"],
+                "validation":p["windows"]["validation"],
+                "diagnostic":p["windows"]["diagnostic"],
+            } for p in policy_reports],
+            "rules":{
+                "probability_min":50.0,
+                "matured_bucket_win_pct_min":50.0,
+                "matured_bucket_mean_net_pct_min_exclusive":0,
+                "matured_bucket_profit_factor_min":1.05,
+                "minimum_history":SELECTOR_MIN_HISTORY,
+                "minimum_bucket_samples":SELECTOR_MIN_BUCKET},
+            "warning":"거래를 선별한 연구 결과이며 전체 신호 성과와 함께 coverage를 반드시 확인해야 합니다."},
         "independent_holdout":False,"live_approved":False,
         "tuning":{"generation":int(search_generation),
             "selection_window":"완료된 전체 과거기간의 반기별 순차평가",
-            "selection_metric":"비용 반영 수익이 양수인 수식 중 50% 승률 우선, 이후 평균·최악구간 순손익",
+            "selection_metric":"검증구간에서 비용 후 순손익·손익비·표본·coverage를 통과한 선택 정책만 진단구간에 적용",
             "previous_best":previous_best,
             "chosen_plan":{k:v for k,v in chosen.items()
                            if k!="period_scores"},

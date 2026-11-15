@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from trade_plan import scenario_from_history,decide_trade
 from risk_guard import screen_candidate
+from reference_indicators import add_reference_indicators
 
 NEEDED = ["Open", "High", "Low", "Close", "Volume"]
 
@@ -69,7 +70,7 @@ def compute(data):
     sd=c.rolling(20).std(ddof=0)
     x["BBUP"]=x.BBMID+2*sd
     x["BBLOW"]=x.BBMID-2*sd
-    return x
+    return add_reference_indicators(x)
 
 def finite(v): return pd.notna(v) and bool(np.isfinite(v))
 

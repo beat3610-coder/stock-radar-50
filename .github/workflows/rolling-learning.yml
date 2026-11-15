@@ -1,4 +1,4 @@
-# manual_generation_request: 3
+# manual_generation_request: 4
 name: Continuing full-history formula evolution
 on:
   schedule:
@@ -11,6 +11,10 @@ on:
       - "direction_audit.py"
       - "buy_success.py"
       - "adaptive_trade_plans.py"
+      - "engine.py"
+      - "reference_indicators.py"
+      - "test_reference_indicators.py"
+      - "test_selective_plan.py"
       - ".github/workflows/rolling-learning.yml"
 concurrency:
   group: rolling-research-learning
@@ -27,14 +31,20 @@ jobs:
         with:
           python-version: "3.11"
       - id: goal
-        name: Continue until every market reaches meaningful 50 percent performance
+        name: Continue until every market reaches meaningful 55 percent performance
         run: |
-          REACHED="$(python -c 'import json,pathlib; p=pathlib.Path("data/direction3-rolling-latest.json"); j=json.loads(p.read_text()) if p.exists() else {}; print("true" if j.get("target_50_all_markets") else "false")')"
+          REACHED="$(python -c 'import json,pathlib; p=pathlib.Path("data/direction3-rolling-latest.json"); j=json.loads(p.read_text()) if p.exists() else {}; print("true" if j.get("target_quality_all_markets") else "false")')"
           echo "reached=$REACHED" >> "$GITHUB_OUTPUT"
-          echo "Previous generation all-market 50 percent, positive net, PF 1.1 status: $REACHED"
+          echo "Previous generation all-market 55 percent, positive net, PF 1.1, sample and coverage status: $REACHED"
       - name: Install market data and analysis dependencies
         if: steps.goal.outputs.reached != 'true'
         run: pip install -r requirements.txt
+      - name: Validate permissive-reference indicators and selective plan gate
+        if: steps.goal.outputs.reached != 'true'
+        run: |
+          python test_reference_indicators.py
+          python test_selective_plan.py
+          python -m compileall -q engine.py reference_indicators.py direction3.py buy_success.py adaptive_trade_plans.py direction_audit.py
       - name: Explore a new formula generation over all historical periods
         if: steps.goal.outputs.reached != 'true'
         run: python direction_audit.py
@@ -55,4 +65,4 @@ jobs:
           git push
       - name: Record target reached
         if: steps.goal.outputs.reached == 'true'
-        run: echo "All markets reached 50 percent wins with positive net return and profit factor at least 1.1."
+        run: echo "All markets reached 55 percent wins with positive net return, profit factor at least 1.1, minimum sample and coverage."

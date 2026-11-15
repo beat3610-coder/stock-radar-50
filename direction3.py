@@ -19,8 +19,16 @@ BAND_PCT=3.0
 WARMUP=240
 SAMPLE_STEP=2
 TRAIN_MIN=90
-CENTERS=(55.,25.,2.5,2.,1.3,2.,0.,0.,0.)
-SCALES=(20.,20.,3.,4.,1.5,8.,3.,1.,1.)
+FEATURE_KEYS=(
+    "signal_rsi","signal_adx","signal_atr_pct","signal_ma20_ma60_pct",
+    "signal_volume_ratio","signal_5d_return_pct","signal_macdh_atr",
+    "signal_price_ma200_pct","signal_bb_position","signal_rsi_wilder",
+    "signal_adx_wilder","signal_cmf20","signal_donchian20_pos",
+    "signal_roc20","signal_bb_width_pct",
+)
+CENTERS=(55.,25.,2.5,2.,1.3,2.,0.,0.,0.,55.,25.,0.,.5,0.,8.)
+SCALES=(20.,20.,3.,4.,1.5,8.,3.,1.,1.,20.,20.,.25,.35,10.,8.)
+FEATURE_COUNT=len(FEATURE_KEYS)+1
 
 def direction_label(forward_return_pct,band_pct=BAND_PCT):
     r=float(forward_return_pct)
@@ -31,10 +39,7 @@ def direction_label(forward_return_pct,band_pct=BAND_PCT):
 
 def features(row):
     try:
-        keys=("signal_rsi","signal_adx","signal_atr_pct","signal_ma20_ma60_pct",
-              "signal_volume_ratio","signal_5d_return_pct",
-              "signal_macdh_atr","signal_price_ma200_pct","signal_bb_position")
-        x=[float(row[k]) for k in keys]
+        x=[float(row[k]) for k in FEATURE_KEYS]
         if not all(math.isfinite(v) for v in x):return None
         return [1.]+[max(-3.,min(3.,(a-c)/s)) for a,c,s in zip(x,CENTERS,SCALES)]
     except (KeyError,TypeError,ValueError,OverflowError):
@@ -53,8 +58,8 @@ class OnlineDirectionModel:
     features based on outcome. Independent learner per market.
     """
     def __init__(self,learning_rate=0.13,l2=0.06,prior_mix=0.15,sideways_weight=1.0):
-        self.weights=[[0.]*10 for _ in LABELS]
-        self.grad_sq=[[4.]*10 for _ in LABELS]
+        self.weights=[[0.]*FEATURE_COUNT for _ in LABELS]
+        self.grad_sq=[[4.]*FEATURE_COUNT for _ in LABELS]
         self.lr=learning_rate
         self.l2=l2
         self.prior_mix=max(0.,min(1.,float(prior_mix)))
@@ -121,6 +126,12 @@ def make_direction_rows(frame,ticker,market,*,end_date="2026-11-01",
                 "signal_macdh_atr":float(r.MACDH)/atr,
                 "signal_price_ma200_pct":100*(close/p200-1),
                 "signal_bb_position":2*(close-float(r.BBLOW))/sd-1,
+                "signal_rsi_wilder":float(r.RSI_WILDER),
+                "signal_adx_wilder":float(r.ADX_WILDER),
+                "signal_cmf20":float(r.CMF20),
+                "signal_donchian20_pos":float(r.DONCHIAN20_POS),
+                "signal_roc20":float(r.ROC20),
+                "signal_bb_width_pct":float(r.BBWIDTH20_PCT),
             }
             if features(values) is None:continue
             fw=100*(due/close-1)
