@@ -28,8 +28,12 @@ class PlanLearningTest(unittest.TestCase):
         a=score_plans(old+[candidate])["windows"]["validation"]
         b=score_plans(old+[candidate,extra])["windows"]["validation"]
         self.assertEqual(a["trades"],1)
-        self.assertEqual(a["actual_win_pct"],b["plan_comparison"]["balanced"]["win_pct"] if False else a["actual_win_pct"])
-        self.assertEqual(a["predicted_win_pct"],score_plans(old+[candidate,extra])["windows"]["validation"]["predicted_win_pct"] if False else a["predicted_win_pct"])
+        # Future trade outcomes cannot change the first candidate forecast.
+        self.assertEqual(a["predicted_win_pct"],b["predicted_win_pct"])
+        self.assertEqual(b["trades"],2)
+        self.assertEqual(a["selected_plans"],{"compact":a["selected_plans"]["compact"],
+                                              "balanced":a["selected_plans"]["balanced"],
+                                              "patient":a["selected_plans"]["patient"]})
     def test_all_candidate_outcomes_recorded_no_probability_gate(self):
         old=[labelled(i,"2025-01-01","2025-01-15",i%3!=0) for i in range(110)]
         future=[labelled(i+300,"2025-12-01","2025-12-15",i%2==0) for i in range(80)]
