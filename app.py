@@ -119,6 +119,9 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
     lab={}
     try: lab=json.loads(Path("data/strategy-lab-latest.json").read_text(encoding="utf-8"))
     except Exception: pass
+    rolling={}
+    try: rolling=json.loads(Path("data/direction3-rolling-latest.json").read_text(encoding="utf-8"))
+    except Exception: pass
     online={}
     online_files=sorted(Path("data").glob("online-adaptive-average-probability-300-*.json"))
     if online_files:
@@ -143,6 +146,26 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
     st.markdown("**기존 시장별 결과 — 임의 변경 없음**")
     st.dataframe(pd.DataFrame(results),hide_index=True,use_container_width=True)
     st.caption("100종목씩 과거 일봉을 평가한 보고서 기준: 코스피 34.92%(63건), 코스닥 26.67%(30건), 나스닥 0건. 이미 열람된 역사적 진단값입니다.")
+    if rolling:
+        st.markdown("**최근 순차학습 결과: 상승·하락·횡보와 매수 성공**")
+        st.caption(f"평가 기준일 {rolling.get('evaluation_as_of','확인 필요')} · 10거래일 뒤 실제 종가로 정답 확인 · 매주 재학습 · 실전 승인 아님")
+        rolling_rows=[]
+        for key,name in names.items():
+            m=(rolling.get("markets") or {}).get(key,{})
+            d=(m.get("windows") or {}).get("diagnostic") or {}
+            b=(((m.get("buy_success") or {}).get("windows") or {}).get("diagnostic") or {})
+            p=(((m.get("adaptive_plans") or {}).get("windows") or {}).get("diagnostic") or {})
+            rolling_rows.append({"시장":name,"방향 표본":d.get("total","확인 필요"),
+              "방향 전체정확도(%)":d.get("accuracy_pct","확인 필요"),
+              "방향 Brier / 기준":f"{d.get('multiclass_brier','—')} / {d.get('prior_brier','—')}",
+              "매수 성공 표본":b.get("count","확인 필요"),
+              "매수 실제 성공률(%)":b.get("actual_success_pct","확인 필요"),
+              "매수 예측확률 평균(%)":b.get("mean_predicted_success_pct","확인 필요"),
+              "매수 평균 순손익(%)":b.get("mean_net_pct","확인 필요"),
+              "적응형 청산 승률(%)":p.get("actual_win_pct","확인 필요"),
+              "적응형 순손익(%)":p.get("mean_net_pct","확인 필요")})
+        st.dataframe(pd.DataFrame(rolling_rows),hide_index=True,use_container_width=True)
+        st.warning("이 반복 진단은 새로 성숙한 과거 관측을 순차 학습합니다. 이미 공개된 진단기간의 성과는 독립 검증이 아닙니다. 새 공식은 별도 미래 구간에서 성능이 확인되기 전까지 자동 실전 적용하지 않습니다.")
     if online:
         st.markdown("**온라인 순차학습 성능: 학습·검증·이미 확인된 진단 구간**")
         summary=[]; policies=[]

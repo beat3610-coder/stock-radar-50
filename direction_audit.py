@@ -14,10 +14,12 @@ from adaptive_trade_plans import label_plans, score_plans
 
 def run_direction3(per_market=100):
     univ=get_universe()
+    cutoff=datetime.now(timezone.utc).date().isoformat()
     result={"created_utc":datetime.now(timezone.utc).isoformat(),
             "type":"direction3_10session_3pct",
             "target_precision_pct_each":80,
             "fixed_horizon_sessions":HORIZON,"sideways_band_pct":BAND_PCT,
+            "evaluation_as_of":cutoff,
             "research_only":True,"live_approved":False,
             "evaluation_warning":"Retrospective period already reviewed; not independent prospective evidence",
             "markets":{}}
@@ -32,7 +34,7 @@ def run_direction3(per_market=100):
             try:
                 data,_=get_prices(ticker,market)
                 x=compute(data)
-                direction_rows=make_direction_rows(x,ticker,market,end_date="2026-11-01")
+                direction_rows=make_direction_rows(x,ticker,market,end_date=cutoff)
                 rows.extend(direction_rows)
                 buy_rows.extend(attach_buy_labels(x,direction_rows))
                 plan_rows.extend(label_plans(x,direction_rows))
@@ -41,9 +43,9 @@ def run_direction3(per_market=100):
                 errors.append({"ticker":ticker,"error":str(exc)[:160]})
             if i%20==0:
                 print(f"DIRECTION_PROGRESS {market} {i}/{len(symbols)} loaded={loaded} labels={len(rows)}",flush=True)
-        metrics=score_directions(rows)
-        buy_metrics=score_buy_success(buy_rows)
-        adaptive_plans=score_plans(plan_rows)
+        metrics=score_directions(rows,eval_end=cutoff)
+        buy_metrics=score_buy_success(buy_rows,eval_end=cutoff)
+        adaptive_plans=score_plans(plan_rows,eval_end=cutoff)
         result["markets"][market]={"loaded":loaded,"requested":len(symbols),"errors":errors[:10],
                                   "labels_total":len(rows),"buy_labels_total":len(buy_rows),
                                   "buy_success":buy_metrics,"adaptive_plans":adaptive_plans,**metrics}
@@ -59,4 +61,9 @@ def run_direction3(per_market=100):
     return result
 
 if __name__=="__main__":
-    print("DIRECTION300_RESULT "+json.dumps(run_direction3(),ensure_ascii=False),flush=True)
+    from pathlib import Path
+    report=run_direction3()
+    Path("data").mkdir(exist_ok=True)
+    Path("data/direction3-rolling-latest.json").write_text(
+        json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
+    print("DIRECTION300_RESULT "+json.dumps(report,ensure_ascii=False),flush=True)
