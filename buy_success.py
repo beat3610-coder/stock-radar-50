@@ -7,6 +7,7 @@ Labels mature at +10 sessions even when the stop or target hit earlier;
 predictions always precede training on labels.
 """
 import math
+import random
 import pandas as pd
 from direction3 import features
 from audit_300 import simulate_exit
@@ -91,55 +92,84 @@ def attach_buy_labels(frame,rows):
             continue
     return output
 
+def _empty_buy_stat():
+    return {"count":0,"wins":0,"pred_sum":0.0,"brier":0.0,
+            "base_brier":0.0,"net_sum":0.0,"expected_net_sum":0.0,
+            "actual_profit_sum":0.0,"actual_loss_sum":0.0}
+
+
+def _record_buy_stat(stat,y,net,predicted):
+    p=predicted["p_success"]
+    stat["count"]+=1
+    stat["wins"]+=int(y)
+    stat["pred_sum"]+=p
+    stat["brier"]+=(p-y)**2
+    stat["base_brier"]+=(predicted["baseline_p"]-y)**2
+    stat["net_sum"]+=net
+    stat["expected_net_sum"]+=predicted["expected_net_pct"]
+    if net>0:
+        stat["actual_profit_sum"]+=net
+    else:
+        stat["actual_loss_sum"]+=-net
+
+
+def _finalize_buy_stat(stat):
+    n=stat["count"]
+    p=stat.pop("pred_sum")
+    actual_win=stat["wins"]
+    stat["mean_predicted_success_pct"]=round(100*p/n,2) if n else None
+    stat["actual_success_pct"]=round(100*actual_win/n,2) if n else None
+    stat["calibration_gap_pp"]=round(100*(p-actual_win)/n,2) if n else None
+    stat["brier_model"]=round(stat.pop("brier")/n,6) if n else None
+    stat["brier_baseline"]=round(stat.pop("base_brier")/n,6) if n else None
+    stat["mean_net_pct"]=round(stat.pop("net_sum")/n,3) if n else None
+    stat["mean_predicted_net_pct"]=round(
+        stat.pop("expected_net_sum")/n,3) if n else None
+    gain=stat.pop("actual_profit_sum")
+    loss=stat.pop("actual_loss_sum")
+    stat["profit_factor"]=round(gain/loss,3) if loss else None
+
+
+def _period_key(signal_date):
+    return signal_date[:4]+("-H1" if signal_date[5:7]<="06" else "-H2")
+
+
 def _score_buy_success_candidate(trades,*,train_end="2025-11-01",
                       validation_end="2026-04-01",eval_end="2026-11-01",
                       lr=0.11,l2=0.065,prior_mix=0.15):
-    """All-sample observed win and forecast success percentage by time window."""
+    """Causal probability scoring plus whole-history half-year slices."""
     stream=sorted(trades,key=lambda r:(r["signal_date"],r["ticker"]))
     done=iter(sorted(trades,key=lambda r:(r["buy_label_available_date"],r["ticker"])))
     next_done=next(done,None)
     model=OnlineBuySuccess(lr=lr,l2=l2,prior_mix=prior_mix)
-    def state():
-        return {"count":0,"wins":0,"pred_sum":0.0,"brier":0.0,
-                "base_brier":0.0,"net_sum":0.0,"expected_net_sum":0.0,
-                "actual_profit_sum":0.0,"actual_loss_sum":0.0}
-    stats={k:state() for k in ("train","validation","diagnostic")}
+    stats={k:_empty_buy_stat()
+           for k in ("train","validation","diagnostic")}
+    periods={}
     for row in stream:
         signal=row["signal_date"]
         while next_done is not None and next_done["buy_label_available_date"]<signal:
             model.update(next_done)
             next_done=next(done,None)
-        if row["buy_label_available_date"]>=eval_end:continue
+        if row["buy_label_available_date"]>=eval_end:
+            continue
         predicted=model.predict(row)
-        if predicted is None:continue
+        if predicted is None:
+            continue
         bucket=("train" if signal<train_end else
                 "validation" if signal<validation_end else "diagnostic")
-        s=stats[bucket]
-        y=float(row["buy_won"]);net=float(row["buy_net_pct"])
-        p=predicted["p_success"]
-        s["count"]+=1;s["wins"]+=int(y)
-        s["pred_sum"]+=p
-        s["brier"]+=(p-y)**2
-        s["base_brier"]+=(predicted["baseline_p"]-y)**2
-        s["net_sum"]+=net
-        s["expected_net_sum"]+=predicted["expected_net_pct"]
-        if net>0:s["actual_profit_sum"]+=net
-        else:s["actual_loss_sum"]+=-net
-    for s in stats.values():
-        n=s["count"]
-        p=s.pop("pred_sum")
-        actual_win=s["wins"]
-        s["mean_predicted_success_pct"]=round(100*p/n,2) if n else None
-        s["actual_success_pct"]=round(100*actual_win/n,2) if n else None
-        s["calibration_gap_pp"]=round(100*(p-actual_win)/n,2) if n else None
-        s["brier_model"]=round(s.pop("brier")/n,6) if n else None
-        s["brier_baseline"]=round(s.pop("base_brier")/n,6) if n else None
-        s["mean_net_pct"]=round(s.pop("net_sum")/n,3) if n else None
-        s["mean_predicted_net_pct"]=round(s.pop("expected_net_sum")/n,3) if n else None
-        gain=s.pop("actual_profit_sum")
-        loss=s.pop("actual_loss_sum")
-        s["profit_factor"]=round(gain/loss,3) if loss else None
-    return {"windows":stats,"training_updates":model.count,
+        y=float(row["buy_won"])
+        net=float(row["buy_net_pct"])
+        _record_buy_stat(stats[bucket],y,net,predicted)
+        period=_period_key(signal)
+        if period not in periods:
+            periods[period]=_empty_buy_stat()
+        _record_buy_stat(periods[period],y,net,predicted)
+    for stat in stats.values():
+        _finalize_buy_stat(stat)
+    for stat in periods.values():
+        _finalize_buy_stat(stat)
+    return {"windows":stats,"periods":periods,
+            "training_updates":model.count,
             "trade_assumptions":{"entry":"next_open","max_hold_sessions":HOLD,
                "stop":"max(1.8*signal_ATR,2.5% of entry)",
                "take":"1.8R from next open","roundtrip_cost_pct":COST_PCT,
@@ -147,42 +177,107 @@ def _score_buy_success_candidate(trades,*,train_end="2025-11-01",
             "target_success_pct":80,"live_approved":False}
 
 
-def score_buy_success(trades,*,train_end="2025-11-01",
-                      validation_end="2026-04-01",eval_end="2026-11-01"):
-    """Tune probability parameters on validation Brier; report all outcomes unfiltered."""
+def _buy_candidates(search_generation,previous_best):
     candidates=[]
+    seen=set()
+    def add(name,lr,l2,prior_mix):
+        lr=round(max(0.005,min(0.5,float(lr))),5)
+        l2=round(max(0.001,min(0.5,float(l2))),5)
+        prior_mix=round(max(0.0,min(1.0,float(prior_mix))),5)
+        key=(lr,l2,prior_mix)
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append({"name":name,"learning_rate":lr,
+                           "l2":l2,"prior_mix":prior_mix})
     for lr in (0.03,0.06,0.10,0.11,0.20):
         for l2 in (0.02,0.065,0.12):
             for prior_mix in (0.0,0.15,0.30,0.50,1.0):
-                candidates.append({"name":f"blr{lr:g}_l2{l2:g}_prior{prior_mix:g}",
-                                   "learning_rate":lr,"l2":l2,"prior_mix":prior_mix})
+                add(f"blr{lr:g}_l2{l2:g}_prior{prior_mix:g}",
+                    lr,l2,prior_mix)
+    center=previous_best or {"learning_rate":0.10,"l2":0.065,
+                             "prior_mix":0.15}
+    seed=(130363*int(search_generation)
+          +int(float(center.get("learning_rate",0.10))*100000)
+          +int(float(center.get("l2",0.065))*100000)
+          +int(float(center.get("prior_mix",0.15))*10000))
+    rng=random.Random(seed)
+    for i in range(35):
+        lr=float(center.get("learning_rate",0.10))*math.exp(rng.uniform(-0.8,0.8))
+        reg=float(center.get("l2",0.065))*math.exp(rng.uniform(-0.9,0.9))
+        prior=float(center.get("prior_mix",0.15))+rng.uniform(-0.25,0.25)
+        add(f"bg{search_generation}_mutation{i+1}",lr,reg,prior)
+    return candidates
+
+
+def score_buy_success(trades,*,train_end="2025-11-01",
+                      validation_end="2026-04-01",eval_end="2026-11-01",
+                      search_generation=1,previous_best=None):
+    """Evolve probability formulas over all completed historical half-years."""
+    candidates=_buy_candidates(search_generation,previous_best)
     scored=[]
     for candidate in candidates:
         report=_score_buy_success_candidate(
-            trades,train_end=train_end,validation_end=validation_end,eval_end=eval_end,
-            lr=candidate["learning_rate"],l2=candidate["l2"],
-            prior_mix=candidate["prior_mix"])
+            trades,train_end=train_end,validation_end=validation_end,
+            eval_end=eval_end,lr=candidate["learning_rate"],
+            l2=candidate["l2"],prior_mix=candidate["prior_mix"])
         validation=report["windows"]["validation"]
+        period_scores=[]
+        for period,stat in sorted(report["periods"].items()):
+            if stat.get("count",0)<100 or stat.get("brier_model") is None:
+                continue
+            period_scores.append({
+                "period":period,"samples":stat["count"],
+                "brier":stat["brier_model"],
+                "baseline_brier":stat.get("brier_baseline"),
+                "calibration_gap_pp":stat.get("calibration_gap_pp"),
+                "actual_success_pct":stat.get("actual_success_pct"),
+                "predicted_success_pct":stat.get("mean_predicted_success_pct")})
+        if period_scores:
+            mean_brier=round(sum(x["brier"] for x in period_scores)
+                             /len(period_scores),6)
+            worst_brier=max(x["brier"] for x in period_scores)
+            mean_gap=round(sum(abs(x["calibration_gap_pp"] or 0)
+                               for x in period_scores)
+                           /len(period_scores),3)
+        else:
+            mean_brier=validation.get("brier_model")
+            worst_brier=mean_brier
+            mean_gap=abs(validation.get("calibration_gap_pp") or 0)
         scored.append({"candidate":candidate,"report":report,
+            "period_scores":period_scores,
+            "whole_history_brier":mean_brier,
+            "worst_period_brier":worst_brier,
+            "whole_history_calibration_gap_pp":mean_gap,
+            "period_count":len(period_scores),
             "validation_brier":validation.get("brier_model"),
             "validation_baseline_brier":validation.get("brier_baseline"),
             "validation_samples":validation.get("count",0),
             "validation_calibration_gap_pp":validation.get("calibration_gap_pp")})
-    eligible=[r for r in scored if r["validation_samples"]>=30 and
-              r["validation_brier"] is not None]
+    eligible=[r for r in scored if r["period_count"]>=2
+              and r["whole_history_brier"] is not None]
     if not eligible:
-        chosen=next(r for r in scored if r["candidate"]["name"]=="blr0.11_l20.065_prior0.15")
-    else:
-        chosen=min(eligible,key=lambda r:(
-            r["validation_brier"],abs(r["validation_calibration_gap_pp"] or 0)))
+        eligible=[r for r in scored if r["validation_samples"]>=30
+                  and r["validation_brier"] is not None]
+    chosen=min(eligible,key=lambda r:(
+        r["whole_history_brier"],
+        r["worst_period_brier"],
+        r["whole_history_calibration_gap_pp"]))
     result=chosen["report"]
     result["tuning"]={
-        "selection_window":f"signal date < {validation_end}",
-        "selection_metric":"검증 Brier 최소화; 동률이면 예측확률-실제승률 차이 최소화",
+        "generation":int(search_generation),
+        "selection_window":"완료된 전체 과거기간의 반기별 순차평가",
+        "selection_metric":"반기별 Brier 평균 최소화, 최악 반기와 확률 보정오차 순 보조",
         "chosen":chosen["candidate"],
-        "candidates":[{k:v for k,v in item.items() if k!="report"} for item in scored],
+        "previous_best":previous_best,
+        "chosen_period_scores":chosen["period_scores"],
+        "candidates":[{k:v for k,v in item.items()
+                       if k not in ("report","period_scores")}
+                      for item in scored],
         "candidate_count":len(candidates),
-        "diagnostic_used_for_selection":False,
-        "warning":"전체 표본 승률은 모든 종목 결과의 실제 빈도이며, 확률식 조정으로 바뀌지 않습니다."
+        "period_count":chosen["period_count"],
+        "whole_history_used_for_selection":True,
+        "independent_holdout":False,
+        "warning":"확률식은 예측 오차를 줄이지만 모든 거래의 실제 승률 자체를 임의로 바꾸지 않습니다."
     }
     return result
