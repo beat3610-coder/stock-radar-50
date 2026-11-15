@@ -120,11 +120,14 @@ def analyze_item(item,with_flow=True):
     r=evaluate(data,market=market,flow=flow_data)
     qc=quote_check(code,market,str(data.index[-1].date()),float(data.Close.iloc[-1]),src)
     r["quote_check"]=qc
-    # A modest secondary-feed closing discrepancy is a review flag, not the
-    # economic entry criterion; extremely divergent prices still fail closed.
-    if qc["status"]=="mismatch" and qc["difference_pct"] is not None and qc["difference_pct"]>2.0:
-        r["signal"]="시세 큰 차이·매수 보류"
-        r["entry_reason"]=qc["reason"]
+    # Never present research BUY candidates when the independent comparison
+    # failed, is stale or is unavailable. Other technical analyses remain visible.
+    if qc.get("status")!="agree" and r["signal"] in (
+        "매수 검토","강한 매수 검토","기술매수 후보·수급 미확인"):
+        r["signal"]="시세 미검증·매수 보류"
+        r["entry_reason"]=qc.get("reason","보조 시세 검증 실패")
+    elif qc.get("status")=="mismatch":
+        r["entry_reason"]+=" / "+qc.get("reason","시세 불일치")
     return data,src,r,flow_data,flow_error
 
 def to_row(item,with_flow=True,market_rank=None):
