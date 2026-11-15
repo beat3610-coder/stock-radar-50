@@ -22,6 +22,12 @@ enforce_access(st)
 st.markdown("<style>.block-container{padding-top:1.4rem;max-width:1560px}.stMetric{padding:12px;border:1px solid #64748b44;border-radius:12px}</style>",unsafe_allow_html=True)
 st.title("📈 STOCK RADAR")
 st.error("⚠️ 현재 전략은 독립 수익 검증 미통과 상태입니다. 표시되는 매수 후보는 연구용이며 실전 매수 권고가 아닙니다.")
+st.warning(
+    "투자 유의사항: 본 사이트의 모든 정보·분석·확률·목표가·손절가는 "
+    "투자 참고 및 연구용이며, 투자 권유·자문 또는 수익 보장이 아닙니다. "
+    "최종 투자 판단은 이용자 본인이 해야 하며, 투자 결과에 따른 이익과 손실은 "
+    "이용자 본인에게 귀속됩니다. 실제 주문 전 공식 시세와 관련 정보를 직접 확인하세요."
+)
 readiness_path=Path("data/live-readiness-summary.json")
 if readiness_path.exists():
     try:
