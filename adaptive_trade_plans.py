@@ -268,12 +268,19 @@ def score_plans(rows,*,train_end="2025-11-01",
             c["worst_period_mean_net_pct"]))
 
     diagnostic=stats["diagnostic"]
-    goal_reached=(diagnostic.get("actual_win_pct") is not None
-                  and diagnostic["actual_win_pct"]>=target_success_pct)
+    goal_reached=(
+        diagnostic.get("actual_win_pct") is not None
+        and diagnostic["actual_win_pct"]>=target_success_pct
+        and (diagnostic.get("mean_net_pct") or 0)>0
+        and (diagnostic.get("profit_factor") or 0)>=1.1)
     return {"windows":stats,"periods":periods,
         "strategy":"generation-evolved delayed-label plan selection",
         "plans":specs,"cost_pct":COST_PCT,
         "target_success_pct":target_success_pct,
+        "target_quality_requirements":{
+            "actual_win_pct_min":target_success_pct,
+            "mean_net_pct_min_exclusive":0,
+            "profit_factor_min":1.1},
         "target_reached":goal_reached,
         "independent_holdout":False,"live_approved":False,
         "tuning":{"generation":int(search_generation),
