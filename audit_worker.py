@@ -8,7 +8,7 @@ try:
     print("AUDIT60_TESTS exit="+str(check.returncode)+" "+(check.stderr+check.stdout)[-3500:],flush=True)
     if check.returncode: raise RuntimeError("risk and execution unit tests failed")
     compiled=subprocess.run([sys.executable,"-m","py_compile","app.py","strategy_lab.py",
-                             "signal_playbook.py","portfolio_audit.py","empirical_edge.py","predictive_model.py","broad_candidates.py","online_edge.py"],
+                             "signal_playbook.py","portfolio_audit.py","empirical_edge.py","predictive_model.py","broad_candidates.py","online_edge.py","online_audit.py"],
                             capture_output=True,text=True,timeout=45)
     print("APP_COMPILE_CHECK exit="+str(compiled.returncode)+
           " "+compiled.stderr[-600:],flush=True)
@@ -16,6 +16,11 @@ try:
     import os
     if os.environ.get("STOCK_AUDIT_TEST_ONLY")=="1":
         print("APP_SMOKE_ONLY_PASSED",flush=True)
+        sys.exit(0)
+    if os.environ.get("STOCK_AUDIT_MODE")=="online":
+        from online_audit import run_online
+        report=run_online(per_market=100)
+        print("ONLINE300_RESULT "+json.dumps(report,ensure_ascii=False,default=str),flush=True)
         sys.exit(0)
     from strategy_lab import run
     report=run(per_market=100)
