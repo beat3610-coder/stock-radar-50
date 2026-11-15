@@ -6,6 +6,8 @@ on:
       - 'app.py'
       - 'trade_plan.py'
       - 'engine.py'
+      - 'strategy_lab.py'
+      - 'test_strategy_filters.py'
       - 'certification.py'
       - 'test_trade_plan_holdout.py'
       - 'test_certification_gate.py'
@@ -22,9 +24,11 @@ jobs:
           python-version: '3.11'
           cache: pip
       - name: Install minimum test dependencies
-        run: python -m pip install numpy pandas
+        run: python -m pip install -r requirements.txt
       - name: Validate source syntax
-        run: python -m compileall -q app.py engine.py trade_plan.py certification.py
+        run: python -m compileall -q app.py engine.py trade_plan.py strategy_lab.py certification.py
+      - name: Regime filter regression tests
+        run: python test_strategy_filters.py
       - name: Historical target and stop tests
         run: python test_trade_plan_holdout.py
       - name: Independent evidence certification tests
