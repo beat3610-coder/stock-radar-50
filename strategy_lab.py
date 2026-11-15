@@ -39,6 +39,10 @@ def _finite(*values):
     return all(v is not None and np.isfinite(v) for v in values)
 
 def qualifying(row,prev,market,variant,prior_high):
+    # Unknown strategy and incomplete derived trend features are *non-signals*,
+    # never exceptions that can interrupt a 300-stock run.
+    if variant not in PARAMS or "MA200_UP20" not in row.index:
+        return False
     p=float(row.Close)
     atr=float(row.ATR)
     if not _finite(row.MA20,row.MA60,row.MA200,row.RSI,row.MACDH,row.ADX,row.PDI,row.MDI,atr,row.VOL20):
