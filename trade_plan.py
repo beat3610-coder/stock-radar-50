@@ -108,7 +108,13 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
     use75=bool(calibration75.mean()>=calibration50.mean()+0.25)
     net50,hit50,stop50=historical_net(q50,holdout)
     net75,hit75,stop75=historical_net(q75,holdout)
-    net_expectancy=float(net75.mean() if use75 else net50.mean())
+    chosen_pnl=net75 if use75 else net50
+    net_expectancy=float(chosen_pnl.mean())
+    # Reaching an intraday high is not a realized profitable execution:
+    # only the stop-first, cost-adjusted exit series counts as a win.
+    realized_wins=int(np.sum(chosen_pnl>0))
+    smoothed_win_probability=100*(realized_wins+2)/(len(chosen_pnl)+4)
+    conservative_expected_net=(float(chosen_pnl.sum())-0.35*20)/(len(chosen_pnl)+20)
     hist_target_first_pct=hit75 if use75 else hit50
     hist_second_first_pct=hit75
     hist_stop_first_pct=stop75 if use75 else stop50
@@ -124,7 +130,10 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
             "historical_net_50th_pct":round(float(net50.mean()),3),
             "historical_net_75th_pct":round(float(net75.mean()),3),
             "history_samples":len(holdout),
-            "positive_rate_pct":round(100*np.mean(favorable>0),2),
+            "positive_rate_pct":round(100*np.mean(chosen_pnl>0),2),
+            "smoothed_win_probability_pct":round(smoothed_win_probability,2),
+            "conservative_expected_net_pct":round(conservative_expected_net,3),
+            "probability_basis":"실제 손절 우선·거래비용 차감 완료 거래의 승률; Beta(2,2) 사전분포 보정",
             "downside_p75_pct":round(100*np.quantile(adverse,0.75),2),
             "stop_risk_pct":round(100*risk/p,2),
             "historical_target_first_pct":hist_target_first_pct,
