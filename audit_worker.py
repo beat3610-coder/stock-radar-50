@@ -4,11 +4,11 @@ print("AUDIT60_WORKER_START",flush=True)
 time.sleep(18)  # let Streamlit bind its service port first
 try:
     import subprocess
-    check=subprocess.run([sys.executable,"-m","unittest","-v","test_risk_guard.py","test_audit_300.py","test_portfolio_audit.py","test_strategy_lab.py","test_signal_playbook.py","test_position_decision.py"],capture_output=True,text=True,timeout=120)
+    check=subprocess.run([sys.executable,"-m","unittest","-v","test_risk_guard.py","test_audit_300.py","test_portfolio_audit.py","test_strategy_lab.py","test_signal_playbook.py","test_position_decision.py","test_empirical_edge.py"],capture_output=True,text=True,timeout=120)
     print("AUDIT60_TESTS exit="+str(check.returncode)+" "+(check.stderr+check.stdout)[-3500:],flush=True)
     if check.returncode: raise RuntimeError("risk and execution unit tests failed")
     compiled=subprocess.run([sys.executable,"-m","py_compile","app.py","strategy_lab.py",
-                             "signal_playbook.py","portfolio_audit.py"],
+                             "signal_playbook.py","portfolio_audit.py","empirical_edge.py"],
                             capture_output=True,text=True,timeout=45)
     print("APP_COMPILE_CHECK exit="+str(compiled.returncode)+
           " "+compiled.stderr[-600:],flush=True)
@@ -32,6 +32,7 @@ try:
             "errors":r["errors"][:5],
             "train_selected":r["training_selected"],"selected":r["selected_for_diagnostic"],
             "train":r["train"].get(r["training_selected"]),
+            "edge_calibration":r.get("edge_calibration",{}),
             "validation":r["validation"].get(r["training_selected"]),
             "holdout":r["holdout_selected_metrics"],
             "holdout_variants":r["holdout_all_variants_diagnostic_only"],
