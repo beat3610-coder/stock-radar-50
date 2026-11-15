@@ -5,6 +5,10 @@ on:
     paths:
       - 'app.py'
       - 'trade_plan.py'
+      - 'trade_execution.py'
+      - 'audit_300.py'
+      - 'signal_playbook.py'
+      - 'test_shared_execution.py'
       - 'engine.py'
       - 'strategy_lab.py'
       - 'test_strategy_filters.py'
@@ -27,7 +31,9 @@ jobs:
       - name: Install minimum test dependencies
         run: python -m pip install -r requirements.txt
       - name: Validate source syntax
-        run: python -m compileall -q app.py engine.py trade_plan.py strategy_lab.py certification.py
+        run: python -m compileall -q app.py engine.py trade_plan.py trade_execution.py signal_playbook.py audit_300.py strategy_lab.py certification.py
+      - name: Shared research execution decision tests
+        run: python test_shared_execution.py
       - name: Opening-price net reward/risk tests
         run: python test_entry_quality.py
       - name: Regime filter regression tests
