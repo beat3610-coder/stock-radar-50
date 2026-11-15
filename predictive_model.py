@@ -95,3 +95,42 @@ def walkforward_model_filter(trades):
         accepted.append({**item,**{"model_"+k:v for k,v in prediction.items()}})
         info["accepted"]+=1
     return accepted,info
+
+# Predeclared diagnostic policies. Never select the best one using the
+# already-seen 2026 evaluation period.
+POLICIES={
+    "coverage":{"win_pct":40.0,"uplift_pct":0.0,"expected_net_pct":0.05},
+    "balanced":{"win_pct":48.0,"uplift_pct":1.0,"expected_net_pct":0.15},
+    "strict":{"win_pct":55.0,"uplift_pct":4.0,"expected_net_pct":0.20},
+}
+
+def walkforward_model_policies(trades):
+    """Score each candidate exactly once and report all policies, transparently.
+
+    Online training samples must have completely exited before signal_date.
+    Only feature data and preexisting exits are eligible at signal time.
+    """
+    ordered=sorted(trades,key=lambda t:(t["signal_date"],t["ticker"],t["entry_date"]))
+    completed=sorted(trades,key=lambda t:(t["exit_date"],t["ticker"],t["entry_date"]))
+    selected={key:[] for key in POLICIES}
+    status={"total":len(trades),"missing_features":0,"insufficient":0,
+            "scored":0,"policy_accepted":{key:0 for key in POLICIES}}
+    j=0;history=[]
+    for item in ordered:
+        while j<len(completed) and completed[j]["exit_date"]<item["signal_date"]:
+            history.append(completed[j]);j+=1
+        if vector(item) is None:
+            status["missing_features"]+=1
+            continue
+        score=fit_probabilities(history,item)
+        if score is None:
+            status["insufficient"]+=1
+            continue
+        status["scored"]+=1
+        for name,policy in POLICIES.items():
+            if (score["predicted_win_pct"]>=policy["win_pct"] and
+                score["predicted_uplift_pct"]>=policy["uplift_pct"] and
+                score["expected_net_pct"]>=policy["expected_net_pct"]):
+                selected[name].append({**item,**{"model_"+k:v for k,v in score.items()}})
+                status["policy_accepted"][name]+=1
+    return selected,status
