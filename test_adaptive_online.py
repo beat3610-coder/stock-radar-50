@@ -38,6 +38,20 @@ class AdaptiveLearningTests(unittest.TestCase):
         _,d=score_stream(seq,"KQ")
         self.assertGreater(d["adaptive_scored"],100)
         self.assertIsNotNone(d["by_window"]["train"]["brier_adaptive"])
+    def test_adaptive_policy_trade_win_rates_are_observed_not_predicted(self):
+        seq=[]
+        for day in range(2,29):
+            signal=f"2025-01-{day:02d}"
+            exit_day=f"2025-01-{day+1:02d}"
+            for j in range(20):
+                seq.append(enriched(day*100+j,signal,exit_day,
+                                    3 if j%3 else -2,j%2==0))
+        chosen,detail=score_stream(seq,"KQ")
+        self.assertIn("adaptive_p50",chosen)
+        self.assertIn("adaptive_p55",chosen)
+        self.assertGreaterEqual(len(chosen["adaptive_p50"]),len(chosen["adaptive_p55"]))
+        self.assertEqual(detail["by_policy"]["adaptive_p50"],len(chosen["adaptive_p50"]))
+        self.assertTrue(all(x["adaptive_predicted_win_pct"]>=50 for x in chosen["adaptive_p50"]))
     def test_missing_features_safe(self):
         self.assertIsNone(signal_features({"signal_rsi":30}))
         self.assertFalse(OnlineLogistic().update({"net_pct":3}))
