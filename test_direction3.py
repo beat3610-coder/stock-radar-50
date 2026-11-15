@@ -46,7 +46,11 @@ class DirectionTests(unittest.TestCase):
     def test_all_three_classes_counted_including_sideways(self):
         past=[row(i,"2025-01-01","2025-01-15",LABELS[i%3]) for i in range(150)]
         future=[row(i+200,"2025-12-01","2025-12-15",LABELS[i%3]) for i in range(60)]
-        metrics=score_directions(past+future)["windows"]["validation"]
+        report=score_directions(past+future)
+        metrics=report["windows"]["validation"]
+        self.assertEqual(report["tuning"]["candidate_count"],75)
+        self.assertEqual(len(report["tuning"]["candidates"]),75)
+        self.assertFalse(report["tuning"]["diagnostic_used_for_selection"])
         self.assertEqual(metrics["total"],60)
         self.assertEqual(sum(metrics["actual"].values()),60)
         self.assertEqual(sum(metrics["predicted"].values()),60)

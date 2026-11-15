@@ -148,7 +148,20 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
     st.caption("100종목씩 과거 일봉을 평가한 보고서 기준: 코스피 34.92%(63건), 코스닥 26.67%(30건), 나스닥 0건. 이미 열람된 역사적 진단값입니다.")
     if rolling:
         st.markdown("**최근 순차학습 결과: 상승·하락·횡보와 매수 성공**")
-        st.caption(f"평가 기준일 {rolling.get('evaluation_as_of','확인 필요')} · 10거래일 뒤 실제 종가로 정답 확인 · 매주 재학습 · 실전 승인 아님")
+        st.caption(f"평가 기준일 {rolling.get('evaluation_as_of','확인 필요')} · 10거래일 뒤 실제 종가로 정답 확인 · 하루 4회 확인, 같은 날짜 데이터는 1회만 재학습 · 실전 승인 아님")
+        tuning=rolling.get("tuning") or {}
+        chosen=tuning.get("chosen") or {}
+        if chosen:
+            st.caption(f"선택 수식: {chosen.get('name','—')} · 학습률 {chosen.get('learning_rate','—')} · 정규화 {chosen.get('l2','—')} · 기준혼합 {chosen.get('prior_mix','—')} (검증구간에서 선택)")
+        candidate_rows=[]
+        for item in tuning.get("candidates") or []:
+            c=item.get("candidate") or {}
+            candidate_rows.append({"후보":c.get("name"),"학습률":c.get("learning_rate"),
+              "정규화":c.get("l2"),"기준혼합":c.get("prior_mix"),
+              "검증 정확도(%)":item.get("validation_accuracy_pct"),
+              "검증 Brier":item.get("validation_brier"),"검증 표본":item.get("validation_samples")})
+        if candidate_rows:
+            st.dataframe(pd.DataFrame(candidate_rows),hide_index=True,use_container_width=True,height=340)
         rolling_rows=[]
         for key,name in names.items():
             m=(rolling.get("markets") or {}).get(key,{})

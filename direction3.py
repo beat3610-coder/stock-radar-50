@@ -51,11 +51,12 @@ class OnlineDirectionModel:
     Learns signal-to-future-label relationship, never changing the input
     features based on outcome. Independent learner per market.
     """
-    def __init__(self,learning_rate=0.13,l2=0.06):
+    def __init__(self,learning_rate=0.13,l2=0.06,prior_mix=0.15):
         self.weights=[[0.]*10 for _ in LABELS]
         self.grad_sq=[[4.]*10 for _ in LABELS]
         self.lr=learning_rate
         self.l2=l2
+        self.prior_mix=max(0.,min(1.,float(prior_mix)))
         self.class_counts=[0]*3
         self.samples=0
     def prior(self):
@@ -67,7 +68,7 @@ class OnlineDirectionModel:
         probs=stable_softmax([sum(w*x for w,x in zip(ws,vec)) for ws in self.weights])
         # Shrink early, noisy 3-way predictions toward online class frequencies.
         prior=self.prior()
-        return [0.85*p+0.15*q for p,q in zip(probs,prior)]
+        return [(1-self.prior_mix)*p+self.prior_mix*q for p,q in zip(probs,prior)]
     def update(self,row):
         vec=features(row)
         label=row.get("direction_label")
@@ -131,8 +132,9 @@ def make_direction_rows(frame,ticker,market,*,end_date="2026-11-01",
             continue
     return result
 
-def score_directions(trades,*,train_end="2025-11-01",
-                     validation_end="2026-04-01",eval_end="2026-11-01"):
+def _score_direction_candidate(trades,*,train_end="2025-11-01",
+                     validation_end="2026-04-01",eval_end="2026-11-01",
+                     learning_rate=0.13,l2=0.06,prior_mix=0.15):
     """Prequential 3-class accuracy, precision/recall, Brier, baseline.
 
     For any prediction, only outcomes whose label_available_date < signal
@@ -142,7 +144,7 @@ def score_directions(trades,*,train_end="2025-11-01",
     ordered=sorted(trades,key=lambda t:(t["signal_date"],t["ticker"]))
     completions=iter(sorted(trades,key=lambda t:(t["label_available_date"],t["ticker"])))
     next_done=next(completions,None)
-    model=OnlineDirectionModel()
+    model=OnlineDirectionModel(learning_rate=learning_rate,l2=l2,prior_mix=prior_mix)
     stats={k:{"total":0,"correct":0,"brier_sum":0.0,
               "baseline_brier_sum":0.0,
               "confusion":{t:{p:0 for p in LABELS} for t in LABELS},
@@ -194,3 +196,50 @@ def score_directions(trades,*,train_end="2025-11-01",
             "horizon_sessions":HORIZON,"band_pct":BAND_PCT,
             "target_precision_pct_each_direction":80,
             "note":"80% is a research target, NOT a verified result."}
+
+
+def score_directions(trades,*,train_end="2025-11-01",
+                     validation_end="2026-04-01",eval_end="2026-11-01"):
+    """Tune a small frozen hyperparameter menu on validation, then report all samples.
+
+    Selection uses validation accuracy, with Brier score as the tie-breaker.
+    The already reviewed diagnostic window is never used to select a candidate.
+    """
+    candidates=[]
+    for learning_rate in (0.03,0.06,0.10,0.13,0.20):
+        for l2 in (0.02,0.06,0.12):
+            for prior_mix in (0.0,0.15,0.30,0.50,1.0):
+                candidates.append({
+                    "name":f"lr{learning_rate:g}_l2{l2:g}_prior{prior_mix:g}",
+                    "learning_rate":learning_rate,"l2":l2,"prior_mix":prior_mix})
+    scored=[]
+    for candidate in candidates:
+        report=_score_direction_candidate(
+            trades,train_end=train_end,validation_end=validation_end,
+            eval_end=eval_end,learning_rate=candidate["learning_rate"],
+            l2=candidate["l2"],prior_mix=candidate["prior_mix"])
+        validation=report["windows"]["validation"]
+        scored.append({"candidate":candidate,"report":report,
+            "validation_accuracy_pct":validation.get("accuracy_pct"),
+            "validation_brier":validation.get("multiclass_brier"),
+            "validation_samples":validation.get("total",0)})
+    eligible=[r for r in scored if r["validation_samples"]>=30 and
+              r["validation_accuracy_pct"] is not None]
+    if not eligible:
+        chosen=next(r for r in scored if r["candidate"]["name"]=="lr0.13_l20.06_prior0.15")
+    else:
+        chosen=max(eligible,key=lambda r:(
+            r["validation_accuracy_pct"],
+            -(r["validation_brier"] if r["validation_brier"] is not None else float("inf"))))
+    result=chosen["report"]
+    result["tuning"]={
+        "selection_window":f"signal date < {validation_end}",
+        "selection_metric":"전체 3분류 정확도; 동률이면 multiclass Brier가 낮은 후보",
+        "chosen":chosen["candidate"],
+        "candidates":[{k:v for k,v in item.items() if k!="report"} for item in scored],
+        "candidate_count":len(candidates),
+        "diagnostic_used_for_selection":False,
+        "warning":"후보 반복 비교로 검증구간도 선택에 사용되었습니다. 이 구간은 이후 독립 검증이 아닙니다."
+    }
+    result["note"]="80%는 목표이며 미달 결과를 그대로 기록합니다. 진단구간은 후보 선택에 쓰지 않았습니다."
+    return result
