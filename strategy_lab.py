@@ -25,7 +25,7 @@ VALID_END="2026-04-01"
 HOLDOUT_END="2026-11-01"
 COST_PCT=0.35
 MIN_TRAIN_TRADES=20
-MIN_VALID_TRADES=5
+MIN_VALID_TRADES=20
 LOOKBACK=220
 STEP=2
 HOLD=10
@@ -45,6 +45,15 @@ def qualifying(row,prev,market,variant,prior_high):
     if atr<=0 or row.VOL20<=0:return False
     volatility=atr/p
     if volatility<0.006 or volatility>0.075:return False
+    # Reduce regime-chasing and late entries: the long average must be rising
+    # over 20 sessions, not merely below today's price. Filter weak directional
+    # momentum and extended entries without looking past the signal candle.
+    if not _finite(row.MA200,row.MA60,row.MA20,row.PDI,row.MDI,row.ADX):
+        return False
+    if not (p>row.MA200 and row.MA60>row.MA200 and row.PDI>row.MDI and row.ADX>=18):
+        return False
+    if p/float(row.MA20)>1.08:
+        return False
     # Determine buying conditions strictly from signal-day and prior bars.
     if variant=="trend_breakout":
         return (p>row.MA20>row.MA60>row.MA200 and p>prior_high
@@ -66,6 +75,11 @@ def candidates_from_frame(frame,ticker,market):
     x=compute(frame)
     result={key:[] for key in PARAMS}
     for i in range(LOOKBACK,len(x)-HOLD,STEP):
+        # A flat or declining MA200 is a frequent source of false rebounds.
+        if not (np.isfinite(x.MA200.iloc[i-20]) and
+                np.isfinite(x.MA200.iloc[i]) and
+                x.MA200.iloc[i] > x.MA200.iloc[i-20]):
+            continue
         date=str(pd.Timestamp(x.index[i]).date())
         if date>=HOLDOUT_END:break
         r=x.iloc[i];prev=x.iloc[i-1]
@@ -131,13 +145,14 @@ def run(per_market=20):
         "method":"train-only selection, fixed validation screening, untouched-in-this-run diagnostic holdout",
         "train_end":TRAIN_END,"validation_end":VALID_END,"holdout_end":HOLDOUT_END,
         "selection_requires":{"train_trades":MIN_TRAIN_TRADES,"validation_trades":MIN_VALID_TRADES,
-                              "train_pf":1.15,"validation_pf":1.15},
+                              "train_pf":1.15,"validation_pf":1.30,"validation_min_win_rate_pct":50,"validation_mean_net_pct":0.25},
         "caveats":["Data from 2026 has been examined during earlier development; not truly independent",
                    "Current constituents create survivorship bias",
                    "Historical tickers' listing/delisting state not reconstructed",
                    "OHLC stop-first, next-day open, costs assumed 0.35%",
                    "Market-level capital has no live currency conversion",
                    "Strategy selection done on training only; validation used only as rejection gate",
+                   "2026 historical holdout was already examined; revised filters are development hypotheses, not new independent evidence",
                    "Never approve live trading without future independently observed paper results"],
         "markets":{}}
     for market in ("KR","KQ","US"):
@@ -164,8 +179,9 @@ def run(per_market=20):
         if leader:
             vm=validation_metrics[leader]
             accepted=(vm["trades"]>=MIN_VALID_TRADES and
-                      vm["mean_net_pct"] is not None and vm["mean_net_pct"]>0 and
-                      vm["profit_factor"] is not None and vm["profit_factor"]>=1.15)
+                      vm["win_rate_pct"] is not None and vm["win_rate_pct"]>=50 and
+                      vm["mean_net_pct"] is not None and vm["mean_net_pct"]>0.25 and
+                      vm["profit_factor"] is not None and vm["profit_factor"]>=1.30)
         selected=leader if accepted else None
         selected_trades=_interval(variants[selected],"test") if selected else []
         holdout_measures=metrics(selected_trades)
