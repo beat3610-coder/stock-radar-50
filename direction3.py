@@ -11,6 +11,7 @@ Definitions (10 sessions, fixed as a hypothesis before evaluation):
 Each signal produces three probabilities summing to one.
 """
 import math
+import random
 
 LABELS=("UP","DOWN","SIDEWAYS")
 HORIZON=10
@@ -133,89 +134,157 @@ def make_direction_rows(frame,ticker,market,*,end_date="2026-11-01",
             continue
     return result
 
+def _empty_direction_stat():
+    return {"total":0,"correct":0,"brier_sum":0.0,
+            "baseline_brier_sum":0.0,
+            "confusion":{t:{p:0 for p in LABELS} for t in LABELS},
+            "actual":{a:0 for a in LABELS},
+            "predicted":{a:0 for a in LABELS},
+            "sum_probability":{a:0.0 for a in LABELS}}
+
+
+def _record_direction(st,actual,predicted,probs,baseline):
+    st["total"]+=1
+    st["correct"]+=int(actual==predicted)
+    st["brier_sum"]+=sum((p-(1 if j==actual else 0))**2
+                         for j,p in enumerate(probs))
+    st["baseline_brier_sum"]+=sum((p-(1 if j==actual else 0))**2
+                                  for j,p in enumerate(baseline))
+    st["confusion"][LABELS[actual]][LABELS[predicted]]+=1
+    st["actual"][LABELS[actual]]+=1
+    st["predicted"][LABELS[predicted]]+=1
+    for j,label in enumerate(LABELS):
+        st["sum_probability"][label]+=probs[j]
+
+
+def _finalize_direction_stat(st):
+    n=st["total"]
+    st["accuracy_pct"]=round(100*st["correct"]/n,2) if n else None
+    st["multiclass_brier"]=round(st.pop("brier_sum")/n,6) if n else None
+    st["prior_brier"]=round(st.pop("baseline_brier_sum")/n,6) if n else None
+    st["mean_probabilities_pct"]={
+        k:round(100*v/n,2) if n else None
+        for k,v in st.pop("sum_probability").items()}
+    st["class_metrics"]={}
+    for label in LABELS:
+        tp=st["confusion"][label][label]
+        predicted=st["predicted"][label]
+        actual=st["actual"][label]
+        st["class_metrics"][label]={
+            "precision_pct":round(100*tp/predicted,2) if predicted else None,
+            "recall_pct":round(100*tp/actual,2) if actual else None,
+            "correct":tp,"predicted":predicted,"actual":actual}
+
+
+def _macro_f1(stat):
+    scores=[]
+    for label in LABELS:
+        item=(stat.get("class_metrics") or {}).get(label) or {}
+        precision=(item.get("precision_pct") or 0)/100
+        recall=(item.get("recall_pct") or 0)/100
+        scores.append(2*precision*recall/(precision+recall)
+                      if precision+recall else 0.0)
+    return round(100*sum(scores)/len(LABELS),2)
+
+
+def _period_key(signal_date):
+    return signal_date[:4]+("-H1" if signal_date[5:7]<="06" else "-H2")
+
+
 def _score_direction_candidate(trades,*,train_end="2025-11-01",
                      validation_end="2026-04-01",eval_end="2026-11-01",
                      learning_rate=0.13,l2=0.06,prior_mix=0.15,sideways_weight=1.0):
-    """Prequential 3-class accuracy, precision/recall, Brier, baseline.
-
-    For any prediction, only outcomes whose label_available_date < signal
-    date have been observed and used for training. Predictions are recorded
-    for EVERY eligible observation, including low-confidence examples.
-    """
+    """Causal prequential scoring with additional whole-history half-year slices."""
     ordered=sorted(trades,key=lambda t:(t["signal_date"],t["ticker"]))
     completions=iter(sorted(trades,key=lambda t:(t["label_available_date"],t["ticker"])))
     next_done=next(completions,None)
-    model=OnlineDirectionModel(learning_rate=learning_rate,l2=l2,prior_mix=prior_mix,sideways_weight=sideways_weight)
-    stats={k:{"total":0,"correct":0,"brier_sum":0.0,
-              "baseline_brier_sum":0.0,
-              "confusion":{t:{p:0 for p in LABELS} for t in LABELS},
-              "actual":{a:0 for a in LABELS},
-              "predicted":{a:0 for a in LABELS},
-              "sum_probability":{a:0.0 for a in LABELS}}
+    model=OnlineDirectionModel(learning_rate=learning_rate,l2=l2,
+        prior_mix=prior_mix,sideways_weight=sideways_weight)
+    stats={k:_empty_direction_stat()
            for k in ("train","validation","diagnostic")}
+    periods={}
     skipped=0
     for t in ordered:
         signal=t["signal_date"]
         while next_done is not None and next_done["label_available_date"]<signal:
             model.update(next_done)
             next_done=next(completions,None)
-        if t["label_available_date"]>=eval_end:continue
+        if t["label_available_date"]>=eval_end:
+            continue
         probs=model.predict(t)
         if probs is None:
-            skipped+=1;continue
-        k="train" if signal<train_end else "validation" if signal<validation_end else "diagnostic"
-        a=LABELS.index(t["direction_label"])
-        pred=max(range(3),key=lambda j:probs[j])
-        base=model.prior()
-        st=stats[k]
-        st["total"]+=1
-        st["correct"]+=int(a==pred)
-        st["brier_sum"]+=sum((p-(1 if j==a else 0))**2 for j,p in enumerate(probs))
-        st["baseline_brier_sum"]+=sum((p-(1 if j==a else 0))**2 for j,p in enumerate(base))
-        st["confusion"][LABELS[a]][LABELS[pred]]+=1
-        st["actual"][LABELS[a]]+=1
-        st["predicted"][LABELS[pred]]+=1
-        for j,label in enumerate(LABELS):
-            st["sum_probability"][label]+=probs[j]
+            skipped+=1
+            continue
+        bucket=("train" if signal<train_end else
+                "validation" if signal<validation_end else "diagnostic")
+        actual=LABELS.index(t["direction_label"])
+        predicted=max(range(3),key=lambda j:probs[j])
+        baseline=model.prior()
+        _record_direction(stats[bucket],actual,predicted,probs,baseline)
+        period=_period_key(signal)
+        if period not in periods:
+            periods[period]=_empty_direction_stat()
+        _record_direction(periods[period],actual,predicted,probs,baseline)
     for st in stats.values():
-        n=st["total"]
-        st["accuracy_pct"]=round(100*st["correct"]/n,2) if n else None
-        st["multiclass_brier"]=round(st.pop("brier_sum")/n,6) if n else None
-        st["prior_brier"]=round(st.pop("baseline_brier_sum")/n,6) if n else None
-        st["mean_probabilities_pct"]={k:round(100*v/n,2) if n else None
-                                     for k,v in st.pop("sum_probability").items()}
-        st["class_metrics"]={}
-        for label in LABELS:
-            tp=st["confusion"][label][label]
-            predicted=st["predicted"][label]
-            actual=st["actual"][label]
-            st["class_metrics"][label]={
-                "precision_pct":round(100*tp/predicted,2) if predicted else None,
-                "recall_pct":round(100*tp/actual,2) if actual else None,
-                "correct":tp,"predicted":predicted,"actual":actual}
-    return {"windows":stats,"skipped_warmup":skipped,"trained_outcomes":model.samples,
+        _finalize_direction_stat(st)
+    for st in periods.values():
+        _finalize_direction_stat(st)
+    return {"windows":stats,"periods":periods,
+            "skipped_warmup":skipped,"trained_outcomes":model.samples,
             "horizon_sessions":HORIZON,"band_pct":BAND_PCT,
             "target_precision_pct_each_direction":80,
             "note":"80% is a research target, NOT a verified result."}
 
 
-def score_directions(trades,*,train_end="2025-11-01",
-                     validation_end="2026-04-01",eval_end="2026-11-01"):
-    """Tune a small frozen hyperparameter menu on validation, then report all samples.
-
-    Selection uses validation macro F1 across UP, DOWN, and SIDEWAYS, then accuracy, then Brier score.
-    The already reviewed diagnostic window is never used to select a candidate.
-    """
-    candidates=[{"name":"baseline_lr0.13_l20.06_prior0.15_side1",
-                  "learning_rate":0.13,"l2":0.06,"prior_mix":0.15,"sideways_weight":1.0}]
+def _direction_candidates(search_generation,previous_best):
+    candidates=[]
+    seen=set()
+    def add(name,learning_rate,l2,prior_mix,sideways_weight):
+        learning_rate=round(max(0.005,min(0.5,float(learning_rate))),5)
+        l2=round(max(0.001,min(0.5,float(l2))),5)
+        prior_mix=round(max(0.0,min(0.95,float(prior_mix))),5)
+        sideways_weight=round(max(1.0,min(6.0,float(sideways_weight))),5)
+        key=(learning_rate,l2,prior_mix,sideways_weight)
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.append({"name":name,"learning_rate":learning_rate,
+            "l2":l2,"prior_mix":prior_mix,
+            "sideways_weight":sideways_weight})
+    add("baseline_lr0.13_l20.06_prior0.15_side1",0.13,0.06,0.15,1.0)
     for learning_rate in (0.03,0.10,0.20):
         for l2 in (0.02,0.12):
             for prior_mix in (0.0,0.30,0.60):
                 for sideways_weight in (1.0,2.0,4.0):
-                    candidates.append({
-                        "name":f"lr{learning_rate:g}_l2{l2:g}_prior{prior_mix:g}_side{sideways_weight:g}",
-                        "learning_rate":learning_rate,"l2":l2,
-                        "prior_mix":prior_mix,"sideways_weight":sideways_weight})
+                    add(f"lr{learning_rate:g}_l2{l2:g}_prior{prior_mix:g}_side{sideways_weight:g}",
+                        learning_rate,l2,prior_mix,sideways_weight)
+    center=previous_best or {"learning_rate":0.10,"l2":0.02,
+                             "prior_mix":0.0,"sideways_weight":1.0}
+    seed=(104729*int(search_generation)
+          +int(float(center.get("learning_rate",0.10))*100000)
+          +int(float(center.get("l2",0.02))*100000)
+          +int(float(center.get("prior_mix",0.0))*10000)
+          +int(float(center.get("sideways_weight",1.0))*1000))
+    rng=random.Random(seed)
+    for i in range(40):
+        lr=float(center.get("learning_rate",0.10))*math.exp(rng.uniform(-0.8,0.8))
+        reg=float(center.get("l2",0.02))*math.exp(rng.uniform(-0.9,0.9))
+        prior=float(center.get("prior_mix",0.0))+rng.uniform(-0.24,0.24)
+        side=float(center.get("sideways_weight",1.0))*math.exp(rng.uniform(-0.45,0.55))
+        add(f"g{search_generation}_mutation{i+1}",lr,reg,prior,side)
+    return candidates
+
+
+def score_directions(trades,*,train_end="2025-11-01",
+                     validation_end="2026-04-01",eval_end="2026-11-01",
+                     search_generation=1,previous_best=None):
+    """Evolve formulas and rank them over every eligible historical half-year.
+
+    Each prediction remains causal: a label is learned only after its availability
+    date. Formula selection deliberately uses all completed historical periods,
+    so the resulting score is a research fit and not an independent holdout.
+    """
+    candidates=_direction_candidates(search_generation,previous_best)
     scored=[]
     for candidate in candidates:
         report=_score_direction_candidate(
@@ -224,36 +293,67 @@ def score_directions(trades,*,train_end="2025-11-01",
             l2=candidate["l2"],prior_mix=candidate["prior_mix"],
             sideways_weight=candidate["sideways_weight"])
         validation=report["windows"]["validation"]
-        class_metrics=validation.get("class_metrics") or {}
-        f1_scores=[]
-        for label in LABELS:
-            item=class_metrics.get(label) or {}
-            precision=(item.get("precision_pct") or 0)/100
-            recall=(item.get("recall_pct") or 0)/100
-            f1_scores.append(2*precision*recall/(precision+recall) if precision+recall else 0.)
-        macro_f1_pct=round(100*sum(f1_scores)/len(LABELS),2)
+        period_scores=[]
+        for period,stat in sorted(report["periods"].items()):
+            if stat.get("total",0)<100:
+                continue
+            period_scores.append({
+                "period":period,"samples":stat["total"],
+                "macro_f1_pct":_macro_f1(stat),
+                "accuracy_pct":stat.get("accuracy_pct"),
+                "brier":stat.get("multiclass_brier")})
+        if period_scores:
+            mean_f1=round(sum(x["macro_f1_pct"] for x in period_scores)
+                          /len(period_scores),2)
+            worst_f1=round(min(x["macro_f1_pct"] for x in period_scores),2)
+            mean_accuracy=round(sum(x["accuracy_pct"] for x in period_scores
+                                    if x["accuracy_pct"] is not None)
+                                /len(period_scores),2)
+            mean_brier=round(sum(x["brier"] for x in period_scores
+                                 if x["brier"] is not None)
+                             /len(period_scores),6)
+        else:
+            mean_f1=_macro_f1(validation)
+            worst_f1=mean_f1
+            mean_accuracy=validation.get("accuracy_pct")
+            mean_brier=validation.get("multiclass_brier")
         scored.append({"candidate":candidate,"report":report,
-            "validation_macro_f1_pct":macro_f1_pct,
+            "period_scores":period_scores,
+            "whole_history_macro_f1_pct":mean_f1,
+            "worst_period_macro_f1_pct":worst_f1,
+            "whole_history_accuracy_pct":mean_accuracy,
+            "whole_history_brier":mean_brier,
+            "period_count":len(period_scores),
+            "validation_macro_f1_pct":_macro_f1(validation),
             "validation_accuracy_pct":validation.get("accuracy_pct"),
             "validation_brier":validation.get("multiclass_brier"),
             "validation_samples":validation.get("total",0)})
-    eligible=[r for r in scored if r["validation_samples"]>=30 and
-              r["validation_macro_f1_pct"] is not None]
+    eligible=[r for r in scored if r["period_count"]>=2]
     if not eligible:
-        chosen=next(r for r in scored if r["candidate"]["name"]=="baseline_lr0.13_l20.06_prior0.15_side1")
-    else:
-        chosen=max(eligible,key=lambda r:(
-            r["validation_macro_f1_pct"],r["validation_accuracy_pct"],
-            -(r["validation_brier"] if r["validation_brier"] is not None else float("inf"))))
+        eligible=[r for r in scored if r["validation_samples"]>=30]
+    chosen=max(eligible,key=lambda r:(
+        r["whole_history_macro_f1_pct"],
+        r["worst_period_macro_f1_pct"],
+        r["whole_history_accuracy_pct"] or 0,
+        -(r["whole_history_brier"] if r["whole_history_brier"] is not None
+          else float("inf"))))
     result=chosen["report"]
     result["tuning"]={
-        "selection_window":f"signal date < {validation_end}",
-        "selection_metric":"UP·DOWN·횡보 3개 클래스 Macro F1 최대화, 동률이면 전체정확도 후 Brier",
+        "generation":int(search_generation),
+        "selection_window":"완료된 전체 과거기간의 반기별 순차평가",
+        "selection_metric":"반기별 Macro F1 평균 최대화, 최악 반기·정확도·Brier 순 보조",
         "chosen":chosen["candidate"],
-        "candidates":[{k:v for k,v in item.items() if k!="report"} for item in scored],
+        "previous_best":previous_best,
+        "chosen_period_scores":chosen["period_scores"],
+        "candidates":[{k:v for k,v in item.items()
+                       if k not in ("report","period_scores")}
+                      for item in scored],
         "candidate_count":len(candidates),
-        "diagnostic_used_for_selection":False,
-        "warning":"후보 반복 비교로 검증구간도 선택에 사용되었습니다. 이 구간은 이후 독립 검증이 아닙니다."
+        "period_count":chosen["period_count"],
+        "whole_history_used_for_selection":True,
+        "diagnostic_used_for_selection":True,
+        "independent_holdout":False,
+        "warning":"전체 과거 구간을 수식 선택에 사용한 연구 적합도입니다. 미래 성공률 보장이 아닙니다."
     }
-    result["note"]="80%는 목표이며 미달 결과를 그대로 기록합니다. 진단구간은 후보 선택에 쓰지 않았습니다."
+    result["note"]="전 기간을 반기별로 순환 학습·비교하며 미달 결과도 그대로 기록합니다."
     return result
