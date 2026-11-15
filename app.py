@@ -149,9 +149,10 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
     if rolling:
         st.markdown("**최근 순차학습 결과: 상승·하락·횡보와 매수 성공**")
         g1,g2,g3=st.columns(3)
+        kr_rolling=((rolling.get("markets") or {}).get("KR") or {})
         g1.metric("누적 수식 세대",rolling.get("learning_generation","확인 필요"))
-        g2.metric("방향 후보/시장",((rolling.get("markets",{}).get("KR",{}).get("tuning") or {}).get("candidate_count","확인 필요")))
-        g3.metric("매수확률 후보/시장",((((rolling.get("markets",{}).get("KR",{}).get("buy_success") or {}).get("tuning") or {}).get("candidate_count","확인 필요")))
+        g2.metric("방향 후보/시장",(kr_rolling.get("tuning") or {}).get("candidate_count","확인 필요"))
+        g3.metric("매수확률 후보/시장",(((kr_rolling.get("buy_success") or {}).get("tuning") or {}).get("candidate_count","확인 필요")))
         st.caption(f"평가 기준일 {rolling.get('evaluation_as_of','확인 필요')} · 학습세대 {rolling.get('learning_generation','확인 필요')} · 하루 4회 새 수식 변이 탐색 · 전체 과거를 반기별 순차 비교 · 실전 승인 아님")
         candidate_rows=[]
         rolling_rows=[]
