@@ -90,15 +90,25 @@ def candidates_from_frame(frame,ticker,market):
             stop=max(close*(1-0.095),close-param["stop_atr"]*atr)
             stop=min(stop,close*0.98)
             risk=op-stop
-            if not(0<risk/op<=0.10):continue
+            # Entry is executed at next day's OPEN, not the signal close.
+            # Re-check actual executable net reward/risk after gap and costs:
+            # the old rule could approve a 2.5% gap-up despite <1R net payout.
             take=close+param["rr"]*(close-stop)
-            if not(take>op and (take-op)/op>=0.02):continue
+            entry_fee=op*(COST_PCT/100.0)
+            net_risk=(op-stop)+entry_fee
+            net_reward=(take-op)-entry_fee
+            actual_rr=net_reward/net_risk if net_risk>0 else -1
+            if not (0<risk/op<=0.07 and net_reward/op>=0.03
+                    and actual_rr>=1.30):
+                continue
             outcome=simulate_exit(x,i,op,stop,take,max_days=HOLD,cost_pct=COST_PCT)
             if not outcome:continue
             trade={"market":market,"ticker":ticker,"strategy":name,
                 "signal_date":date,"entry_date":str(pd.Timestamp(x.index[i+1]).date()),
                 "exit_date":str(pd.Timestamp(x.index[outcome["exit_index"]]).date()),
                 "entry":op,"stop":stop,"take":take,
+                "entry_net_rr":round(actual_rr,3),
+                "entry_net_upside_pct":round(100*net_reward/op,3),
                 "score":float(r.RSI),**outcome}
             result[name].append(trade)
     # prevent same ticker stacking into its own previous trade
