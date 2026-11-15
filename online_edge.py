@@ -137,6 +137,7 @@ def score_stream(trades, market, *, db_path=None):
                      "brier_model_sum":0.0,"brier_market_baseline_sum":0.0,
                      "absolute_probability_error_sum":0.0,
                      "by_regime":{},
+                     "by_window":{},
                      "calibration_bins":{str(k):{"count":0,"wins":0,"sum_net":0.0} for k in range(10)}}
         for signal,data in signals:
             # Strict before, never same-day settlement or later outcome.
@@ -155,6 +156,16 @@ def score_stream(trades, market, *, db_path=None):
             diagnostics["brier_model_sum"]+=(forecast-y)**2
             diagnostics["brier_market_baseline_sum"]+=(baseline-y)**2
             diagnostics["absolute_probability_error_sum"]+=abs(forecast-y)
+            window=("train" if signal<"2025-11-01" else
+                    "validation" if signal<"2026-04-01" else "diagnostic")
+            segment=diagnostics["by_window"].setdefault(window,{
+                "count":0,"wins":0,"sum_net":0.0,"brier_model_sum":0.0,
+                "brier_baseline_sum":0.0})
+            segment["count"]+=1
+            segment["wins"]+=int(observed)
+            segment["sum_net"]+=float(row["net_pct"])
+            segment["brier_model_sum"]+=(forecast-y)**2
+            segment["brier_baseline_sum"]+=(baseline-y)**2
             key=str(regime_key(row))
             state=diagnostics["by_regime"].setdefault(key,{"trades":0,"wins":0,"sum_net_pct":0.0,"brier":0.0})
             state["trades"]+=1
@@ -181,6 +192,13 @@ def score_stream(trades, market, *, db_path=None):
             "mean_absolute_probability_error":round(diagnostics.pop("absolute_probability_error_sum")/n,6) if n else None,
             "interpretation":"Brier lower is better; all scored candidates, including losing ones",
         }
+        for seg in diagnostics["by_window"].values():
+            count=seg["count"]
+            seg["actual_win_rate_pct"]=round(100*seg["wins"]/count,2)
+            seg["mean_net_pct"]=round(seg.pop("sum_net")/count,3)
+            seg["brier_model"]=round(seg.pop("brier_model_sum")/count,6)
+            seg["brier_baseline"]=round(seg.pop("brier_baseline_sum")/count,6)
+            seg["model_beats_baseline"]=seg["brier_model"]<seg["brier_baseline"]
         for state in diagnostics["by_regime"].values():
             m=state["trades"]
             state["win_rate_pct"]=round(100*state["wins"]/m,2)
