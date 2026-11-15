@@ -4,6 +4,7 @@ from access_control import enforce_access, access_mode
 from trade_plan import position_sizing
 from signal_playbook import playbook
 from position_decision import position_review
+from certification import assess
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
@@ -45,6 +46,32 @@ if readiness_path.exists():
     except Exception as ex:
         st.warning("검증표 파일 읽기 오류: "+str(ex)[:120])
 
+
+# Recalculate certification from underlying metrics. Never trust an editable
+# report's textual release_status as proof of approval.
+def _certification_view():
+    lab_path=Path("data/strategy-lab-latest.json")
+    if not lab_path.exists():
+        st.error("판매·실전 인증: 미승인 — 300종목 검증 보고서가 없습니다.")
+        return
+    try:
+        report=json.loads(lab_path.read_text(encoding="utf-8"))
+        paper_path=Path("data/forward-paper-evidence.json")
+        paper=json.loads(paper_path.read_text(encoding="utf-8")) if paper_path.exists() else {}
+        verdict=assess(report,paper=paper)
+        if verdict["status"]=="LIVE_APPROVED":
+            st.success("실전·판매 검증 승인 — 근거 자료의 유효성 및 이용권한을 추가 확인하세요.")
+        else:
+            st.error("실전·판매 검증 미승인 | 통과하지 못한 기준 "+str(len(verdict["reasons"]))+"개")
+        with st.expander("🔍 독립 검증·판매 적합성 자동 판정 상세",expanded=False):
+            st.caption("과거 개발 과정에서 이미 확인한 평가구간은 신규 독립 검증으로 인정하지 않습니다.")
+            st.dataframe(pd.DataFrame([{"미충족 기준":reason} for reason in verdict["reasons"]]),
+                         hide_index=True,use_container_width=True)
+            st.caption("실전 승인과 유료 판매 개시에는 검증된 미래 모의매매·합법적 시세 사용·결제/법적 요건이 모두 필요합니다.")
+    except Exception as exc:
+        st.error("인증 계산 오류 — 기본 상태는 미승인: "+str(exc)[:150])
+
+_certification_view()
 
 strategy_report=Path("data/strategy-lab-latest.json")
 if strategy_report.exists():
