@@ -31,23 +31,22 @@ def vector(trade):
 def _sigmoid(x):
     return 1/(1+np.exp(-np.clip(x,-35,35)))
 
-def fit_probabilities(history,candidate):
-    """Return prediction at trade decision time, or None for small samples."""
-    query=vector(candidate)
-    if query is None:return None
-    usable=[(vector(t),float(t["net_pct"])) for t in history if vector(t) is not None
-            and np.isfinite(float(t.get("net_pct",float("nan"))))]
+def prepare_snapshot(history):
+    """Fit once per signal date, using only trades exited before that date."""
+    usable=[]
+    for trade in history[-MAX_TRAIN:]:
+        v=vector(trade)
+        try: pnl=float(trade["net_pct"])
+        except (ValueError,TypeError,KeyError):continue
+        if v is not None and np.isfinite(pnl):usable.append((v,pnl))
     if len(usable)<MIN_COMPLETED:return None
-    usable=usable[-MAX_TRAIN:]
     x=np.asarray([v for v,_ in usable])
     pnl=np.asarray([r for _,r in usable])
     y=(pnl>0).astype(float)
     n=len(y)
-    # All-positive or all-negative samples are not fit; use honest prior only.
     if np.unique(y).size<2:return None
     X=np.column_stack([np.ones(n),x])
     beta=np.zeros(X.shape[1],dtype=float)
-    # L2 shrinks noisy indicator coefficients. Intercept gets no penalty.
     penalty=np.diag([0.0]+[16.0]*x.shape[1])
     for _ in range(12):
         p=_sigmoid(X@beta)
@@ -57,17 +56,27 @@ def fit_probabilities(history,candidate):
         delta=np.linalg.solve(hessian,grad)
         beta+=np.clip(delta,-1.5,1.5)
         if np.max(np.abs(delta))<1e-5:break
-    p_raw=float(_sigmoid(np.r_[1.0,query]@beta))
-    p_base=float((y.sum()+2)/(n+4))
-    # Baseline shrink prevents extrapolation producing spurious 90% forecasts.
+    return {"n":n,"beta":beta,"base":float((y.sum()+2)/(n+4)),
+            "win_gain":float(np.mean(pnl[y>0])),
+            "loss_net":float(np.mean(pnl[y==0]))}
+
+def predict_from_snapshot(model,candidate):
+    """Fast feature-only prediction using a frozen prior-day model."""
+    query=vector(candidate)
+    if model is None or query is None:return None
+    p_raw=float(_sigmoid(np.r_[1.0,query]@model["beta"]))
+    p_base=model["base"]
     p_shrunk=0.65*p_raw+0.35*p_base
-    win_magnitude=float(np.mean(pnl[y>0]))
-    loss_magnitude=float(np.mean(pnl[y==0]))  # already negative, net of costs
-    expected=p_shrunk*win_magnitude+(1-p_shrunk)*loss_magnitude
-    return {"training_completed":n,"predicted_win_pct":round(100*p_shrunk,2),
+    expected=p_shrunk*model["win_gain"]+(1-p_shrunk)*model["loss_net"]
+    return {"training_completed":model["n"],
+            "predicted_win_pct":round(100*p_shrunk,2),
             "baseline_win_pct":round(100*p_base,2),
             "expected_net_pct":round(expected,3),
             "predicted_uplift_pct":round(100*(p_shrunk-p_base),2)}
+
+def fit_probabilities(history,candidate):
+    """Backward-compatible per-item scorer (fast policies use date snapshots)."""
+    return predict_from_snapshot(prepare_snapshot(history),candidate)
 
 def walkforward_model_filter(trades):
     """One-step chronological prequential scoring with fully exited records."""
@@ -105,24 +114,30 @@ POLICIES={
 }
 
 def walkforward_model_policies(trades):
-    """Score each candidate exactly once and report all policies, transparently.
+    """One model fit per signal date; scores all trades at that date.
 
-    Online training samples must have completely exited before signal_date.
-    Only feature data and preexisting exits are eligible at signal time.
+    No candidate outcome can leak into its own or same-day peer's model:
+    training history is restricted to exits strictly before signal_date.
     """
     ordered=sorted(trades,key=lambda t:(t["signal_date"],t["ticker"],t["entry_date"]))
     completed=sorted(trades,key=lambda t:(t["exit_date"],t["ticker"],t["entry_date"]))
     selected={key:[] for key in POLICIES}
     status={"total":len(trades),"missing_features":0,"insufficient":0,
-            "scored":0,"policy_accepted":{key:0 for key in POLICIES}}
-    j=0;history=[]
+            "scored":0,"models_fitted":0,
+            "policy_accepted":{key:0 for key in POLICIES}}
+    j=0;history=[];active_date=None;model=None
     for item in ordered:
-        while j<len(completed) and completed[j]["exit_date"]<item["signal_date"]:
-            history.append(completed[j]);j+=1
+        signal=item["signal_date"]
+        if signal!=active_date:
+            while j<len(completed) and completed[j]["exit_date"]<signal:
+                history.append(completed[j]);j+=1
+            model=prepare_snapshot(history)
+            active_date=signal
+            status["models_fitted"]+=1
         if vector(item) is None:
             status["missing_features"]+=1
             continue
-        score=fit_probabilities(history,item)
+        score=predict_from_snapshot(model,item)
         if score is None:
             status["insufficient"]+=1
             continue
