@@ -112,6 +112,115 @@ if strategy_report.exists():
     except Exception as exc:
         st.warning("전략 비교 보고서 조회 오류: "+str(exc)[:120])
 
+
+# Verification, approval, and ongoing learning monitor
+with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
+    st.caption("기존 Render 서비스의 커밋된 보고서에서 실제 수치를 읽습니다. 이미 열람한 과거 평가기간은 신규 독립 검증으로 보지 않습니다.")
+    lab={}
+    try: lab=json.loads(Path("data/strategy-lab-latest.json").read_text(encoding="utf-8"))
+    except Exception: pass
+    online={}
+    online_files=sorted(Path("data").glob("online-adaptive-average-probability-300-*.json"))
+    if online_files:
+        try: online=json.loads(online_files[-1].read_text(encoding="utf-8"))
+        except Exception: pass
+    c1,c2,c3=st.columns(3)
+    c1.metric("요청 목표 승률","80%","목표값 · 보장 아님")
+    c2.metric("최신 온라인 학습 결과",str(online.get("created_utc","확인 필요"))[:10])
+    c3.metric("실전·유료 승인","차단","독립 검증 및 운영 요건 미충족")
+    st.warning("계속 학습해도 80% 승률을 약속할 수 없습니다. 같은 평가기간을 보고 수식을 고치면 그 기간은 더 이상 독립 검증이 아닙니다.")
+    names={"KR":"코스피","KQ":"코스닥","US":"나스닥"}
+    results=[]
+    for key,name in names.items():
+        m=(lab.get("markets") or {}).get(key,{})
+        x=m.get("holdout_selected_metrics") or {}
+        p=m.get("portfolio") or {}
+        results.append({"시장":name,"시세 종목수":f'{m.get("loaded","—")}/{m.get("requested","—")}',
+          "기존 전략":m.get("training_selected") or "선정 없음","평가 매매":x.get("trades","확인 필요"),
+          "승률(%)":x.get("win_rate_pct","확인 필요"),"거래당 순손익(%)":x.get("mean_net_pct","확인 필요"),
+          "손익비":x.get("profit_factor","확인 필요"),"계좌 수익률(%)":p.get("total_return_pct","확인 필요"),
+          "최대낙폭(%)":p.get("max_drawdown_pct","확인 필요"),"실전승인":"아니오"})
+    st.markdown("**기존 시장별 결과 — 임의 변경 없음**")
+    st.dataframe(pd.DataFrame(results),hide_index=True,use_container_width=True)
+    st.caption("100종목씩 과거 일봉을 평가한 보고서 기준: 코스피 34.92%(63건), 코스닥 26.67%(30건), 나스닥 0건. 이미 열람된 역사적 진단값입니다.")
+    if online:
+        st.markdown("**온라인 순차학습 성능: 학습·검증·이미 확인된 진단 구간**")
+        summary=[]; policies=[]
+        for key,name in names.items():
+            m=(online.get("markets") or {}).get(key,{})
+            scoring=m.get("scoring") or {}
+            q=scoring.get("probability_quality") or {}
+            d=(scoring.get("by_window") or {}).get("diagnostic") or {}
+            summary.append({"시장":name,"학습 후보":scoring.get("population","확인 필요"),
+              "진단 거래":d.get("count","확인 필요"),"진단 실제 승률(%)":d.get("actual_win_rate_pct","확인 필요"),
+              "평균 예측확률(%)":d.get("average_adaptive_predicted_win_pct","확인 필요"),
+              "Brier 모델":q.get("brier_model","확인 필요"),"Brier 기준":q.get("brier_market_baseline","확인 필요"),
+              "확률모델이 기준보다 나음":("예" if q.get("brier_model") is not None and q.get("brier_market_baseline") is not None and q.get("brier_model")<q.get("brier_market_baseline") else "아니오/확인 필요")})
+            for policy,v in (m.get("policies") or {}).items():
+                for window in ("train","validation","diagnostic"):
+                    a=v.get(window) or {}
+                    policies.append({"시장":name,"모델":policy,"구간":window,"거래수":a.get("trades","확인 필요"),
+                      "승률(%)":a.get("win_rate_pct","확인 필요"),"거래당 순손익(%)":a.get("mean_net_pct","확인 필요"),
+                      "손익비":a.get("profit_factor","확인 필요"),"최대낙폭(%)":a.get("max_drawdown_pct","확인 필요")})
+        st.dataframe(pd.DataFrame(summary),hide_index=True,use_container_width=True)
+        st.caption("Brier는 낮을수록 확률예측 오차가 작습니다. 예측확률과 실제 승률은 별도 지표입니다.")
+        pdf=pd.DataFrame(policies)
+        q=st.text_input("모델·시장·구간 검색",key="sr50_policy_search")
+        mf=st.multiselect("시장",list(names.values()),default=list(names.values()),key="sr50_policy_market")
+        if not pdf.empty:
+            pdf=pdf[pdf["시장"].isin(mf)]
+            if q: pdf=pdf[pdf.astype(str).apply(lambda col:col.str.contains(q,case=False,regex=False)).any(axis=1)]
+            st.dataframe(pdf,hide_index=True,use_container_width=True,height=360)
+    else: st.info("온라인 학습 보고서 없음 · 확인되지 않은 값은 추정하지 않습니다.")
+    st.markdown("**종목별 최신 데이터 확인**")
+    vp=Path("data/verification.json")
+    if vp.exists():
+        try:
+            snap=json.loads(vp.read_text(encoding="utf-8")); df=pd.DataFrame(snap.get("rows") or [])
+            if not df.empty:
+                a,b=st.columns([2,1]); q=a.text_input("종목명·코드 검색",key="sr50_symbol_q")
+                mf=b.multiselect("시장 필터",["KR","KQ","US"],default=["KR","KQ","US"],key="sr50_symbol_market")
+                df=df[df["market"].isin(mf)]
+                if q: df=df[df.astype(str).apply(lambda col:col.str.contains(q,case=False,regex=False)).any(axis=1)]
+                st.dataframe(df,hide_index=True,use_container_width=True,height=300)
+                st.caption(f'스냅샷 기준 {snap.get("checked_at_utc","확인 필요")} · 장기 종목별 거래이력은 아닙니다.')
+        except Exception as exc: st.warning("종목자료 확인 오류: "+str(exc)[:120])
+    checks=[
+      ["데이터","시장별 100종목 과거 평가","충족","보고서에 각 시장 100/100 기록"],
+      ["데이터","과거 시점 구성종목 복원","미충족","현재 구성 종목 소급에 따른 생존편향 가능"],
+      ["데이터","상장폐지·합병·거래정지 포함","미충족","이력 복원 증거 없음"],
+      ["검증","새 독립 미래 holdout","미충족","기존 과거 평가기간 열람됨"],
+      ["검증","최소 100개 독립 평가 거래/시장","미충족","63 / 30 / 0건"],
+      ["전략","수식 버전 동결·변경 전후 재현","부분 충족","Git·보고서 존재; 신규 holdout 필요"],
+      ["데이터","시세 라이선스·재배포 권리","확인 필요","공식 계약 증거 없음"],
+      ["체결","실시간 체결·슬리피지·세금","미충족","일봉 모델과 가정 비용; 실제 항목 분리 미확인"],
+      ["기능","자동 주문","미구현","주문제출 기능 없음"],
+      ["서비스","회원·결제·환불 운영","미충족","접근제어는 있으나 결제 미연결"],
+      ["감사","변경·승인 로그","부분 충족","Git·CI 보고서; 불변 외부 감사로그는 아님"],
+      ["법적","유료 판매 법률 검토","확인 필요","검토 자료 없음"],
+      ["운영","장애·백업·개인정보 처리","확인 필요","운영 증거 확인 필요"]]
+    st.markdown("**실전 사용·유료 출시 체크리스트**")
+    cf=pd.DataFrame(checks,columns=["영역","요건","상태","근거·미확인 사유"])
+    q=st.text_input("요건 검색",key="sr50_check_q")
+    statuses=st.multiselect("상태 필터",list(cf["상태"].unique()),default=list(cf["상태"].unique()),key="sr50_check_status")
+    cf=cf[cf["상태"].isin(statuses)]
+    if q: cf=cf[cf.astype(str).apply(lambda col:col.str.contains(q,case=False,regex=False)).any(axis=1)]
+    st.dataframe(cf,hide_index=True,use_container_width=True)
+    tasks=pd.DataFrame([
+      ["P0","미사용 미래기간으로 시장별 walk-forward 재실행","검증","대기"],
+      ["P0","과거 구성종목·상장폐지·합병 이력 확보","데이터","대기"],
+      ["P0","미래 모의매매를 90일·60건 이상 자동 기록","실전검증","대기"],
+      ["P0","확률구간별 승률·Brier·순손익을 시장별 비교","모델","진행"],
+      ["P1","실제 수수료·세금·슬리피지·체결지연 반영","체결","대기"],
+      ["P1","전략·자료·결과 버전과 commit hash 고정","감사","부분"],
+      ["P1","시세권리·회원결제·법률·환불 요건 검토","출시","대기"]
+    ],columns=["우선순위","다음 수정 과제","영역","상태"])
+    tq=st.text_input("과제 검색",key="sr50_task_q")
+    pr=st.multiselect("우선순위 필터",["P0","P1"],default=["P0","P1"],key="sr50_task_priority")
+    tasks=tasks[tasks["우선순위"].isin(pr)]
+    if tq: tasks=tasks[tasks.astype(str).apply(lambda col:col.str.contains(tq,case=False,regex=False)).any(axis=1)]
+    st.dataframe(tasks,hide_index=True,use_container_width=True)
+
 if access_mode()!="private":
     st.caption("공개 베타 · 비상업용 평가 버전 | 공식 시세 라이선스·결제·회원 운영 미연결")
 else:
