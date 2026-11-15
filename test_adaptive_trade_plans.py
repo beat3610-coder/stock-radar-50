@@ -24,7 +24,8 @@ class PlanLearningTest(unittest.TestCase):
     def test_learning_is_strictly_delayed(self):
         old=[labelled(i,"2025-01-01","2025-01-15",i%2==0) for i in range(140)]
         candidate=labelled(999,"2025-12-01","2025-12-15",True)
-        extra=labelled(998,"2025-12-01","2025-12-12",False)
+        extra=labelled(998,"2025-12-01","2025-12-12",True)
+        extra["plan_net_pct"]={name:-99.0 for name in PLANS}
         a=score_plans(old+[candidate])["windows"]["validation"]
         b=score_plans(old+[candidate,extra])["windows"]["validation"]
         self.assertEqual(a["trades"],1)
