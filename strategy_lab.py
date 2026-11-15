@@ -21,6 +21,7 @@ from audit_300 import simulate_exit, metrics
 from portfolio_audit import replay
 from trade_execution import entry_quality
 from empirical_edge import walkforward_filter, walkforward_regime_filter
+from predictive_model import walkforward_model_filter
 
 TRAIN_END="2025-11-01"
 VALID_END="2026-04-01"
@@ -124,6 +125,11 @@ def candidates_from_frame(frame,ticker,market):
                 "score":float(r.RSI),
                 "signal_atr_pct":round(100*atr/close,3),
                 "signal_ma20_ma60_pct":round(100*(float(r.MA20)/float(r.MA60)-1),3),
+                "signal_rsi":float(r.RSI),
+                "signal_adx":float(r.ADX),
+                "signal_volume_ratio":float(r.Volume/r.VOL20),
+                "signal_5d_return_pct":100*(close/float(x.Close.iloc[i-5])-1),
+                "entry_gap_pct":100*(op/close-1),
                 **outcome}
             result[name].append(trade)
     # prevent same ticker stacking into its own previous trade
@@ -161,7 +167,7 @@ def train_choice(choices):
 def run(per_market=20):
     u=get_universe()
     res={"created_utc":datetime.now(timezone.utc).isoformat(),
-        "type":"research_lab_v4_regime_probabilities",
+        "type":"research_lab_v5_prequential_prediction",
         "method":"train-only selection, fixed validation screening, untouched-in-this-run diagnostic holdout",
         "train_end":TRAIN_END,"validation_end":VALID_END,"holdout_end":HOLDOUT_END,
         "research_target_win_rate_pct":70,
@@ -201,7 +207,10 @@ def run(per_market=20):
             variants[original+"_prob_edge"]=filtered
             high_confidence,high_confidence_report=walkforward_regime_filter(variants[original])
             variants[original+"_regime_edge"]=high_confidence
-            edge_diagnostics[original]={**report,"regime_filter":high_confidence_report}
+            ml_filtered,ml_report=walkforward_model_filter(variants[original])
+            variants[original+"_ml_edge"]=ml_filtered
+            edge_diagnostics[original]={**report,"regime_filter":high_confidence_report,
+                                        "predictive_model":ml_report}
         leader,scores=train_choice(variants)
         train_metrics={k:metrics(_interval(v,"train")) for k,v in variants.items()}
         validation_metrics={k:metrics(_interval(v,"validate")) for k,v in variants.items()}
