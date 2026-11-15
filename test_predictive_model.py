@@ -1,6 +1,6 @@
 """Prediction math, reproducibility and future-leak tests."""
 import unittest
-from predictive_model import vector, fit_probabilities,walkforward_model_filter,MIN_COMPLETED
+from predictive_model import vector, fit_probabilities,walkforward_model_filter,walkforward_model_policies,POLICIES,MIN_COMPLETED
 
 def record(i,win,signal="2025-02-01",exit_date="2025-02-03",hot=False):
     return {"ticker":f"S{i}","entry_date":signal,"signal_date":signal,
@@ -34,6 +34,25 @@ class ModelTest(unittest.TestCase):
         b,_=walkforward_model_filter(history+[test,later])
         self.assertEqual([x for x in a if x["ticker"]=="S999"],
                          [x for x in b if x["ticker"]=="S999"])
+    def test_predeclared_policy_thresholds_nested(self):
+        self.assertLess(POLICIES["coverage"]["win_pct"],POLICIES["balanced"]["win_pct"])
+        self.assertLess(POLICIES["balanced"]["win_pct"],POLICIES["strict"]["win_pct"])
+        history=self.history()
+        candidates=[record(999,False,"2025-02-01","2025-02-15",hot=True)]
+        result,diagnostics=walkforward_model_policies(history+candidates)
+        self.assertEqual(diagnostics["total"],61)
+        self.assertGreaterEqual(len(result["coverage"]),len(result["balanced"]))
+        self.assertGreaterEqual(len(result["balanced"]),len(result["strict"]))
+    def test_policy_scores_exclude_later_same_day_results(self):
+        hist=self.history()
+        item=record(999,False,"2025-02-01","2025-02-10",hot=True)
+        future=record(1000,True,"2025-02-01","2025-02-03",hot=True)
+        first,_=walkforward_model_policies(hist+[item])
+        second,_=walkforward_model_policies(hist+[item,future])
+        for policy in POLICIES:
+            self.assertEqual([t for t in first[policy] if t["ticker"]=="S999"],
+                             [t for t in second[policy] if t["ticker"]=="S999"])
+
     def test_no_future_cannot_generate_signal(self):
         all_future=[record(i,True,"2026-01-01","2026-01-15",hot=True) for i in range(60)]
         selected,counts=walkforward_model_filter(all_future)
