@@ -17,6 +17,14 @@ class CalibratedEdgeTest(unittest.TestCase):
         self.assertTrue(p["eligible"])
         self.assertLess(p["win_probability_pct"],100.0)
         self.assertGreater(p["expected_net_pct"],0)
+    def test_recent_regime_deterioration_blocks_stale_long_mean(self):
+        old=[trade(i,5,"2025-01-01","2025-01-02") for i in range(70)]
+        recent=[trade(200+i,-3,"2025-01-01","2025-01-02") for i in range(30)]
+        p=posterior_from_completed(old+recent)
+        self.assertGreater(p["expected_net_pct"],0)
+        self.assertLess(p["recent_expected_net_pct"],0)
+        self.assertFalse(p["eligible"])
+
     def test_negative_history_blocked(self):
         p=posterior_from_completed([trade(i,-2,"2025-01-01","2025-01-02") for i in range(30)])
         self.assertFalse(p["eligible"])
