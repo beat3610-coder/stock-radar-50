@@ -10,6 +10,7 @@ from providers import get_prices
 from universe import get_universe
 from portfolio_audit import replay
 from certification import assess
+from trade_execution import entry_quality
 
 BUY = {"연구용 매수 후보·실거래 미승인", "연구용 후보·위험조건 미충족"}
 HOLD_DAYS = 10
@@ -72,9 +73,10 @@ def audit_symbol(frame, market, ticker):
         # and reward at the actual executable next-day opening price.
         if abs(next_open/reference-1) > 0.025:
             continue
-        risk = (next_open-float(stop))/next_open
-        reward = (float(target)-next_open)/next_open
-        if not (0 < risk <= 0.12 and reward >= 0.02 and reward/risk >= 1.2):
+        # All three research paths use the identical next-open execution gate.
+        # Existing 2.5% gap check is also enforced within entry_quality.
+        entry_check = entry_quality(next_open,float(stop),float(target),reference=reference)
+        if not entry_check["accepted"]:
             continue
         outcome = simulate_exit(x, t, next_open, float(stop), float(target))
         if outcome is None:
@@ -84,6 +86,8 @@ def audit_symbol(frame, market, ticker):
                      "signal_date":str(pd.Timestamp(x.index[t]).date()),
                      "entry_date":str(pd.Timestamp(x.index[t+1]).date()),
                      "entry":next_open,"stop":float(stop),"take":float(target),
+                     "entry_net_rr":entry_check["net_rr"],
+                     "entry_net_upside_pct":entry_check["net_upside_pct"],
                      "exit_date":str(pd.Timestamp(x.index[outcome["exit_index"]]).date()),
                      "score":info.get("score"), **outcome})
     return rows
