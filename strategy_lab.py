@@ -50,7 +50,7 @@ def qualifying(row,prev,market,variant,prior_high):
     # momentum and extended entries without looking past the signal candle.
     if not _finite(row.MA200,row.MA60,row.MA20,row.PDI,row.MDI,row.ADX):
         return False
-    if not (p>row.MA200 and row.MA60>row.MA200 and row.PDI>row.MDI and row.ADX>=18):
+    if not (bool(row.MA200_UP20) and p>row.MA200 and row.MA60>row.MA200 and row.PDI>row.MDI and row.ADX>=18):
         return False
     if p/float(row.MA20)>1.08:
         return False
@@ -75,11 +75,6 @@ def candidates_from_frame(frame,ticker,market):
     x=compute(frame)
     result={key:[] for key in PARAMS}
     for i in range(LOOKBACK,len(x)-HOLD,STEP):
-        # A flat or declining MA200 is a frequent source of false rebounds.
-        if not (np.isfinite(x.MA200.iloc[i-20]) and
-                np.isfinite(x.MA200.iloc[i]) and
-                x.MA200.iloc[i] > x.MA200.iloc[i-20]):
-            continue
         date=str(pd.Timestamp(x.index[i]).date())
         if date>=HOLDOUT_END:break
         r=x.iloc[i];prev=x.iloc[i-1]
