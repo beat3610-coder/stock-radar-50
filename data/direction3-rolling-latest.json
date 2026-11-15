@@ -1,5 +1,5 @@
 {
-  "created_utc": "2026-11-15T22:19:09.576255+00:00",
+  "created_utc": "2026-11-15T22:28:23.812986+00:00",
   "type": "direction3_10session_3pct",
   "target_precision_pct_each": 80,
   "fixed_horizon_sessions": 10,
@@ -20,37 +20,37 @@
           "train": {
             "count": 2967,
             "wins": 1500,
-            "mean_predicted_success_pct": 45.5,
+            "mean_predicted_success_pct": 40.36,
             "actual_success_pct": 50.56,
-            "calibration_gap_pp": -5.05,
-            "brier_model": 0.272628,
+            "calibration_gap_pp": -10.19,
+            "brier_model": 0.262105,
             "brier_baseline": 0.262105,
             "mean_net_pct": 1.28,
-            "mean_predicted_net_pct": -0.057,
+            "mean_predicted_net_pct": -0.647,
             "profit_factor": 1.536
           },
           "validation": {
             "count": 4971,
             "wins": 2495,
-            "mean_predicted_success_pct": 53.21,
+            "mean_predicted_success_pct": 48.57,
             "actual_success_pct": 50.19,
-            "calibration_gap_pp": 3.02,
-            "brier_model": 0.267392,
+            "calibration_gap_pp": -1.62,
+            "brier_model": 0.252335,
             "brier_baseline": 0.252335,
             "mean_net_pct": 1.192,
-            "mean_predicted_net_pct": 1.425,
+            "mean_predicted_net_pct": 0.846,
             "profit_factor": 1.367
           },
           "diagnostic": {
             "count": 7102,
             "wins": 2739,
-            "mean_predicted_success_pct": 43.51,
+            "mean_predicted_success_pct": 48.04,
             "actual_success_pct": 38.57,
-            "calibration_gap_pp": 4.95,
-            "brier_model": 0.255538,
+            "calibration_gap_pp": 9.48,
+            "brier_model": 0.246371,
             "brier_baseline": 0.246371,
             "mean_net_pct": -1.47,
-            "mean_predicted_net_pct": 0.054,
+            "mean_predicted_net_pct": 0.783,
             "profit_factor": 0.727
           }
         },
@@ -64,7 +64,922 @@
           "same_candle_stop_take": "stop_first"
         },
         "target_success_pct": 80,
-        "live_approved": false
+        "live_approved": false,
+        "tuning": {
+          "selection_window": "signal date < 2026-04-01",
+          "selection_metric": "검증 Brier 최소화; 동률이면 예측확률-실제승률 차이 최소화",
+          "chosen": {
+            "name": "blr0.03_l20.02_prior1",
+            "learning_rate": 0.03,
+            "l2": 0.02,
+            "prior_mix": 1.0
+          },
+          "candidates": [
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior0",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.260742,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.18
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior0.15",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.258423,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.46
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior0.3",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.256477,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 1.74
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior0.5",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.254464,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 0.78
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior1",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior0",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.259682,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.88
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior0.15",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.257682,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.2
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior0.3",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.256,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 1.53
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior0.5",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.254249,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 0.63
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior1",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior0",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.258946,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.63
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior0.15",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.257179,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 1.99
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior0.3",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.255685,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 1.35
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior0.5",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.25412,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 0.5
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior1",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior0",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.269195,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 4.12
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior0.15",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.264758,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.26
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior0.3",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.260994,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.4
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior0.5",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.257023,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 1.25
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior1",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior0",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.266924,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.68
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior0.15",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.263095,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.89
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior0.3",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.259844,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.09
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior0.5",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.256412,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 1.03
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior1",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior0",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.265526,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.4
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior0.15",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.262088,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.65
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior0.3",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.259165,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 1.9
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior0.5",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.256069,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 0.89
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior1",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior0",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.274281,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 4.28
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior0.15",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.26844,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.39
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior0.3",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.263499,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.51
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior0.5",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.258311,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 1.33
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior1",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior0",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.271899,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.85
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior0.15",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.266702,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.03
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior0.3",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.262304,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.21
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior0.5",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.257681,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 1.11
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior1",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior0",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.270483,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.58
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior0.15",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.265701,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.8
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior0.3",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.261646,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.02
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior0.5",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.25737,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 0.98
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior1",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior0",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.275161,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 4.26
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior0.15",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.269076,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.38
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior0.3",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.26393,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.5
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior0.5",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.25853,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 1.32
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior1",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior0",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.272847,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.84
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior0.15",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.267392,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.02
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior0.3",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.262777,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.2
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior0.5",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.257929,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 1.11
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior1",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior0",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.271462,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.57
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior0.15",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.26642,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.79
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior0.3",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.262145,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.01
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior0.5",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.257637,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 0.98
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior1",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior0",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.280782,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior0.15",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.273186,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior0.3",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.266765,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.29
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior0.5",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.260031,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 1.18
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior1",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior0",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.27905,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.58
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior0.15",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.271974,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.8
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior0.3",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.265982,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.02
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior0.5",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.259676,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 0.98
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior1",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior0",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.27791,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 3.31
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior0.15",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.271219,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 2.57
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior0.3",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.265535,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 1.83
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior0.5",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.259524,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": 0.84
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior1",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.252335,
+              "validation_baseline_brier": 0.252335,
+              "validation_samples": 4971,
+              "validation_calibration_gap_pp": -1.62
+            }
+          ],
+          "candidate_count": 75,
+          "diagnostic_used_for_selection": false,
+          "warning": "전체 표본 승률은 모든 종목 결과의 실제 빈도이며, 확률식 조정으로 바뀌지 않습니다."
+        }
       },
       "adaptive_plans": {
         "windows": {
@@ -1314,37 +2229,37 @@
           "train": {
             "count": 2939,
             "wins": 1516,
-            "mean_predicted_success_pct": 47.23,
+            "mean_predicted_success_pct": 45.66,
             "actual_success_pct": 51.58,
-            "calibration_gap_pp": -4.35,
-            "brier_model": 0.275141,
+            "calibration_gap_pp": -5.92,
+            "brier_model": 0.26101,
             "brier_baseline": 0.262792,
             "mean_net_pct": 2.205,
-            "mean_predicted_net_pct": 1.031,
+            "mean_predicted_net_pct": 0.787,
             "profit_factor": 1.693
           },
           "validation": {
             "count": 4883,
             "wins": 2342,
-            "mean_predicted_success_pct": 50.72,
+            "mean_predicted_success_pct": 50.51,
             "actual_success_pct": 47.96,
-            "calibration_gap_pp": 2.75,
-            "brier_model": 0.259044,
+            "calibration_gap_pp": 2.54,
+            "brier_model": 0.251521,
             "brier_baseline": 0.251663,
             "mean_net_pct": 1.644,
-            "mean_predicted_net_pct": 2.096,
+            "mean_predicted_net_pct": 2.058,
             "profit_factor": 1.354
           },
           "diagnostic": {
             "count": 6960,
             "wins": 2808,
-            "mean_predicted_success_pct": 42.64,
+            "mean_predicted_success_pct": 45.46,
             "actual_success_pct": 40.34,
-            "calibration_gap_pp": 2.3,
-            "brier_model": 0.274718,
+            "calibration_gap_pp": 5.12,
+            "brier_model": 0.253375,
             "brier_baseline": 0.248101,
             "mean_net_pct": -1.182,
-            "mean_predicted_net_pct": 0.232,
+            "mean_predicted_net_pct": 0.824,
             "profit_factor": 0.836
           }
         },
@@ -1358,7 +2273,922 @@
           "same_candle_stop_take": "stop_first"
         },
         "target_success_pct": 80,
-        "live_approved": false
+        "live_approved": false,
+        "tuning": {
+          "selection_window": "signal date < 2026-04-01",
+          "selection_metric": "검증 Brier 최소화; 동률이면 예측확률-실제승률 차이 최소화",
+          "chosen": {
+            "name": "blr0.03_l20.12_prior0.5",
+            "learning_rate": 0.03,
+            "l2": 0.12,
+            "prior_mix": 0.5
+          },
+          "candidates": [
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior0",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.25408,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.64
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior0.15",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.253128,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.39
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior0.3",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.252385,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.14
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior0.5",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.251717,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.8
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior1",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior0",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.253641,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.39
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior0.15",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.252817,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.18
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior0.3",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.25218,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.96
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior0.5",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.251619,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.68
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior1",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior0",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.25321,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.12
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior0.15",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.252511,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.95
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior0.3",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.251977,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.78
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior0.5",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.251521,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.54
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior1",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior0",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.258505,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.86
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior0.15",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.256321,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.58
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior0.3",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.254546,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.29
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior0.5",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.252815,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.91
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior1",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior0",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.25731,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.34
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior0.15",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.255431,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior0.3",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.253917,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.92
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior0.5",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.252464,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.65
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior1",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior0",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.256368,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.89
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior0.15",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.254731,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.75
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior0.3",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.253423,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.61
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior0.5",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.25219,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.43
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior1",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior0",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.263162,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.64
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior0.15",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.259708,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.39
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior0.3",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.256865,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.14
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior0.5",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.254023,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.8
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior1",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior0",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.261412,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior0.15",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.258384,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.82
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior0.3",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.25591,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.67
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior0.5",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.253469,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.47
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior1",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior0",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.260306,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.54
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior0.15",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.257562,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.46
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior0.3",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.255328,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.37
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior0.5",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.253145,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.25
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior1",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior0",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.264133,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.57
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior0.15",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.260416,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.33
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior0.3",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.25735,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 3.09
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior0.5",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.254277,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.77
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior1",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior0",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.262321,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.89
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior0.15",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.259044,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.75
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior0.3",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.256359,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.61
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior0.5",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.253702,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.43
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior1",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior0",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.261228,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.48
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior0.15",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.258234,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.41
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior0.3",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.255791,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.33
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior0.5",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.253388,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.22
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior1",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior0",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.270694,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.94
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior0.15",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.265209,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.79
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior0.3",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.260653,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.64
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior0.5",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.256021,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.45
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior1",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior0",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.26903,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.39
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior0.15",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.263987,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.32
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior0.3",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.259805,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.26
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior0.5",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.255567,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.18
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior1",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior0",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.268283,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.16
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior0.15",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.263493,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior0.3",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.259513,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.1
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior0.5",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.255468,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 2.06
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior1",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.251663,
+              "validation_baseline_brier": 0.251663,
+              "validation_samples": 4883,
+              "validation_calibration_gap_pp": 1.97
+            }
+          ],
+          "candidate_count": 75,
+          "diagnostic_used_for_selection": false,
+          "warning": "전체 표본 승률은 모든 종목 결과의 실제 빈도이며, 확률식 조정으로 바뀌지 않습니다."
+        }
       },
       "adaptive_plans": {
         "windows": {
@@ -2608,37 +4438,37 @@
           "train": {
             "count": 3525,
             "wins": 1555,
-            "mean_predicted_success_pct": 47.08,
+            "mean_predicted_success_pct": 46.27,
             "actual_success_pct": 44.11,
-            "calibration_gap_pp": 2.97,
-            "brier_model": 0.249009,
+            "calibration_gap_pp": 2.16,
+            "brier_model": 0.246555,
             "brier_baseline": 0.246555,
             "mean_net_pct": 0.104,
-            "mean_predicted_net_pct": 0.345,
+            "mean_predicted_net_pct": 0.27,
             "profit_factor": 1.042
           },
           "validation": {
             "count": 4925,
             "wins": 2101,
-            "mean_predicted_success_pct": 43.95,
+            "mean_predicted_success_pct": 44.79,
             "actual_success_pct": 42.66,
-            "calibration_gap_pp": 1.29,
-            "brier_model": 0.261211,
+            "calibration_gap_pp": 2.13,
+            "brier_model": 0.245965,
             "brier_baseline": 0.245965,
             "mean_net_pct": -0.136,
-            "mean_predicted_net_pct": 0.052,
+            "mean_predicted_net_pct": 0.14,
             "profit_factor": 0.956
           },
           "diagnostic": {
             "count": 7252,
             "wins": 3321,
-            "mean_predicted_success_pct": 44.93,
+            "mean_predicted_success_pct": 44.71,
             "actual_success_pct": 45.79,
-            "calibration_gap_pp": -0.86,
-            "brier_model": 0.25685,
+            "calibration_gap_pp": -1.08,
+            "brier_model": 0.249013,
             "brier_baseline": 0.249013,
             "mean_net_pct": 0.107,
-            "mean_predicted_net_pct": 0.238,
+            "mean_predicted_net_pct": 0.209,
             "profit_factor": 1.031
           }
         },
@@ -2652,7 +4482,922 @@
           "same_candle_stop_take": "stop_first"
         },
         "target_success_pct": 80,
-        "live_approved": false
+        "live_approved": false,
+        "tuning": {
+          "selection_window": "signal date < 2026-04-01",
+          "selection_metric": "검증 Brier 최소화; 동률이면 예측확률-실제승률 차이 최소화",
+          "chosen": {
+            "name": "blr0.03_l20.02_prior1",
+            "learning_rate": 0.03,
+            "l2": 0.02,
+            "prior_mix": 1.0
+          },
+          "candidates": [
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior0",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.252551,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 3.12
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior0.15",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.251105,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.97
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior0.3",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.24982,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.82
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior0.5",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.248359,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.63
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.02_prior1",
+                "learning_rate": 0.03,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior0",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.252387,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.87
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior0.15",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.251028,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.76
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior0.3",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.249809,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.65
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior0.5",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.248401,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.5
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.065_prior1",
+                "learning_rate": 0.03,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior0",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.252285,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.73
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior0.15",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.250982,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.64
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior0.3",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.249804,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.55
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior0.5",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.248429,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.43
+            },
+            {
+              "candidate": {
+                "name": "blr0.03_l20.12_prior1",
+                "learning_rate": 0.03,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior0",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.258571,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.01
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior0.15",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.255824,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.03
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior0.3",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.253379,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.04
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior0.5",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.250589,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.07
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.02_prior1",
+                "learning_rate": 0.06,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior0",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.258191,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.79
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior0.15",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.255592,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.84
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior0.3",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.253263,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.89
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior0.5",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.250578,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.96
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.065_prior1",
+                "learning_rate": 0.06,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior0",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.257768,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.69
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior0.15",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.255293,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.76
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior0.3",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.253067,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.83
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior0.5",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.250485,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.91
+            },
+            {
+              "candidate": {
+                "name": "blr0.06_l20.12_prior1",
+                "learning_rate": 0.06,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior0",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.265051,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.4
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior0.15",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.26084,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.51
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior0.3",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.257105,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.62
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior0.5",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.252865,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.77
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.02_prior1",
+                "learning_rate": 0.1,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior0",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.264227,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.23
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior0.15",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.260259,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.37
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior0.3",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.256725,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.5
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior0.5",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.252687,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.68
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.065_prior1",
+                "learning_rate": 0.1,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior0",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.263277,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.14
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior0.15",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.259549,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.29
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior0.3",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.25622,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.44
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior0.5",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.252402,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.64
+            },
+            {
+              "candidate": {
+                "name": "blr0.1_l20.12_prior1",
+                "learning_rate": 0.1,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior0",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.266413,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.3
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior0.15",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.26189,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.42
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior0.3",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.257881,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.55
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior0.5",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.253335,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.72
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.02_prior1",
+                "learning_rate": 0.11,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior0",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.265465,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.14
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior0.15",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.261211,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.29
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior0.3",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.257426,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.44
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior0.5",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.253109,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.64
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.065_prior1",
+                "learning_rate": 0.11,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior0",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.264395,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.04
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior0.15",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.260408,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.2
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior0.3",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.256853,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.37
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior0.5",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.252784,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.59
+            },
+            {
+              "candidate": {
+                "name": "blr0.11_l20.12_prior1",
+                "learning_rate": 0.11,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior0",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.275532,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 0.72
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior0.15",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.268899,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 0.93
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior0.3",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.263042,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.14
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior0.5",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.256439,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.43
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.02_prior1",
+                "learning_rate": 0.2,
+                "l2": 0.02,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior0",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.273551,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 0.54
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior0.15",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.267417,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 0.78
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior0.3",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.261987,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.02
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior0.5",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.255843,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.34
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.065_prior1",
+                "learning_rate": 0.2,
+                "l2": 0.065,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior0",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 0.0
+              },
+              "validation_brier": 0.271652,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 0.42
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior0.15",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 0.15
+              },
+              "validation_brier": 0.265985,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 0.67
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior0.3",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 0.3
+              },
+              "validation_brier": 0.260958,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 0.93
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior0.5",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 0.5
+              },
+              "validation_brier": 0.255252,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 1.27
+            },
+            {
+              "candidate": {
+                "name": "blr0.2_l20.12_prior1",
+                "learning_rate": 0.2,
+                "l2": 0.12,
+                "prior_mix": 1.0
+              },
+              "validation_brier": 0.245965,
+              "validation_baseline_brier": 0.245965,
+              "validation_samples": 4925,
+              "validation_calibration_gap_pp": 2.13
+            }
+          ],
+          "candidate_count": 75,
+          "diagnostic_used_for_selection": false,
+          "warning": "전체 표본 승률은 모든 종목 결과의 실제 빈도이며, 확률식 조정으로 바뀌지 않습니다."
+        }
       },
       "adaptive_plans": {
         "windows": {
