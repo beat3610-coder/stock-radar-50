@@ -64,7 +64,7 @@ class DirectionTests(unittest.TestCase):
         a=make_direction_rows(x,"A","US",end_date="2027-01-01")
         self.assertGreater(len(a),0)
         y=x.copy()
-        y.loc[y.index[250]:,"Close"]=y.loc[y.index[251]:,"Close"]*0.4
+        y.loc[y.index[250]:,"Close"]=y.loc[y.index[250]:,"Close"]*0.4
         b=make_direction_rows(y,"A","US",end_date="2027-01-01")
         self.assertEqual(a[0]["signal_date"],b[0]["signal_date"])
         self.assertEqual(a[0]["signal_rsi"],b[0]["signal_rsi"])
