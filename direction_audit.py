@@ -21,7 +21,10 @@ def run_direction3(per_market=100):
             "research_only":True,"live_approved":False,
             "evaluation_warning":"Retrospective period already reviewed; not independent prospective evidence",
             "markets":{}}
-    for market in ("KR","KQ","US"):
+    import os
+    selected=os.environ.get("STOCK_AUDIT_MARKET","").strip().upper()
+    markets=(selected,) if selected in ("KR","KQ","US") else ("KR","KQ","US")
+    for market in markets:
         excluded={"KR":{"472150","0262B0"},"KQ":set(),"US":{"SOXL"}}[market]
         symbols=[x[0] for x in univ[market] if x[0] not in excluded][:per_market]
         rows=[];buy_rows=[];plan_rows=[];loaded=0;errors=[]
