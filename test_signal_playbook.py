@@ -10,7 +10,8 @@ class ResearchPlaybookTest(unittest.TestCase):
         dates=pd.bdate_range("2024-01-01",periods=221)
         frame=pd.DataFrame({
             "Close":[100.]*220+[105.],"MA20":[100.]*221,
-            "MA60":[98.]*221,"MA200":[90.]*221,
+            "MA60":[98.]*221,"MA200":[89.+i/220 for i in range(221)],
+            "MA200_UP20":[False]*20+[True]*201,
             "RSI":[55.]*221,"MACDH":[-0.1]*220+[0.4],
             "ADX":[25.]*221,"PDI":[25.]*221,"MDI":[12.]*221,
             "ATR":[2.]*221,"VOL20":[100.]*221,"Volume":[170.]*221,
