@@ -437,6 +437,8 @@ def evaluate(x, market="US", flow=None):
         "upside_pct":upside_pct,"entry_rr":entry_rr,
         "trade_target":trade_target,"trade_target2":plan["target2"],
         "trade_plan_basis":plan["basis"],"historical_samples":plan["history_samples"],
+        "historical_calibration_samples":plan.get("calibration_samples",0),
+        "historical_evaluation_samples":plan.get("evaluation_samples",0),
         "stop_risk_pct":plan["stop_risk_pct"],
         "downside_p75_pct":plan["downside_p75_pct"],
         "historical_net_expectancy_pct":plan.get("historical_net_expectancy_pct"),

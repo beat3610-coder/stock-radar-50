@@ -11,6 +11,9 @@ df=pd.DataFrame({"Open":p-.5,"High":p+2,"Low":p-2,
 x=compute(df)
 plan=scenario_from_history(x,stop=float(x.Close.iloc[-1])-4)
 assert plan["history_samples"]>=50,plan
+assert plan["calibration_samples"]>=30,plan
+assert plan["evaluation_samples"]>=15,plan
+assert plan["calibration_samples"]+plan["evaluation_samples"]<=plan["history_samples"],plan
 assert plan["target"]>float(x.Close.iloc[-1])
 assert plan["target2"]>=plan["target"]
 assert plan["planned_rr"]>0

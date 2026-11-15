@@ -337,7 +337,7 @@ def to_row(item,with_flow=True,market_rank=None):
       "통합 목표가":round(r["trade_target"],2) if r["trade_target"] is not None else None,
       "2차 익절 참고":round(r["trade_target2"],2) if r["trade_target2"] is not None else None,
       "과거 저항 참고":round(r["integrated_target"],2) if r["integrated_target"] is not None else None,
-      "과거 경로 표본":r["historical_samples"],
+      "과거 전체 표본":r["historical_samples"],"학습 표본":r.get("historical_calibration_samples",0),"독립 평가 표본":r.get("historical_evaluation_samples",0),
       "과거 비용 반영 손익 %":r["historical_net_expectancy_pct"],
       "선택 익절 기준":r["historical_target_choice"],
       "과거 1차 익절 우선 %":r["historical_target_first_pct"],
@@ -609,7 +609,7 @@ with candidate_tab:
         columns=["구분","종목","코드","전략 검증 통과 후보","전략 진입 조건","전략 연구 목표상승 %","전략 연구 손절폭 %","매매 판단","기술 판단(목표 검증 전)",
                  "시장 위험국면","실전 전략 승인","종가","통합 목표가","손절 참고","목표 상승여력 %","손절폭 %",
                  "기대손익비(R)","과거 비용 반영 손익 %",
-                 "과거 1차 익절 우선 %","과거 경로 표본",
+                 "과거 1차 익절 우선 %","과거 전체 표본","학습 표본","독립 평가 표본",
                  "점수","종가 교차검증","매매 판단 근거","거래일"]
         columns=[col for col in columns if col in candidates]
         st.caption(f"조건에 해당하는 종목 {len(candidates)}개")

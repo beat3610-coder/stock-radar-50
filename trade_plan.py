@@ -1,8 +1,8 @@
 """Risk-first exit planning, with strictly historical empirical excursion levels.
 
 All prices are daily-bar scenarios, not guaranteed fills or forecasts.
-Forward excursion calibration *at time t* uses samples whose full future
-10-session window ended before t; no future data leak.
+history_samples counts all usable historical entry windows. calibration_samples
+and evaluation_samples report time-separated training and holdout outcomes.
 """
 import numpy as np
 import pandas as pd
@@ -16,7 +16,7 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
     if stop is None or not np.isfinite(stop) or not 0<stop<p or len(x)<200:
         return {"target":None,"target1":None,"target2":None,
                 "expected_upside_pct":None,"planned_rr":None,
-                "history_samples":0,"positive_rate_pct":None,
+                "history_samples":0,"calibration_samples":0,"evaluation_samples":0,"positive_rate_pct":None,
                 "downside_p75_pct":None,"stop_risk_pct":None,
                 "basis":"손절가 또는 200거래일 자료 부족"}
     close=x.Close.to_numpy(dtype=float)
@@ -37,7 +37,7 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
     if len(starts)<min_samples:
         return {"target":None,"target1":None,"target2":None,
                 "expected_upside_pct":None,"planned_rr":None,
-                "history_samples":int(len(starts)),"positive_rate_pct":None,
+                "history_samples":int(len(starts)),"calibration_samples":0,"evaluation_samples":0,"positive_rate_pct":None,
                 "downside_p75_pct":None,"stop_risk_pct":round(100*(p-stop)/p,2),
                 "basis":"완료된 과거 10거래일 경로 부족"}
     # Entry is NOT the decision-day close: it is the next day's actual open.
@@ -69,7 +69,7 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
     if len(calibration)<30 or len(holdout)<15:
         return {"target":None,"target1":None,"target2":None,
                 "expected_upside_pct":None,"planned_rr":None,
-                "history_samples":len(holdout),"positive_rate_pct":None,
+                "history_samples":int(len(starts)),"calibration_samples":int(len(calibration)),"evaluation_samples":int(len(holdout)),"positive_rate_pct":None,
                 "downside_p75_pct":None,
                 "stop_risk_pct":round(100*(p-stop)/p,2),
                 "basis":"시간순 학습·평가 경계의 10거래일 누수 제거 후 표본 부족"}
@@ -129,7 +129,9 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
             "historical_target_choice":"75th" if use75 else "50th",
             "historical_net_50th_pct":round(float(net50.mean()),3),
             "historical_net_75th_pct":round(float(net75.mean()),3),
-            "history_samples":len(holdout),
+            "history_samples":int(len(starts)),
+            "calibration_samples":int(len(calibration)),
+            "evaluation_samples":int(len(holdout)),
             "positive_rate_pct":round(100*np.mean(chosen_pnl>0),2),
             "smoothed_win_probability_pct":round(smoothed_win_probability,2),
             "conservative_expected_net_pct":round(conservative_expected_net,3),
@@ -167,7 +169,7 @@ def decide_trade(signal, plan, score=None, min_rr=1.2, min_upside=2.0,
     if reasons:return hold," · ".join(reasons)
     return signal,("과거 중앙 상승여력 "
                    f"{plan['expected_upside_pct']:.2f}%, 손익비 {plan['planned_rr']:.2f}R "
-                   f"(표본 {plan['history_samples']}; 미래 예측 아님)")
+                   f"(전체 경로 {plan['history_samples']}개, 손익 평가 {plan.get('evaluation_samples',0)}개; 미래 예측 아님)")
 
 def position_sizing(capital, entry, stop, take, risk_fraction=0.01,
                     round_trip_cost_fraction=0.0035, max_allocation_fraction=0.20):
