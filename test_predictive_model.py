@@ -34,6 +34,15 @@ class ModelTest(unittest.TestCase):
         b,_=walkforward_model_filter(history+[test,later])
         self.assertEqual([x for x in a if x["ticker"]=="S999"],
                          [x for x in b if x["ticker"]=="S999"])
+    def test_single_snapshot_fit_for_many_same_day_signals(self):
+        history=self.history()
+        same_day=[record(2000+i,bool(i%2),"2025-02-01","2025-02-14",hot=bool(i%2))
+                  for i in range(120)]
+        out,stats=walkforward_model_policies(history+same_day)
+        self.assertEqual(stats["total"],180)
+        self.assertEqual(stats["models_fitted"],2)
+        self.assertEqual(stats["scored"],120)
+        self.assertGreater(stats["total"],stats["models_fitted"])
     def test_predeclared_policy_thresholds_nested(self):
         self.assertLess(POLICIES["coverage"]["win_pct"],POLICIES["balanced"]["win_pct"])
         self.assertLess(POLICIES["balanced"]["win_pct"],POLICIES["strict"]["win_pct"])
