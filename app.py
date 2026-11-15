@@ -40,7 +40,7 @@ if readiness_path.exists():
                     "계좌 누적수익 %":p.get("total_return_pct"),
                     "계좌 최대낙폭 %":p.get("max_drawdown_pct"),
                     "거래비용 2배 수익 %":stress.get("total_return_pct")})
-            st.dataframe(pd.DataFrame(details),hide_index=True,use_container_width=True)
+            st.dataframe(pd.DataFrame(details).fillna("—"),hide_index=True,use_container_width=True)
             st.error("실전 합격: 미통과 · 더 많은 독립 표본과 실제 미래 모의매매 기록이 필요합니다.")
     except Exception as ex:
         st.warning("검증표 파일 읽기 오류: "+str(ex)[:120])
@@ -64,7 +64,7 @@ if strategy_report.exists():
                     "평가 거래수":tested.get("trades"),"평가 승률 %":tested.get("win_rate_pct"),
                     "거래당 순손익 %":tested.get("mean_net_pct"),
                     "가상 계좌 수익 %":port.get("total_return_pct")})
-            st.dataframe(pd.DataFrame(table),hide_index=True,use_container_width=True)
+            st.dataframe(pd.DataFrame(table).fillna("—"),hide_index=True,use_container_width=True)
             st.warning("과거 전략 비교는 실전 수익 증빙이 아닙니다. 모든 시장의 실전 매수 승인은 차단되어 있습니다.")
     except Exception as exc:
         st.warning("전략 비교 보고서 조회 오류: "+str(exc)[:120])
@@ -144,6 +144,9 @@ def to_row(item,with_flow=True,market_rank=None):
     best_idea=max(ideas,key=lambda z:z["target_upside_pct"]) if ideas else None
     labels={"trend_breakout":"고점 돌파","trend_pullback":"눌림목 반등","momentum_reentry":"MACD 재상승"}
     return {
+      "분석 상태":("가격 교차검증 경고" if r["quote_check"].get("status")=="mismatch" else "가격 교차검증 미완료" if r["quote_check"].get("status")!="agree" else "보조시세 일치"),
+      "목표가 산정 상태":("10거래일 경로 기반" if r.get("trade_target") is not None else "산정 불가·기술 저항선 별도 참고"),
+      "목표가 미산정 사유":("" if r.get("trade_target") is not None else r.get("trade_plan_basis","근거 부족")),
       "구분":(f"코스피 {market_rank}위" if market_rank is not None else "국내 ETF") if market=="KR" else (f"코스닥 {market_rank}위" if market_rank is not None else "코스닥") if market=="KQ" else (f"나스닥 {market_rank}위" if market_rank is not None else "미국 ETF"),
       "종목":name,"코드":code,"업종":sector,
       "거래일":r["date"],"통화":"KRW" if market in ("KR","KQ") else "USD",
@@ -349,10 +352,10 @@ def ranking_page(mkt):
                           list(range(1,pages+1)),key=page_key,
                           format_func=lambda p:f"{p}번째 50종목 / 총 {pages}묶음")
         # Prioritize actionable prices and the trading decision in the horizontal table.
-        primary_cols=("구분","종목","코드","업종","거래일","통화",
+        primary_cols=("구분","종목","코드","업종","거래일","통화","분석 상태","목표가 산정 상태",
                       "매매 판단","종가","통합 목표가","손절 참고","중장기 상승추세",
                       "목표 상승여력 %","손절폭 %","기대손익비(R)","과거 비용 반영 손익 %",
-                      "2차 익절 참고","52주 고점","52주 저점")
+                      "2차 익절 참고","과거 저항 참고","목표가 미산정 사유","52주 고점","52주 저점")
         first=[col for col in primary_cols if col in df.columns]
         df=df[first+[col for col in df.columns if col not in first]]
         batch_codes=set(state["batches"][page-1])
@@ -396,9 +399,12 @@ def ranking_page(mkt):
         if "과거 경로 표본" in shown.columns:number_formats["과거 경로 표본"]="{:,.0f}"
         if "종가 차이 %" in shown.columns:
             number_formats["종가 차이 %"]="{:.2f}"
+        missing_targets=int(shown["통합 목표가"].isna().sum()) if "통합 목표가" in shown else 0
+        if missing_targets:
+            st.info(f"현재 묶음 {missing_targets}개 종목은 과거 경로 부족 또는 상승 목표가 미성립으로 목표가를 산정하지 않았습니다. 저항선은 별도 참고치입니다.")
         styled=shown.style.format(number_formats,na_rep="—")
         st.dataframe(styled,hide_index=True,use_container_width=True,height=510)
-        st.download_button("📥 분석 결과 CSV 저장",df.to_csv(index=False).encode("utf-8-sig"),f"STOCK_RADAR200_{mkt}.csv","text/csv",key="csv"+mkt)
+        st.download_button("📥 분석 결과 CSV 저장",df.fillna("—").to_csv(index=False).encode("utf-8-sig"),f"STOCK_RADAR200_{mkt}.csv","text/csv",key="csv"+mkt)
     else:
         st.info("위 버튼을 눌러 종목별 시세 분석을 시작하세요. 항목을 추측해서 채우지 않습니다.")
     if fail:
