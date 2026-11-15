@@ -92,6 +92,22 @@ if strategy_report.exists():
                     "거래당 순손익 %":tested.get("mean_net_pct"),
                     "가상 계좌 수익 %":port.get("total_return_pct")})
             st.dataframe(pd.DataFrame(table).fillna("—"),hide_index=True,use_container_width=True)
+            diagnostics=[]
+            for market_key,market_name in names.items():
+                d=(lab.get("markets",{}).get(market_key,{}) or {}).get("loss_diagnosis") or {}
+                if not d:continue
+                diagnostics.append({
+                    "시장":market_name,
+                    "손실 거래":d.get("losing_trades"),
+                    "전체 거래":d.get("completed_trades"),
+                    "손절 사유별 건수":str(d.get("loss_exit_reason_counts") or {}),
+                    "학습→평가 승률 변화(%p)":d.get("train_to_holdout_win_rate_change_pp")
+                })
+            if diagnostics:
+                st.markdown("**손실 원인 진단: 손절·목표가·기간 종료별 손실 빈도**")
+                st.dataframe(pd.DataFrame(diagnostics).fillna("—"),hide_index=True,use_container_width=True)
+            else:
+                st.caption("손실 원인별 거래 기록은 수정된 전략 백테스트 실행 후 표시됩니다.")
             st.warning("과거 전략 비교는 실전 수익 증빙이 아닙니다. 모든 시장의 실전 매수 승인은 차단되어 있습니다.")
     except Exception as exc:
         st.warning("전략 비교 보고서 조회 오류: "+str(exc)[:120])
