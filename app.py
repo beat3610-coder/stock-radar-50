@@ -149,27 +149,19 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
     if rolling:
         st.markdown("**최근 순차학습 결과: 상승·하락·횡보와 매수 성공**")
         st.caption(f"평가 기준일 {rolling.get('evaluation_as_of','확인 필요')} · 10거래일 뒤 실제 종가로 정답 확인 · 하루 4회 확인, 같은 날짜 데이터는 1회만 재학습 · 실전 승인 아님")
-        tuning=rolling.get("tuning") or {}
-        chosen=tuning.get("chosen") or {}
-        if chosen:
-            st.caption(f"선택 수식: {chosen.get('name','—')} · 학습률 {chosen.get('learning_rate','—')} · 정규화 {chosen.get('l2','—')} · 기준혼합 {chosen.get('prior_mix','—')} (검증구간에서 선택)")
         candidate_rows=[]
-        for item in tuning.get("candidates") or []:
-            c=item.get("candidate") or {}
-            candidate_rows.append({"후보":c.get("name"),"학습률":c.get("learning_rate"),
-              "정규화":c.get("l2"),"기준혼합":c.get("prior_mix"),
-              "검증 Macro F1(%)":item.get("validation_macro_f1_pct"),
-              "검증 정확도(%)":item.get("validation_accuracy_pct"),
-              "검증 Brier":item.get("validation_brier"),"검증 표본":item.get("validation_samples")})
-        if candidate_rows:
-            st.dataframe(pd.DataFrame(candidate_rows),hide_index=True,use_container_width=True,height=340)
         rolling_rows=[]
         for key,name in names.items():
             m=(rolling.get("markets") or {}).get(key,{})
             d=(m.get("windows") or {}).get("diagnostic") or {}
             b=(((m.get("buy_success") or {}).get("windows") or {}).get("diagnostic") or {})
             p=(((m.get("adaptive_plans") or {}).get("windows") or {}).get("diagnostic") or {})
-            rolling_rows.append({"시장":name,"방향 표본":d.get("total","확인 필요"),
+            dt=m.get("tuning") or {}
+            bt=(m.get("buy_success") or {}).get("tuning") or {}
+            dc=dt.get("chosen") or {}
+            bc=bt.get("chosen") or {}
+            rolling_rows.append({"시장":name,"선택 방향식":dc.get("name","확인 필요"),
+              "선택 매수확률식":bc.get("name","확인 필요"),"방향 표본":d.get("total","확인 필요"),
               "방향 전체정확도(%)":d.get("accuracy_pct","확인 필요"),
               "방향 Brier / 기준":f"{d.get('multiclass_brier','—')} / {d.get('prior_brier','—')}",
               "매수 성공 표본":b.get("count","확인 필요"),
@@ -178,7 +170,24 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
               "매수 평균 순손익(%)":b.get("mean_net_pct","확인 필요"),
               "적응형 청산 승률(%)":p.get("actual_win_pct","확인 필요"),
               "적응형 순손익(%)":p.get("mean_net_pct","확인 필요")})
+            for model_name, tuning in (("방향",dt),("매수확률",bt)):
+                for item in tuning.get("candidates") or []:
+                    c=item.get("candidate") or {}
+                    candidate_rows.append({"시장":name,"모델":model_name,"후보":c.get("name"),
+                      "학습률":c.get("learning_rate"),"정규화":c.get("l2"),"기준혼합":c.get("prior_mix"),
+                      "검증 Macro F1(%)":item.get("validation_macro_f1_pct"),
+                      "검증 정확도(%)":item.get("validation_accuracy_pct"),
+                      "검증 Brier":item.get("validation_brier"),"기준 Brier":item.get("validation_baseline_brier"),
+                      "검증 표본":item.get("validation_samples")})
         st.dataframe(pd.DataFrame(rolling_rows),hide_index=True,use_container_width=True)
+        if candidate_rows:
+            cf=pd.DataFrame(candidate_rows)
+            markets_filter=st.multiselect("수식 후보 비교 시장",list(names.values()),default=list(names.values()),key="sr50_tuning_market")
+            cf=cf[cf["시장"].isin(markets_filter)]
+            search=st.text_input("후보 수식 검색",key="sr50_tuning_search")
+            if search:
+                cf=cf[cf.astype(str).apply(lambda col:col.str.contains(search,case=False,regex=False)).any(axis=1)]
+            st.dataframe(cf,hide_index=True,use_container_width=True,height=340)
         st.warning("이 반복 진단은 새로 성숙한 과거 관측을 순차 학습합니다. 이미 공개된 진단기간의 성과는 독립 검증이 아닙니다. 새 공식은 별도 미래 구간에서 성능이 확인되기 전까지 자동 실전 적용하지 않습니다.")
     if online:
         st.markdown("**온라인 순차학습 성능: 학습·검증·이미 확인된 진단 구간**")

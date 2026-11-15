@@ -16,11 +16,12 @@ COST_PCT=0.35
 TRAIN_MIN=90
 
 class OnlineBuySuccess:
-    def __init__(self, lr=0.11, l2=0.065):
+    def __init__(self, lr=0.11, l2=0.065, prior_mix=0.15):
         self.weights=[0.0]*10
         self.adagrad=[4.0]*10
         self.lr=lr
         self.l2=l2
+        self.prior_mix=max(0.,min(1.,float(prior_mix)))
         self.count=0
         self.wins=0
         self.positive_sum=0.0
@@ -33,7 +34,7 @@ class OnlineBuySuccess:
     def predict(self,row):
         v=features(row)
         if v is None or self.count<TRAIN_MIN:return None
-        p=0.85*self._p(v)+0.15*self.prior()
+        p=(1-self.prior_mix)*self._p(v)+self.prior_mix*self.prior()
         avg_up=self.positive_sum/max(1,self.wins)
         avg_down=self.negative_sum/max(1,self.count-self.wins)
         return {"p_success":p,
@@ -90,13 +91,14 @@ def attach_buy_labels(frame,rows):
             continue
     return output
 
-def score_buy_success(trades,*,train_end="2025-11-01",
-                      validation_end="2026-04-01",eval_end="2026-11-01"):
+def _score_buy_success_candidate(trades,*,train_end="2025-11-01",
+                      validation_end="2026-04-01",eval_end="2026-11-01",
+                      lr=0.11,l2=0.065,prior_mix=0.15):
     """All-sample observed win and forecast success percentage by time window."""
     stream=sorted(trades,key=lambda r:(r["signal_date"],r["ticker"]))
     done=iter(sorted(trades,key=lambda r:(r["buy_label_available_date"],r["ticker"])))
     next_done=next(done,None)
-    model=OnlineBuySuccess()
+    model=OnlineBuySuccess(lr=lr,l2=l2,prior_mix=prior_mix)
     def state():
         return {"count":0,"wins":0,"pred_sum":0.0,"brier":0.0,
                 "base_brier":0.0,"net_sum":0.0,"expected_net_sum":0.0,
@@ -143,3 +145,44 @@ def score_buy_success(trades,*,train_end="2025-11-01",
                "take":"1.8R from next open","roundtrip_cost_pct":COST_PCT,
                "same_candle_stop_take":"stop_first"},
             "target_success_pct":80,"live_approved":False}
+
+
+def score_buy_success(trades,*,train_end="2025-11-01",
+                      validation_end="2026-04-01",eval_end="2026-11-01"):
+    """Tune probability parameters on validation Brier; report all outcomes unfiltered."""
+    candidates=[]
+    for lr in (0.03,0.06,0.10,0.11,0.20):
+        for l2 in (0.02,0.065,0.12):
+            for prior_mix in (0.0,0.15,0.30,0.50,1.0):
+                candidates.append({"name":f"blr{lr:g}_l2{l2:g}_prior{prior_mix:g}",
+                                   "learning_rate":lr,"l2":l2,"prior_mix":prior_mix})
+    scored=[]
+    for candidate in candidates:
+        report=_score_buy_success_candidate(
+            trades,train_end=train_end,validation_end=validation_end,eval_end=eval_end,
+            lr=candidate["learning_rate"],l2=candidate["l2"],
+            prior_mix=candidate["prior_mix"])
+        validation=report["windows"]["validation"]
+        scored.append({"candidate":candidate,"report":report,
+            "validation_brier":validation.get("brier_model"),
+            "validation_baseline_brier":validation.get("brier_baseline"),
+            "validation_samples":validation.get("count",0),
+            "validation_calibration_gap_pp":validation.get("calibration_gap_pp")})
+    eligible=[r for r in scored if r["validation_samples"]>=30 and
+              r["validation_brier"] is not None]
+    if not eligible:
+        chosen=next(r for r in scored if r["candidate"]["name"]=="blr0.11_l20.065_prior0.15")
+    else:
+        chosen=min(eligible,key=lambda r:(
+            r["validation_brier"],abs(r["validation_calibration_gap_pp"] or 0)))
+    result=chosen["report"]
+    result["tuning"]={
+        "selection_window":f"signal date < {validation_end}",
+        "selection_metric":"검증 Brier 최소화; 동률이면 예측확률-실제승률 차이 최소화",
+        "chosen":chosen["candidate"],
+        "candidates":[{k:v for k,v in item.items() if k!="report"} for item in scored],
+        "candidate_count":len(candidates),
+        "diagnostic_used_for_selection":False,
+        "warning":"전체 표본 승률은 모든 종목 결과의 실제 빈도이며, 확률식 조정으로 바뀌지 않습니다."
+    }
+    return result

@@ -42,7 +42,10 @@ class BuySuccessTest(unittest.TestCase):
     def test_reports_probability_vs_actual_and_net(self):
         past=[rec(i,"2025-01-01","2025-01-12",i%2==0) for i in range(130)]
         test=[rec(i+200,"2025-12-01","2025-12-15",i%3!=0) for i in range(60)]
-        result=score_buy_success(past+test)["windows"]["validation"]
+        report=score_buy_success(past+test)
+        result=report["windows"]["validation"]
+        self.assertEqual(report["tuning"]["candidate_count"],75)
+        self.assertFalse(report["tuning"]["diagnostic_used_for_selection"])
         self.assertEqual(result["count"],60)
         self.assertEqual(result["wins"],40)
         self.assertAlmostEqual(result["actual_success_pct"],66.67,places=2)
