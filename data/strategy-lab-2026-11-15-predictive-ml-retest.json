@@ -1,0 +1,932 @@
+{
+  "source": "Actual Render 300-stock daily OHLC diagnostic; 2026 retrospective previously inspected, not independent validation",
+  "commit": "ae07ea60354ef8f433ad0638f4c96b491ed7f62d",
+  "date_of_run": "2026-11-15T10:49:07.126527339Z",
+  "prediction_architecture": "NumPy ridge-regularized logistic regression on prior fully exited trade features",
+  "roundtrip_cost_pct": 0.35,
+  "live_trade_approved": false,
+  "created_utc": "2026-11-15T10:41:20.326673+00:00",
+  "train_end": "2025-11-01",
+  "validation_end": "2026-04-01",
+  "holdout_end": "2026-11-01",
+  "markets": {
+    "KR": {
+      "requested": 100,
+      "loaded": 100,
+      "error_count": 0,
+      "errors": [],
+      "train_selected": "trend_pullback",
+      "selected": null,
+      "train": {
+        "trades": 58,
+        "win_rate_pct": 48.28,
+        "mean_net_pct": 1.405,
+        "profit_factor": 1.645,
+        "max_drawdown_pct": 35.81
+      },
+      "edge_calibration": {
+        "trend_breakout": {
+          "total": 32,
+          "insufficient": 28,
+          "negative_edge": 0,
+          "accepted": 4,
+          "regime_filter": {
+            "total": 32,
+            "insufficient_regime": 32,
+            "poor_expectancy": 0,
+            "uncertain_win_probability": 0,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 32,
+            "missing_features": 0,
+            "insufficient": 32,
+            "weak_prediction": 0,
+            "accepted": 0
+          }
+        },
+        "trend_pullback": {
+          "total": 129,
+          "insufficient": 30,
+          "negative_edge": 27,
+          "accepted": 72,
+          "regime_filter": {
+            "total": 129,
+            "insufficient_regime": 82,
+            "poor_expectancy": 35,
+            "uncertain_win_probability": 12,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 129,
+            "missing_features": 0,
+            "insufficient": 42,
+            "weak_prediction": 87,
+            "accepted": 0
+          }
+        },
+        "momentum_reentry": {
+          "total": 45,
+          "insufficient": 27,
+          "negative_edge": 0,
+          "accepted": 18,
+          "regime_filter": {
+            "total": 45,
+            "insufficient_regime": 45,
+            "poor_expectancy": 0,
+            "uncertain_win_probability": 0,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 45,
+            "missing_features": 0,
+            "insufficient": 36,
+            "weak_prediction": 9,
+            "accepted": 0
+          }
+        },
+        "trend_pullback_balanced": {
+          "total": 96,
+          "insufficient": 32,
+          "negative_edge": 23,
+          "accepted": 41,
+          "regime_filter": {
+            "total": 96,
+            "insufficient_regime": 71,
+            "poor_expectancy": 9,
+            "uncertain_win_probability": 16,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 96,
+            "missing_features": 0,
+            "insufficient": 42,
+            "weak_prediction": 54,
+            "accepted": 0
+          }
+        },
+        "momentum_reentry_balanced": {
+          "total": 41,
+          "insufficient": 27,
+          "negative_edge": 0,
+          "accepted": 14,
+          "regime_filter": {
+            "total": 41,
+            "insufficient_regime": 41,
+            "poor_expectancy": 0,
+            "uncertain_win_probability": 0,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 41,
+            "missing_features": 0,
+            "insufficient": 35,
+            "weak_prediction": 6,
+            "accepted": 0
+          }
+        }
+      },
+      "validation": {
+        "trades": 49,
+        "win_rate_pct": 44.9,
+        "mean_net_pct": 0.844,
+        "profit_factor": 1.377,
+        "max_drawdown_pct": 47.42
+      },
+      "holdout": {
+        "trades": 0,
+        "win_rate_pct": null,
+        "mean_net_pct": null,
+        "profit_factor": null,
+        "max_drawdown_pct": null
+      },
+      "holdout_variants": {
+        "trend_breakout": {
+          "trades": 2,
+          "win_rate_pct": 50,
+          "mean_net_pct": -2.38,
+          "profit_factor": 0.019,
+          "max_drawdown_pct": 4.85
+        },
+        "trend_pullback": {
+          "trades": 18,
+          "win_rate_pct": 38.89,
+          "mean_net_pct": -1.187,
+          "profit_factor": 0.582,
+          "max_drawdown_pct": 32.61
+        },
+        "momentum_reentry": {
+          "trades": 7,
+          "win_rate_pct": 28.57,
+          "mean_net_pct": -1.337,
+          "profit_factor": 0.62,
+          "max_drawdown_pct": 21.86
+        },
+        "trend_pullback_balanced": {
+          "trades": 11,
+          "win_rate_pct": 18.18,
+          "mean_net_pct": -2.264,
+          "profit_factor": 0.366,
+          "max_drawdown_pct": 27.64
+        },
+        "momentum_reentry_balanced": {
+          "trades": 6,
+          "win_rate_pct": 33.33,
+          "mean_net_pct": -0.683,
+          "profit_factor": 0.778,
+          "max_drawdown_pct": 16.72
+        },
+        "trend_breakout_prob_edge": {
+          "trades": 2,
+          "win_rate_pct": 50,
+          "mean_net_pct": -2.38,
+          "profit_factor": 0.019,
+          "max_drawdown_pct": 4.85
+        },
+        "trend_breakout_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_breakout_ml_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_prob_edge": {
+          "trades": 18,
+          "win_rate_pct": 38.89,
+          "mean_net_pct": -1.187,
+          "profit_factor": 0.582,
+          "max_drawdown_pct": 32.61
+        },
+        "trend_pullback_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_ml_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_prob_edge": {
+          "trades": 7,
+          "win_rate_pct": 28.57,
+          "mean_net_pct": -1.337,
+          "profit_factor": 0.62,
+          "max_drawdown_pct": 21.86
+        },
+        "momentum_reentry_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_ml_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_balanced_prob_edge": {
+          "trades": 6,
+          "win_rate_pct": 16.67,
+          "mean_net_pct": -2.791,
+          "profit_factor": 0.339,
+          "max_drawdown_pct": 17.89
+        },
+        "trend_pullback_balanced_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_balanced_ml_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_balanced_prob_edge": {
+          "trades": 6,
+          "win_rate_pct": 33.33,
+          "mean_net_pct": -0.683,
+          "profit_factor": 0.778,
+          "max_drawdown_pct": 16.72
+        },
+        "momentum_reentry_balanced_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_balanced_ml_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        }
+      },
+      "portfolio": {
+        "valid": true,
+        "initial_equity": 10000000,
+        "end_equity": 10000000,
+        "total_return_pct": 0,
+        "max_drawdown_pct": 0,
+        "trades_executed": 0,
+        "days": 153,
+        "mark_to_market": true,
+        "no_leverage": true,
+        "max_concurrent_positions": 5,
+        "max_position_weight": 0.2,
+        "risk_budget_per_trade": 0.01,
+        "benchmark_verified": false,
+        "caveat": "Single-market simplified daily OHLC; no intraday cross-position allocation or market impact. No verified benchmark."
+      },
+      "stress_portfolio": {
+        "valid": true,
+        "initial_equity": 10000000,
+        "end_equity": 10000000,
+        "total_return_pct": 0,
+        "max_drawdown_pct": 0,
+        "trades_executed": 0,
+        "days": 153,
+        "mark_to_market": true,
+        "no_leverage": true,
+        "max_concurrent_positions": 5,
+        "max_position_weight": 0.2,
+        "risk_budget_per_trade": 0.01,
+        "benchmark_verified": false,
+        "caveat": "Single-market simplified daily OHLC; no intraday cross-position allocation or market impact. No verified benchmark."
+      }
+    },
+    "KQ": {
+      "requested": 100,
+      "loaded": 100,
+      "error_count": 0,
+      "errors": [],
+      "train_selected": null,
+      "selected": null,
+      "train": null,
+      "edge_calibration": {
+        "trend_breakout": {
+          "total": 1,
+          "insufficient": 1,
+          "negative_edge": 0,
+          "accepted": 0,
+          "regime_filter": {
+            "total": 1,
+            "insufficient_regime": 1,
+            "poor_expectancy": 0,
+            "uncertain_win_probability": 0,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 1,
+            "missing_features": 0,
+            "insufficient": 1,
+            "weak_prediction": 0,
+            "accepted": 0
+          }
+        },
+        "trend_pullback": {
+          "total": 38,
+          "insufficient": 25,
+          "negative_edge": 11,
+          "accepted": 2,
+          "regime_filter": {
+            "total": 38,
+            "insufficient_regime": 35,
+            "poor_expectancy": 0,
+            "uncertain_win_probability": 3,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 38,
+            "missing_features": 0,
+            "insufficient": 36,
+            "weak_prediction": 2,
+            "accepted": 0
+          }
+        },
+        "momentum_reentry": {
+          "total": 8,
+          "insufficient": 8,
+          "negative_edge": 0,
+          "accepted": 0,
+          "regime_filter": {
+            "total": 8,
+            "insufficient_regime": 8,
+            "poor_expectancy": 0,
+            "uncertain_win_probability": 0,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 8,
+            "missing_features": 0,
+            "insufficient": 8,
+            "weak_prediction": 0,
+            "accepted": 0
+          }
+        },
+        "trend_pullback_balanced": {
+          "total": 24,
+          "insufficient": 24,
+          "negative_edge": 0,
+          "accepted": 0,
+          "regime_filter": {
+            "total": 24,
+            "insufficient_regime": 24,
+            "poor_expectancy": 0,
+            "uncertain_win_probability": 0,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 24,
+            "missing_features": 0,
+            "insufficient": 24,
+            "weak_prediction": 0,
+            "accepted": 0
+          }
+        },
+        "momentum_reentry_balanced": {
+          "total": 6,
+          "insufficient": 6,
+          "negative_edge": 0,
+          "accepted": 0,
+          "regime_filter": {
+            "total": 6,
+            "insufficient_regime": 6,
+            "poor_expectancy": 0,
+            "uncertain_win_probability": 0,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 6,
+            "missing_features": 0,
+            "insufficient": 6,
+            "weak_prediction": 0,
+            "accepted": 0
+          }
+        }
+      },
+      "validation": null,
+      "holdout": {
+        "trades": 0,
+        "win_rate_pct": null,
+        "mean_net_pct": null,
+        "profit_factor": null,
+        "max_drawdown_pct": null
+      },
+      "holdout_variants": {
+        "trend_breakout": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_balanced": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_balanced": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_breakout_prob_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_breakout_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_breakout_ml_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_prob_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_ml_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_prob_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_ml_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_balanced_prob_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_balanced_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_balanced_ml_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_balanced_prob_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_balanced_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_balanced_ml_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        }
+      },
+      "portfolio": {
+        "valid": true,
+        "initial_equity": 10000000,
+        "end_equity": 10000000,
+        "total_return_pct": 0,
+        "max_drawdown_pct": 0,
+        "trades_executed": 0,
+        "days": 153,
+        "mark_to_market": true,
+        "no_leverage": true,
+        "max_concurrent_positions": 5,
+        "max_position_weight": 0.2,
+        "risk_budget_per_trade": 0.01,
+        "benchmark_verified": false,
+        "caveat": "Single-market simplified daily OHLC; no intraday cross-position allocation or market impact. No verified benchmark."
+      },
+      "stress_portfolio": {
+        "valid": true,
+        "initial_equity": 10000000,
+        "end_equity": 10000000,
+        "total_return_pct": 0,
+        "max_drawdown_pct": 0,
+        "trades_executed": 0,
+        "days": 153,
+        "mark_to_market": true,
+        "no_leverage": true,
+        "max_concurrent_positions": 5,
+        "max_position_weight": 0.2,
+        "risk_budget_per_trade": 0.01,
+        "benchmark_verified": false,
+        "caveat": "Single-market simplified daily OHLC; no intraday cross-position allocation or market impact. No verified benchmark."
+      }
+    },
+    "US": {
+      "requested": 100,
+      "loaded": 100,
+      "error_count": 0,
+      "errors": [],
+      "train_selected": "trend_pullback",
+      "selected": null,
+      "train": {
+        "trades": 53,
+        "win_rate_pct": 62.26,
+        "mean_net_pct": 2.701,
+        "profit_factor": 3.404,
+        "max_drawdown_pct": 9.61
+      },
+      "edge_calibration": {
+        "trend_breakout": {
+          "total": 35,
+          "insufficient": 25,
+          "negative_edge": 10,
+          "accepted": 0,
+          "regime_filter": {
+            "total": 35,
+            "insufficient_regime": 32,
+            "poor_expectancy": 3,
+            "uncertain_win_probability": 0,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 35,
+            "missing_features": 0,
+            "insufficient": 35,
+            "weak_prediction": 0,
+            "accepted": 0
+          }
+        },
+        "trend_pullback": {
+          "total": 132,
+          "insufficient": 30,
+          "negative_edge": 31,
+          "accepted": 71,
+          "regime_filter": {
+            "total": 132,
+            "insufficient_regime": 75,
+            "poor_expectancy": 12,
+            "uncertain_win_probability": 45,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 132,
+            "missing_features": 0,
+            "insufficient": 38,
+            "weak_prediction": 77,
+            "accepted": 17
+          }
+        },
+        "momentum_reentry": {
+          "total": 51,
+          "insufficient": 28,
+          "negative_edge": 23,
+          "accepted": 0,
+          "regime_filter": {
+            "total": 51,
+            "insufficient_regime": 44,
+            "poor_expectancy": 7,
+            "uncertain_win_probability": 0,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 51,
+            "missing_features": 0,
+            "insufficient": 37,
+            "weak_prediction": 14,
+            "accepted": 0
+          }
+        },
+        "trend_pullback_balanced": {
+          "total": 111,
+          "insufficient": 27,
+          "negative_edge": 32,
+          "accepted": 52,
+          "regime_filter": {
+            "total": 111,
+            "insufficient_regime": 71,
+            "poor_expectancy": 17,
+            "uncertain_win_probability": 23,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 111,
+            "missing_features": 0,
+            "insufficient": 37,
+            "weak_prediction": 65,
+            "accepted": 9
+          }
+        },
+        "momentum_reentry_balanced": {
+          "total": 36,
+          "insufficient": 26,
+          "negative_edge": 10,
+          "accepted": 0,
+          "regime_filter": {
+            "total": 36,
+            "insufficient_regime": 36,
+            "poor_expectancy": 0,
+            "uncertain_win_probability": 0,
+            "missing_regime": 0,
+            "accepted": 0
+          },
+          "predictive_model": {
+            "total": 36,
+            "missing_features": 0,
+            "insufficient": 35,
+            "weak_prediction": 1,
+            "accepted": 0
+          }
+        }
+      },
+      "validation": {
+        "trades": 41,
+        "win_rate_pct": 51.22,
+        "mean_net_pct": 0.528,
+        "profit_factor": 1.268,
+        "max_drawdown_pct": 19.69
+      },
+      "holdout": {
+        "trades": 0,
+        "win_rate_pct": null,
+        "mean_net_pct": null,
+        "profit_factor": null,
+        "max_drawdown_pct": null
+      },
+      "holdout_variants": {
+        "trend_breakout": {
+          "trades": 6,
+          "win_rate_pct": 16.67,
+          "mean_net_pct": -3.133,
+          "profit_factor": 0.014,
+          "max_drawdown_pct": 17.54
+        },
+        "trend_pullback": {
+          "trades": 32,
+          "win_rate_pct": 25,
+          "mean_net_pct": -3.241,
+          "profit_factor": 0.184,
+          "max_drawdown_pct": 67.89
+        },
+        "momentum_reentry": {
+          "trades": 9,
+          "win_rate_pct": 44.44,
+          "mean_net_pct": 0.631,
+          "profit_factor": 1.358,
+          "max_drawdown_pct": 8.36
+        },
+        "trend_pullback_balanced": {
+          "trades": 23,
+          "win_rate_pct": 26.09,
+          "mean_net_pct": -3.398,
+          "profit_factor": 0.148,
+          "max_drawdown_pct": 57.95
+        },
+        "momentum_reentry_balanced": {
+          "trades": 6,
+          "win_rate_pct": 50,
+          "mean_net_pct": 0.061,
+          "profit_factor": 1.031,
+          "max_drawdown_pct": 8.04
+        },
+        "trend_breakout_prob_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_breakout_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_breakout_ml_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_prob_edge": {
+          "trades": 8,
+          "win_rate_pct": 37.5,
+          "mean_net_pct": -2.05,
+          "profit_factor": 0.097,
+          "max_drawdown_pct": 16.38
+        },
+        "trend_pullback_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_ml_edge": {
+          "trades": 6,
+          "win_rate_pct": 0,
+          "mean_net_pct": -5.361,
+          "profit_factor": 0,
+          "max_drawdown_pct": 28.19
+        },
+        "momentum_reentry_prob_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_ml_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_balanced_prob_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_balanced_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback_balanced_ml_edge": {
+          "trades": 3,
+          "win_rate_pct": 0,
+          "mean_net_pct": -5.359,
+          "profit_factor": 0,
+          "max_drawdown_pct": 15.25
+        },
+        "momentum_reentry_balanced_prob_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_balanced_regime_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry_balanced_ml_edge": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        }
+      },
+      "portfolio": {
+        "valid": true,
+        "initial_equity": 100000,
+        "end_equity": 100000,
+        "total_return_pct": 0,
+        "max_drawdown_pct": 0,
+        "trades_executed": 0,
+        "days": 158,
+        "mark_to_market": true,
+        "no_leverage": true,
+        "max_concurrent_positions": 5,
+        "max_position_weight": 0.2,
+        "risk_budget_per_trade": 0.01,
+        "benchmark_verified": false,
+        "caveat": "Single-market simplified daily OHLC; no intraday cross-position allocation or market impact. No verified benchmark."
+      },
+      "stress_portfolio": {
+        "valid": true,
+        "initial_equity": 100000,
+        "end_equity": 100000,
+        "total_return_pct": 0,
+        "max_drawdown_pct": 0,
+        "trades_executed": 0,
+        "days": 158,
+        "mark_to_market": true,
+        "no_leverage": true,
+        "max_concurrent_positions": 5,
+        "max_position_weight": 0.2,
+        "risk_budget_per_trade": 0.01,
+        "benchmark_verified": false,
+        "caveat": "Single-market simplified daily OHLC; no intraday cross-position allocation or market impact. No verified benchmark."
+      }
+    }
+  }
+}
