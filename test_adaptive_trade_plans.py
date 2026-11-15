@@ -31,9 +31,8 @@ class PlanLearningTest(unittest.TestCase):
         # Future trade outcomes cannot change the first candidate forecast.
         self.assertEqual(a["predicted_win_pct"],b["predicted_win_pct"])
         self.assertEqual(b["trades"],2)
-        self.assertEqual(a["selected_plans"],{"compact":a["selected_plans"]["compact"],
-                                              "balanced":a["selected_plans"]["balanced"],
-                                              "patient":a["selected_plans"]["patient"]})
+        self.assertEqual(sum(a["selected_plans"].values()),1)
+        self.assertEqual(sum(b["selected_plans"].values()),2)
     def test_all_candidate_outcomes_recorded_no_probability_gate(self):
         old=[labelled(i,"2025-01-01","2025-01-15",i%3!=0) for i in range(110)]
         future=[labelled(i+300,"2025-12-01","2025-12-15",i%2==0) for i in range(80)]
