@@ -30,6 +30,7 @@ def compute(data):
     x=normalize(data)
     c=x.Close
     for n in (5,20,60,120,200): x[f"MA{n}"]=c.rolling(n).mean()
+    x["MA200_UP20"]=(x.MA200>x.MA200.shift(20)).fillna(False)
     d=c.diff()
     g=d.clip(lower=0).ewm(alpha=1/14,adjust=False,min_periods=14).mean()
     l=(-d.clip(upper=0)).ewm(alpha=1/14,adjust=False,min_periods=14).mean()
