@@ -6,6 +6,7 @@ updates the prediction model ONLY after its exit date is strictly before the
 next signal date. This module cannot guarantee any win rate.
 """
 from collections import defaultdict
+from adaptive_online import OnlineLogistic
 import json
 import math
 import os
@@ -131,10 +132,12 @@ def score_stream(trades, market, *, db_path=None):
         finished=iter(exits)
         next_exit=next(finished,None)
         model=RunningEdge()
+        adaptive=OnlineLogistic()
         selected={k:[] for k in POLICIES}
         diagnostics={"population":staged,"insufficient":0,"scored":0,
                      "by_policy":{k:0 for k in POLICIES},
                      "brier_model_sum":0.0,"brier_market_baseline_sum":0.0,
+                     "brier_adaptive_sum":0.0,"adaptive_scored":0,
                      "absolute_probability_error_sum":0.0,
                      "by_regime":{},
                      "by_window":{},
@@ -142,7 +145,9 @@ def score_stream(trades, market, *, db_path=None):
         for signal,data in signals:
             # Strict before, never same-day settlement or later outcome.
             while next_exit is not None and next_exit[0]<signal:
-                model.add(json.loads(next_exit[1]))
+                historical_trade=json.loads(next_exit[1])
+                model.add(historical_trade)
+                adaptive.update(historical_trade)
                 next_exit=next(finished,None)
             row=json.loads(data)
             estimate=model.estimate(row)
@@ -153,6 +158,10 @@ def score_stream(trades, market, *, db_path=None):
             y=float(observed)
             forecast=estimate["predicted_win_pct"]/100
             baseline=estimate["market_base_win_pct"]/100
+            p_adaptive=adaptive.predict(row)
+            if p_adaptive is not None:
+                diagnostics["brier_adaptive_sum"]+=(p_adaptive-y)**2
+                diagnostics["adaptive_scored"]+=1
             diagnostics["brier_model_sum"]+=(forecast-y)**2
             diagnostics["brier_market_baseline_sum"]+=(baseline-y)**2
             diagnostics["absolute_probability_error_sum"]+=abs(forecast-y)
@@ -160,12 +169,15 @@ def score_stream(trades, market, *, db_path=None):
                     "validation" if signal<"2026-04-01" else "diagnostic")
             segment=diagnostics["by_window"].setdefault(window,{
                 "count":0,"wins":0,"sum_net":0.0,"brier_model_sum":0.0,
-                "brier_baseline_sum":0.0})
+                "brier_baseline_sum":0.0,"brier_adaptive_sum":0.0,"adaptive_count":0})
             segment["count"]+=1
             segment["wins"]+=int(observed)
             segment["sum_net"]+=float(row["net_pct"])
             segment["brier_model_sum"]+=(forecast-y)**2
             segment["brier_baseline_sum"]+=(baseline-y)**2
+            if p_adaptive is not None:
+                segment["brier_adaptive_sum"]+=(p_adaptive-y)**2
+                segment["adaptive_count"]+=1
             key=str(regime_key(row))
             state=diagnostics["by_regime"].setdefault(key,{"trades":0,"wins":0,"sum_net_pct":0.0,"brier":0.0})
             state["trades"]+=1
@@ -186,9 +198,12 @@ def score_stream(trades, market, *, db_path=None):
             bucket["actual_win_rate_pct"]=round(100*bucket["wins"]/count,2) if count else None
             bucket["actual_avg_net_pct"]=round(bucket["sum_net"]/count,3) if count else None
         n=diagnostics["scored"]
+        ad_n=diagnostics["adaptive_scored"]
         diagnostics["probability_quality"]={
             "brier_model":round(diagnostics.pop("brier_model_sum")/n,6) if n else None,
             "brier_market_baseline":round(diagnostics.pop("brier_market_baseline_sum")/n,6) if n else None,
+            "brier_adaptive":round(diagnostics.pop("brier_adaptive_sum")/ad_n,6) if ad_n else None,
+            "adaptive_scored":ad_n,
             "mean_absolute_probability_error":round(diagnostics.pop("absolute_probability_error_sum")/n,6) if n else None,
             "interpretation":"Brier lower is better; all scored candidates, including losing ones",
         }
@@ -198,7 +213,11 @@ def score_stream(trades, market, *, db_path=None):
             seg["mean_net_pct"]=round(seg.pop("sum_net")/count,3)
             seg["brier_model"]=round(seg.pop("brier_model_sum")/count,6)
             seg["brier_baseline"]=round(seg.pop("brier_baseline_sum")/count,6)
+            adaptive_count=seg.pop("adaptive_count")
+            adaptive_sum=seg.pop("brier_adaptive_sum")
+            seg["brier_adaptive"]=round(adaptive_sum/adaptive_count,6) if adaptive_count else None
             seg["model_beats_baseline"]=seg["brier_model"]<seg["brier_baseline"]
+            seg["adaptive_beats_baseline"]=seg["brier_adaptive"] is not None and seg["brier_adaptive"]<seg["brier_baseline"]
         for state in diagnostics["by_regime"].values():
             m=state["trades"]
             state["win_rate_pct"]=round(100*state["wins"]/m,2)
