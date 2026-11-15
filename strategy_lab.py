@@ -20,6 +20,7 @@ from universe import get_universe
 from audit_300 import simulate_exit, metrics
 from portfolio_audit import replay
 from trade_execution import entry_quality
+from empirical_edge import walkforward_filter
 
 TRAIN_END="2025-11-01"
 VALID_END="2026-04-01"
@@ -151,7 +152,7 @@ def train_choice(choices):
 def run(per_market=20):
     u=get_universe()
     res={"created_utc":datetime.now(timezone.utc).isoformat(),
-        "type":"research_lab_v1",
+        "type":"research_lab_v2_empirical_probability",
         "method":"train-only selection, fixed validation screening, untouched-in-this-run diagnostic holdout",
         "train_end":TRAIN_END,"validation_end":VALID_END,"holdout_end":HOLDOUT_END,
         "selection_requires":{"train_trades":MIN_TRAIN_TRADES,"validation_trades":MIN_VALID_TRADES,
@@ -181,6 +182,14 @@ def run(per_market=20):
                 failures.append({"ticker":ticker,"error":str(exc)[:160]})
             if idx%5==0:
                 print(f"LAB_PROGRESS {market} {idx}/{len(items)} loaded={len(frames)}",flush=True)
+        # Compare the original three technical variants with prospective,
+        # cost-adjusted probability/expectancy filters. Every calibration uses
+        # ONLY prior trades that were fully exited before its signal date.
+        edge_diagnostics={}
+        for original in tuple(PARAMS):
+            filtered,report=walkforward_filter(variants[original])
+            variants[original+"_prob_edge"]=filtered
+            edge_diagnostics[original]=report
         leader,scores=train_choice(variants)
         train_metrics={k:metrics(_interval(v,"train")) for k,v in variants.items()}
         validation_metrics={k:metrics(_interval(v,"validate")) for k,v in variants.items()}
@@ -192,7 +201,11 @@ def run(per_market=20):
                       vm["win_rate_pct"] is not None and vm["win_rate_pct"]>=50 and
                       vm["mean_net_pct"] is not None and vm["mean_net_pct"]>0.25 and
                       vm["profit_factor"] is not None and vm["profit_factor"]>=1.30)
-        selected=leader if accepted else None
+        # The candidate is always diagnosed in the known retrospective period,
+        # even if the validation rejection gate failed. That prevents a "0%
+        # drawdown" no-trade record from hiding a losing strategy. Rejection
+        # still blocks live approval.
+        selected=leader
         selected_trades=_interval(variants[selected],"test") if selected else []
         holdout_measures=metrics(selected_trades)
         # Diagnose actual loss mechanisms instead of reporting only win rate.
@@ -244,6 +257,8 @@ def run(per_market=20):
             "requested":per_market,"loaded":len(frames),"errors":failures,
             "training_selected":leader,"training_scores":scores,
             "validation_accepted":accepted,
+            "edge_calibration":edge_diagnostics,
+            "evaluation_policy":"diagnostic_heldout_even_if_validation_rejected; never live approve",
             "selected_for_diagnostic":selected,
             "research_eligible":research_eligible,
             "live_approved":False,
