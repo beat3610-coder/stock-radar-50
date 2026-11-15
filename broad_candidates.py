@@ -1,6 +1,6 @@
 """Research-only broad candidate generation independent of legacy buy filters.
 
-Every tenth observation evaluates a hypothetical executable next-open purchase,
+Every fifth observation evaluates a hypothetical executable next-open purchase,
 including weak/negative trend states. These are labelled using historical
 stop-first exits to train a classifier; generated outcomes are NEVER consulted
 when generating the signal, risk plan, or features.
@@ -11,7 +11,7 @@ import numpy as np
 from trade_execution import entry_quality
 from audit_300 import simulate_exit
 
-BROAD_STEP=10
+BROAD_STEP=5
 HOLD=10
 WARMUP=240
 
