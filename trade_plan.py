@@ -60,8 +60,19 @@ def scenario_from_history(x, stop, horizon=HORIZON, min_samples=MIN_SAMPLES):
                 "history_samples":int(len(starts)),"positive_rate_pct":None,
                 "downside_p75_pct":None,"stop_risk_pct":round(100*(p-stop)/p,2),
                 "basis":"독립 시간순 평가 구간 15개 미만"}
+    # Purge overlapping future-outcome windows across the calibration/holdout
+    # boundary; adjacent signal dates share up to horizon future sessions.
+    boundary=int(starts[split])
     calibration=starts[:split]
+    calibration=calibration[calibration+horizon<boundary]
     holdout=starts[split:]
+    if len(calibration)<30 or len(holdout)<15:
+        return {"target":None,"target1":None,"target2":None,
+                "expected_upside_pct":None,"planned_rr":None,
+                "history_samples":len(holdout),"positive_rate_pct":None,
+                "downside_p75_pct":None,
+                "stop_risk_pct":round(100*(p-stop)/p,2),
+                "basis":"시간순 학습·평가 경계의 10거래일 누수 제거 후 표본 부족"}
     favorable_cal=np.array([highs[i+1:i+horizon+1].max()/opens[i+1]-1 for i in calibration])
     favorable=np.array([highs[i+1:i+horizon+1].max()/opens[i+1]-1 for i in holdout])
     adverse=np.array([1-lows[i+1:i+horizon+1].min()/opens[i+1] for i in holdout])
