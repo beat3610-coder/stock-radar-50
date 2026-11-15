@@ -1,0 +1,876 @@
+{
+  "created_utc": "2026-11-15T12:12:26.643142+00:00",
+  "type": "v9_all_candidate_probability_score",
+  "goal_win_pct": 70,
+  "live_approved": false,
+  "method": "historical market-specific prior-only online probability; all candidates scored",
+  "caveats": [
+    "2026 evaluation is repeatedly examined, not a fresh independent holdout",
+    "Current surviving stock constituents only",
+    "Daily stop-first OHLC execution and estimated 0.35% costs",
+    "Probability quality vs naive market base is primary; selecting 70% after seeing tests is prohibited"
+  ],
+  "markets": {
+    "KR": {
+      "requested": 100,
+      "loaded": 100,
+      "error_count": 0,
+      "errors": [],
+      "candidates": 1704,
+      "scoring": {
+        "population": 1704,
+        "insufficient": 102,
+        "scored": 1602,
+        "by_policy": {
+          "online_coverage": 246,
+          "online_balanced": 116,
+          "online_high_confidence": 28
+        },
+        "adaptive_scored": 1602,
+        "by_regime": {
+          "(0, 1, 1)": {
+            "trades": 338,
+            "wins": 124,
+            "brier": 0.23404,
+            "win_rate_pct": 36.69,
+            "mean_net_pct": -0.983
+          },
+          "(1, 0, 1)": {
+            "trades": 71,
+            "wins": 34,
+            "brier": 0.261097,
+            "win_rate_pct": 47.89,
+            "mean_net_pct": 0.649
+          },
+          "(1, 1, 1)": {
+            "trades": 444,
+            "wins": 170,
+            "brier": 0.244186,
+            "win_rate_pct": 38.29,
+            "mean_net_pct": 0.091
+          },
+          "(0, 0, 1)": {
+            "trades": 92,
+            "wins": 62,
+            "brier": 0.2466,
+            "win_rate_pct": 67.39,
+            "mean_net_pct": 2.327
+          },
+          "(0, 1, 0)": {
+            "trades": 392,
+            "wins": 144,
+            "brier": 0.241977,
+            "win_rate_pct": 36.73,
+            "mean_net_pct": -0.631
+          },
+          "(0, 0, 0)": {
+            "trades": 122,
+            "wins": 58,
+            "brier": 0.266202,
+            "win_rate_pct": 47.54,
+            "mean_net_pct": 0.255
+          },
+          "(1, 1, 0)": {
+            "trades": 110,
+            "wins": 48,
+            "brier": 0.257762,
+            "win_rate_pct": 43.64,
+            "mean_net_pct": 0.779
+          },
+          "(1, 0, 0)": {
+            "trades": 33,
+            "wins": 13,
+            "brier": 0.248443,
+            "win_rate_pct": 39.39,
+            "mean_net_pct": 0.332
+          }
+        },
+        "by_window": {
+          "train": {
+            "count": 435,
+            "wins": 212,
+            "actual_win_rate_pct": 48.74,
+            "mean_net_pct": 0.684,
+            "brier_model": 0.265755,
+            "brier_baseline": 0.264215,
+            "brier_adaptive": 0.259752,
+            "model_beats_baseline": false,
+            "adaptive_beats_baseline": true
+          },
+          "validation": {
+            "count": 494,
+            "wins": 229,
+            "actual_win_rate_pct": 46.36,
+            "mean_net_pct": 0.73,
+            "brier_model": 0.249955,
+            "brier_baseline": 0.252224,
+            "brier_adaptive": 0.254696,
+            "model_beats_baseline": true,
+            "adaptive_beats_baseline": false
+          },
+          "diagnostic": {
+            "count": 673,
+            "wins": 212,
+            "actual_win_rate_pct": 31.5,
+            "mean_net_pct": -1.203,
+            "brier_model": 0.22816,
+            "brier_baseline": 0.230812,
+            "brier_adaptive": 0.224607,
+            "model_beats_baseline": true,
+            "adaptive_beats_baseline": true
+          }
+        },
+        "calibration_bins": {
+          "0": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          },
+          "1": {
+            "count": 8,
+            "wins": 4,
+            "sum_net": 3.6633718561746216,
+            "actual_win_rate_pct": 50,
+            "actual_avg_net_pct": 0.458
+          },
+          "2": {
+            "count": 97,
+            "wins": 44,
+            "sum_net": -47.733523045732476,
+            "actual_win_rate_pct": 45.36,
+            "actual_avg_net_pct": -0.492
+          },
+          "3": {
+            "count": 520,
+            "wins": 212,
+            "sum_net": -52.97517254951729,
+            "actual_win_rate_pct": 40.77,
+            "actual_avg_net_pct": -0.102
+          },
+          "4": {
+            "count": 773,
+            "wins": 301,
+            "sum_net": -100.35596271904663,
+            "actual_win_rate_pct": 38.94,
+            "actual_avg_net_pct": -0.13
+          },
+          "5": {
+            "count": 176,
+            "wins": 78,
+            "sum_net": 38.35089916763752,
+            "actual_win_rate_pct": 44.32,
+            "actual_avg_net_pct": 0.218
+          },
+          "6": {
+            "count": 28,
+            "wins": 14,
+            "sum_net": 7.655877201962062,
+            "actual_win_rate_pct": 50,
+            "actual_avg_net_pct": 0.273
+          },
+          "7": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          },
+          "8": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          },
+          "9": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          }
+        },
+        "probability_quality": {
+          "brier_model": 0.245089,
+          "brier_market_baseline": 0.246485,
+          "brier_adaptive": 0.243429,
+          "adaptive_scored": 1602,
+          "mean_absolute_probability_error": 0.482144,
+          "interpretation": "Brier lower is better; all scored candidates, including losing ones"
+        }
+      },
+      "all_candidates": {
+        "train": {
+          "trades": 489,
+          "win_rate_pct": 46.63,
+          "mean_net_pct": 0.445,
+          "profit_factor": 1.176,
+          "max_drawdown_pct": 97.86
+        },
+        "validation": {
+          "trades": 529,
+          "win_rate_pct": 46.5,
+          "mean_net_pct": 0.735,
+          "profit_factor": 1.258,
+          "max_drawdown_pct": 94.15
+        },
+        "diagnostic": {
+          "trades": 652,
+          "win_rate_pct": 30.21,
+          "mean_net_pct": -1.354,
+          "profit_factor": 0.667,
+          "max_drawdown_pct": 100
+        }
+      },
+      "policies": {
+        "online_coverage": {
+          "train": {
+            "trades": 41,
+            "win_rate_pct": 41.46,
+            "mean_net_pct": 1.081,
+            "profit_factor": 1.502,
+            "max_drawdown_pct": 43.54
+          },
+          "validation": {
+            "trades": 133,
+            "win_rate_pct": 52.63,
+            "mean_net_pct": 0.854,
+            "profit_factor": 1.376,
+            "max_drawdown_pct": 66.82
+          },
+          "diagnostic": {
+            "trades": 69,
+            "win_rate_pct": 36.23,
+            "mean_net_pct": -0.213,
+            "profit_factor": 0.931,
+            "max_drawdown_pct": 65.02
+          }
+        },
+        "online_balanced": {
+          "train": {
+            "trades": 29,
+            "win_rate_pct": 41.38,
+            "mean_net_pct": 0.711,
+            "profit_factor": 1.304,
+            "max_drawdown_pct": 33.16
+          },
+          "validation": {
+            "trades": 76,
+            "win_rate_pct": 51.32,
+            "mean_net_pct": 0.784,
+            "profit_factor": 1.347,
+            "max_drawdown_pct": 42.26
+          },
+          "diagnostic": {
+            "trades": 10,
+            "win_rate_pct": 20,
+            "mean_net_pct": -2.992,
+            "profit_factor": 0.225,
+            "max_drawdown_pct": 32.81
+          }
+        },
+        "online_high_confidence": {
+          "train": {
+            "trades": 5,
+            "win_rate_pct": 20,
+            "mean_net_pct": -2.265,
+            "profit_factor": 0.183,
+            "max_drawdown_pct": 11.82
+          },
+          "validation": {
+            "trades": 18,
+            "win_rate_pct": 61.11,
+            "mean_net_pct": 1.059,
+            "profit_factor": 1.499,
+            "max_drawdown_pct": 13.57
+          },
+          "diagnostic": {
+            "trades": 5,
+            "win_rate_pct": 40,
+            "mean_net_pct": -0.017,
+            "profit_factor": 0.991,
+            "max_drawdown_pct": 8.59
+          }
+        }
+      }
+    },
+    "KQ": {
+      "requested": 100,
+      "loaded": 100,
+      "error_count": 0,
+      "errors": [],
+      "candidates": 1416,
+      "scoring": {
+        "population": 1416,
+        "insufficient": 94,
+        "scored": 1322,
+        "by_policy": {
+          "online_coverage": 64,
+          "online_balanced": 2,
+          "online_high_confidence": 0
+        },
+        "adaptive_scored": 1322,
+        "by_regime": {
+          "(0, 1, 1)": {
+            "trades": 301,
+            "wins": 112,
+            "brier": 0.238656,
+            "win_rate_pct": 37.21,
+            "mean_net_pct": -0.312
+          },
+          "(1, 1, 1)": {
+            "trades": 478,
+            "wins": 186,
+            "brier": 0.249498,
+            "win_rate_pct": 38.91,
+            "mean_net_pct": 0.979
+          },
+          "(0, 1, 0)": {
+            "trades": 364,
+            "wins": 122,
+            "brier": 0.227553,
+            "win_rate_pct": 33.52,
+            "mean_net_pct": -0.758
+          },
+          "(0, 0, 0)": {
+            "trades": 34,
+            "wins": 16,
+            "brier": 0.289422,
+            "win_rate_pct": 47.06,
+            "mean_net_pct": 1.183
+          },
+          "(0, 0, 1)": {
+            "trades": 12,
+            "wins": 4,
+            "brier": 0.225748,
+            "win_rate_pct": 33.33,
+            "mean_net_pct": 0.236
+          },
+          "(1, 1, 0)": {
+            "trades": 115,
+            "wins": 54,
+            "brier": 0.26996,
+            "win_rate_pct": 46.96,
+            "mean_net_pct": 2.47
+          },
+          "(1, 0, 1)": {
+            "trades": 11,
+            "wins": 3,
+            "brier": 0.237971,
+            "win_rate_pct": 27.27,
+            "mean_net_pct": 0.422
+          },
+          "(1, 0, 0)": {
+            "trades": 7,
+            "wins": 3,
+            "brier": 0.283439,
+            "win_rate_pct": 42.86,
+            "mean_net_pct": 1.667
+          }
+        },
+        "by_window": {
+          "train": {
+            "count": 385,
+            "wins": 169,
+            "actual_win_rate_pct": 43.9,
+            "mean_net_pct": 1.339,
+            "brier_model": 0.271675,
+            "brier_baseline": 0.263653,
+            "brier_adaptive": 0.273804,
+            "model_beats_baseline": false,
+            "adaptive_beats_baseline": false
+          },
+          "validation": {
+            "count": 407,
+            "wins": 163,
+            "actual_win_rate_pct": 40.05,
+            "mean_net_pct": 0.694,
+            "brier_model": 0.241403,
+            "brier_baseline": 0.242112,
+            "brier_adaptive": 0.244332,
+            "model_beats_baseline": true,
+            "adaptive_beats_baseline": false
+          },
+          "diagnostic": {
+            "count": 530,
+            "wins": 168,
+            "actual_win_rate_pct": 31.7,
+            "mean_net_pct": -0.672,
+            "brier_model": 0.225047,
+            "brier_baseline": 0.223122,
+            "brier_adaptive": 0.225458,
+            "model_beats_baseline": false,
+            "adaptive_beats_baseline": false
+          }
+        },
+        "calibration_bins": {
+          "0": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          },
+          "1": {
+            "count": 20,
+            "wins": 13,
+            "sum_net": 95.11203661536634,
+            "actual_win_rate_pct": 65,
+            "actual_avg_net_pct": 4.756
+          },
+          "2": {
+            "count": 152,
+            "wins": 68,
+            "sum_net": 263.3384839464173,
+            "actual_win_rate_pct": 44.74,
+            "actual_avg_net_pct": 1.732
+          },
+          "3": {
+            "count": 592,
+            "wins": 210,
+            "sum_net": 19.637766855011463,
+            "actual_win_rate_pct": 35.47,
+            "actual_avg_net_pct": 0.033
+          },
+          "4": {
+            "count": 518,
+            "wins": 191,
+            "sum_net": -21.40525331222735,
+            "actual_win_rate_pct": 36.87,
+            "actual_avg_net_pct": -0.041
+          },
+          "5": {
+            "count": 40,
+            "wins": 18,
+            "sum_net": 85.13345160958512,
+            "actual_win_rate_pct": 45,
+            "actual_avg_net_pct": 2.128
+          },
+          "6": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          },
+          "7": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          },
+          "8": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          },
+          "9": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          }
+        },
+        "probability_quality": {
+          "brier_model": 0.243662,
+          "brier_market_baseline": 0.240772,
+          "brier_adaptive": 0.245348,
+          "adaptive_scored": 1322,
+          "mean_absolute_probability_error": 0.475278,
+          "interpretation": "Brier lower is better; all scored candidates, including losing ones"
+        }
+      },
+      "all_candidates": {
+        "train": {
+          "trades": 422,
+          "win_rate_pct": 42.18,
+          "mean_net_pct": 0.86,
+          "profit_factor": 1.281,
+          "max_drawdown_pct": 98.72
+        },
+        "validation": {
+          "trades": 435,
+          "win_rate_pct": 38.39,
+          "mean_net_pct": 0.404,
+          "profit_factor": 1.108,
+          "max_drawdown_pct": 91.91
+        },
+        "diagnostic": {
+          "trades": 520,
+          "win_rate_pct": 31.73,
+          "mean_net_pct": -0.647,
+          "profit_factor": 0.852,
+          "max_drawdown_pct": 99.98
+        }
+      },
+      "policies": {
+        "online_coverage": {
+          "train": {
+            "trades": 3,
+            "win_rate_pct": 0,
+            "mean_net_pct": -6.121,
+            "profit_factor": 0,
+            "max_drawdown_pct": 17.26
+          },
+          "validation": {
+            "trades": 34,
+            "win_rate_pct": 44.12,
+            "mean_net_pct": 1.675,
+            "profit_factor": 1.467,
+            "max_drawdown_pct": 43.22
+          },
+          "diagnostic": {
+            "trades": 20,
+            "win_rate_pct": 45,
+            "mean_net_pct": 2.507,
+            "profit_factor": 1.73,
+            "max_drawdown_pct": 24.11
+          }
+        },
+        "online_balanced": {
+          "train": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null
+          },
+          "validation": {
+            "trades": 2,
+            "win_rate_pct": 50,
+            "mean_net_pct": 4.325,
+            "profit_factor": 2.381,
+            "max_drawdown_pct": 6.26
+          },
+          "diagnostic": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null
+          }
+        },
+        "online_high_confidence": {
+          "train": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null
+          },
+          "validation": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null
+          },
+          "diagnostic": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null
+          }
+        }
+      }
+    },
+    "US": {
+      "requested": 100,
+      "loaded": 100,
+      "error_count": 0,
+      "errors": [],
+      "candidates": 2403,
+      "scoring": {
+        "population": 2403,
+        "insufficient": 110,
+        "scored": 2293,
+        "by_policy": {
+          "online_coverage": 301,
+          "online_balanced": 63,
+          "online_high_confidence": 0
+        },
+        "adaptive_scored": 2293,
+        "by_regime": {
+          "(0, 0, 0)": {
+            "trades": 419,
+            "wins": 167,
+            "brier": 0.243922,
+            "win_rate_pct": 39.86,
+            "mean_net_pct": -0.475
+          },
+          "(0, 0, 1)": {
+            "trades": 302,
+            "wins": 128,
+            "brier": 0.251521,
+            "win_rate_pct": 42.38,
+            "mean_net_pct": -0.418
+          },
+          "(1, 1, 1)": {
+            "trades": 300,
+            "wins": 143,
+            "brier": 0.257377,
+            "win_rate_pct": 47.67,
+            "mean_net_pct": 1.313
+          },
+          "(1, 1, 0)": {
+            "trades": 81,
+            "wins": 35,
+            "brier": 0.258424,
+            "win_rate_pct": 43.21,
+            "mean_net_pct": -0.178
+          },
+          "(1, 0, 1)": {
+            "trades": 368,
+            "wins": 154,
+            "brier": 0.245161,
+            "win_rate_pct": 41.85,
+            "mean_net_pct": -0.128
+          },
+          "(0, 1, 1)": {
+            "trades": 292,
+            "wins": 117,
+            "brier": 0.248271,
+            "win_rate_pct": 40.07,
+            "mean_net_pct": -0.134
+          },
+          "(1, 0, 0)": {
+            "trades": 121,
+            "wins": 51,
+            "brier": 0.250702,
+            "win_rate_pct": 42.15,
+            "mean_net_pct": -0.446
+          },
+          "(0, 1, 0)": {
+            "trades": 410,
+            "wins": 180,
+            "brier": 0.257999,
+            "win_rate_pct": 43.9,
+            "mean_net_pct": 0.57
+          }
+        },
+        "by_window": {
+          "train": {
+            "count": 558,
+            "wins": 248,
+            "actual_win_rate_pct": 44.44,
+            "mean_net_pct": 0.479,
+            "brier_model": 0.249227,
+            "brier_baseline": 0.248999,
+            "brier_adaptive": 0.250943,
+            "model_beats_baseline": false,
+            "adaptive_beats_baseline": false
+          },
+          "validation": {
+            "count": 803,
+            "wins": 320,
+            "actual_win_rate_pct": 39.85,
+            "mean_net_pct": -0.468,
+            "brier_model": 0.252352,
+            "brier_baseline": 0.242642,
+            "brier_adaptive": 0.252447,
+            "model_beats_baseline": false,
+            "adaptive_beats_baseline": false
+          },
+          "diagnostic": {
+            "count": 932,
+            "wins": 407,
+            "actual_win_rate_pct": 43.67,
+            "mean_net_pct": 0.275,
+            "brier_model": 0.250461,
+            "brier_baseline": 0.246949,
+            "brier_adaptive": 0.248102,
+            "model_beats_baseline": false,
+            "adaptive_beats_baseline": false
+          }
+        },
+        "calibration_bins": {
+          "0": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          },
+          "1": {
+            "count": 25,
+            "wins": 6,
+            "sum_net": -36.654712700293246,
+            "actual_win_rate_pct": 24,
+            "actual_avg_net_pct": -1.466
+          },
+          "2": {
+            "count": 16,
+            "wins": 9,
+            "sum_net": 30.442004088924044,
+            "actual_win_rate_pct": 56.25,
+            "actual_avg_net_pct": 1.903
+          },
+          "3": {
+            "count": 730,
+            "wins": 342,
+            "sum_net": 465.477355717494,
+            "actual_win_rate_pct": 46.85,
+            "actual_avg_net_pct": 0.638
+          },
+          "4": {
+            "count": 1284,
+            "wins": 531,
+            "sum_net": -189.50020317545156,
+            "actual_win_rate_pct": 41.36,
+            "actual_avg_net_pct": -0.148
+          },
+          "5": {
+            "count": 238,
+            "wins": 87,
+            "sum_net": -121.69828493351359,
+            "actual_win_rate_pct": 36.55,
+            "actual_avg_net_pct": -0.511
+          },
+          "6": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          },
+          "7": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          },
+          "8": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          },
+          "9": {
+            "count": 0,
+            "wins": 0,
+            "sum_net": 0,
+            "actual_win_rate_pct": null,
+            "actual_avg_net_pct": null
+          }
+        },
+        "probability_quality": {
+          "brier_model": 0.250823,
+          "brier_market_baseline": 0.24594,
+          "brier_adaptive": 0.250315,
+          "adaptive_scored": 2293,
+          "mean_absolute_probability_error": 0.490885,
+          "interpretation": "Brier lower is better; all scored candidates, including losing ones"
+        }
+      },
+      "all_candidates": {
+        "train": {
+          "trades": 644,
+          "win_rate_pct": 44.57,
+          "mean_net_pct": 0.414,
+          "profit_factor": 1.2,
+          "max_drawdown_pct": 73.61
+        },
+        "validation": {
+          "trades": 755,
+          "win_rate_pct": 38.01,
+          "mean_net_pct": -0.626,
+          "profit_factor": 0.782,
+          "max_drawdown_pct": 99.77
+        },
+        "diagnostic": {
+          "trades": 896,
+          "win_rate_pct": 42.97,
+          "mean_net_pct": 0.242,
+          "profit_factor": 1.091,
+          "max_drawdown_pct": 97.1
+        }
+      },
+      "policies": {
+        "online_coverage": {
+          "train": {
+            "trades": 99,
+            "win_rate_pct": 48.48,
+            "mean_net_pct": 1.514,
+            "profit_factor": 1.636,
+            "max_drawdown_pct": 40.39
+          },
+          "validation": {
+            "trades": 101,
+            "win_rate_pct": 19.8,
+            "mean_net_pct": -3.356,
+            "profit_factor": 0.29,
+            "max_drawdown_pct": 97.47
+          },
+          "diagnostic": {
+            "trades": 93,
+            "win_rate_pct": 43.01,
+            "mean_net_pct": 0.554,
+            "profit_factor": 1.164,
+            "max_drawdown_pct": 61.49
+          }
+        },
+        "online_balanced": {
+          "train": {
+            "trades": 33,
+            "win_rate_pct": 42.42,
+            "mean_net_pct": 1.243,
+            "profit_factor": 1.491,
+            "max_drawdown_pct": 28.45
+          },
+          "validation": {
+            "trades": 30,
+            "win_rate_pct": 13.33,
+            "mean_net_pct": -3.679,
+            "profit_factor": 0.238,
+            "max_drawdown_pct": 72.36
+          },
+          "diagnostic": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null
+          }
+        },
+        "online_high_confidence": {
+          "train": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null
+          },
+          "validation": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null
+          },
+          "diagnostic": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null
+          }
+        }
+      }
+    }
+  },
+  "run_timestamp": "2026-11-15T12:16:25.753081227Z",
+  "code_commit": "85546388387df85e9d9fbe3df78a28dadbb114c3",
+  "adaptive_formula": "O(1) online logistic regression with AdaGrad, prior-exit-only labels, shrink 20% base",
+  "calibration_tested": true,
+  "independent_test": false,
+  "real_trade_win_rate_70_verified": false
+}
