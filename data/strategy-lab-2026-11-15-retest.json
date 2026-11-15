@@ -1,0 +1,255 @@
+{
+  "source": "Render application log LAB300_SUMMARY",
+  "run_commit": "ac9b422fa95a8212a43457e18ca7d816d25cd1fa",
+  "run_timestamp_utc": "2026-11-15T09:31:52.188947+00:00",
+  "method": "strategy_lab.run(per_market=100), actual historical OHLC, next-session open, 0.35% round trip cost, inspected retrospective diagnostic",
+  "created_utc": "2026-11-15T09:31:52.188947+00:00",
+  "train_end": "2025-11-01",
+  "validation_end": "2026-04-01",
+  "holdout_end": "2026-11-01",
+  "markets": {
+    "KR": {
+      "requested": 100,
+      "loaded": 100,
+      "error_count": 0,
+      "errors": [],
+      "train_selected": "trend_pullback",
+      "selected": null,
+      "train": {
+        "trades": 58,
+        "win_rate_pct": 48.28,
+        "mean_net_pct": 1.405,
+        "profit_factor": 1.645,
+        "max_drawdown_pct": 35.81
+      },
+      "validation": {
+        "trades": 49,
+        "win_rate_pct": 44.9,
+        "mean_net_pct": 0.844,
+        "profit_factor": 1.377,
+        "max_drawdown_pct": 47.42
+      },
+      "holdout": {
+        "trades": 0,
+        "win_rate_pct": null,
+        "mean_net_pct": null,
+        "profit_factor": null,
+        "max_drawdown_pct": null
+      },
+      "holdout_variants": {
+        "trend_breakout": {
+          "trades": 2,
+          "win_rate_pct": 50,
+          "mean_net_pct": -2.38,
+          "profit_factor": 0.019,
+          "max_drawdown_pct": 4.85
+        },
+        "trend_pullback": {
+          "trades": 18,
+          "win_rate_pct": 38.89,
+          "mean_net_pct": -1.187,
+          "profit_factor": 0.582,
+          "max_drawdown_pct": 32.61
+        },
+        "momentum_reentry": {
+          "trades": 7,
+          "win_rate_pct": 28.57,
+          "mean_net_pct": -1.337,
+          "profit_factor": 0.62,
+          "max_drawdown_pct": 21.86
+        }
+      },
+      "portfolio": {
+        "valid": true,
+        "initial_equity": 10000000,
+        "end_equity": 10000000,
+        "total_return_pct": 0,
+        "max_drawdown_pct": 0,
+        "trades_executed": 0,
+        "days": 153,
+        "mark_to_market": true,
+        "no_leverage": true,
+        "max_concurrent_positions": 5,
+        "max_position_weight": 0.2,
+        "risk_budget_per_trade": 0.01,
+        "benchmark_verified": false,
+        "caveat": "Single-market simplified daily OHLC; no intraday cross-position allocation or market impact. No verified benchmark."
+      },
+      "stress_portfolio": {
+        "valid": true,
+        "initial_equity": 10000000,
+        "end_equity": 10000000,
+        "total_return_pct": 0,
+        "max_drawdown_pct": 0,
+        "trades_executed": 0,
+        "days": 153,
+        "mark_to_market": true,
+        "no_leverage": true,
+        "max_concurrent_positions": 5,
+        "max_position_weight": 0.2,
+        "risk_budget_per_trade": 0.01,
+        "benchmark_verified": false,
+        "caveat": "Single-market simplified daily OHLC; no intraday cross-position allocation or market impact. No verified benchmark."
+      }
+    },
+    "KQ": {
+      "requested": 100,
+      "loaded": 100,
+      "error_count": 0,
+      "errors": [],
+      "train_selected": null,
+      "selected": null,
+      "train": null,
+      "validation": null,
+      "holdout": {
+        "trades": 0,
+        "win_rate_pct": null,
+        "mean_net_pct": null,
+        "profit_factor": null,
+        "max_drawdown_pct": null
+      },
+      "holdout_variants": {
+        "trend_breakout": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "trend_pullback": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        },
+        "momentum_reentry": {
+          "trades": 0,
+          "win_rate_pct": null,
+          "mean_net_pct": null,
+          "profit_factor": null,
+          "max_drawdown_pct": null
+        }
+      },
+      "portfolio": {
+        "valid": true,
+        "initial_equity": 10000000,
+        "end_equity": 10000000,
+        "total_return_pct": 0,
+        "max_drawdown_pct": 0,
+        "trades_executed": 0,
+        "days": 153,
+        "mark_to_market": true,
+        "no_leverage": true,
+        "max_concurrent_positions": 5,
+        "max_position_weight": 0.2,
+        "risk_budget_per_trade": 0.01,
+        "benchmark_verified": false,
+        "caveat": "Single-market simplified daily OHLC; no intraday cross-position allocation or market impact. No verified benchmark."
+      },
+      "stress_portfolio": {
+        "valid": true,
+        "initial_equity": 10000000,
+        "end_equity": 10000000,
+        "total_return_pct": 0,
+        "max_drawdown_pct": 0,
+        "trades_executed": 0,
+        "days": 153,
+        "mark_to_market": true,
+        "no_leverage": true,
+        "max_concurrent_positions": 5,
+        "max_position_weight": 0.2,
+        "risk_budget_per_trade": 0.01,
+        "benchmark_verified": false,
+        "caveat": "Single-market simplified daily OHLC; no intraday cross-position allocation or market impact. No verified benchmark."
+      }
+    },
+    "US": {
+      "requested": 100,
+      "loaded": 100,
+      "error_count": 0,
+      "errors": [],
+      "train_selected": "trend_pullback",
+      "selected": null,
+      "train": {
+        "trades": 53,
+        "win_rate_pct": 62.26,
+        "mean_net_pct": 2.701,
+        "profit_factor": 3.404,
+        "max_drawdown_pct": 9.61
+      },
+      "validation": {
+        "trades": 41,
+        "win_rate_pct": 51.22,
+        "mean_net_pct": 0.528,
+        "profit_factor": 1.268,
+        "max_drawdown_pct": 19.69
+      },
+      "holdout": {
+        "trades": 0,
+        "win_rate_pct": null,
+        "mean_net_pct": null,
+        "profit_factor": null,
+        "max_drawdown_pct": null
+      },
+      "holdout_variants": {
+        "trend_breakout": {
+          "trades": 6,
+          "win_rate_pct": 16.67,
+          "mean_net_pct": -3.133,
+          "profit_factor": 0.014,
+          "max_drawdown_pct": 17.54
+        },
+        "trend_pullback": {
+          "trades": 32,
+          "win_rate_pct": 25,
+          "mean_net_pct": -3.241,
+          "profit_factor": 0.184,
+          "max_drawdown_pct": 67.89
+        },
+        "momentum_reentry": {
+          "trades": 9,
+          "win_rate_pct": 44.44,
+          "mean_net_pct": 0.631,
+          "profit_factor": 1.358,
+          "max_drawdown_pct": 8.36
+        }
+      },
+      "portfolio": {
+        "valid": true,
+        "initial_equity": 100000,
+        "end_equity": 100000,
+        "total_return_pct": 0,
+        "max_drawdown_pct": 0,
+        "trades_executed": 0,
+        "days": 158,
+        "mark_to_market": true,
+        "no_leverage": true,
+        "max_concurrent_positions": 5,
+        "max_position_weight": 0.2,
+        "risk_budget_per_trade": 0.01,
+        "benchmark_verified": false,
+        "caveat": "Single-market simplified daily OHLC; no intraday cross-position allocation or market impact. No verified benchmark."
+      },
+      "stress_portfolio": {
+        "valid": true,
+        "initial_equity": 100000,
+        "end_equity": 100000,
+        "total_return_pct": 0,
+        "max_drawdown_pct": 0,
+        "trades_executed": 0,
+        "days": 158,
+        "mark_to_market": true,
+        "no_leverage": true,
+        "max_concurrent_positions": 5,
+        "max_position_weight": 0.2,
+        "risk_budget_per_trade": 0.01,
+        "benchmark_verified": false,
+        "caveat": "Single-market simplified daily OHLC; no intraday cross-position allocation or market impact. No verified benchmark."
+      }
+    }
+  },
+  "verified_as_of_log_utc": "2026-11-15T09:38:03.596357663Z",
+  "independent": false,
+  "approved_for_live": false
+}
