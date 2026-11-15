@@ -180,6 +180,32 @@ def run(per_market=20):
         selected=leader if accepted else None
         selected_trades=_interval(variants[selected],"test") if selected else []
         holdout_measures=metrics(selected_trades)
+        # Diagnose actual loss mechanisms instead of reporting only win rate.
+        loss_trades=[t for t in selected_trades if t.get("net_pct",0)<=0]
+        exit_counts={}
+        loss_exit_counts={}
+        for trade in selected_trades:
+            label=str(trade.get("exit_reason","unknown"))
+            exit_counts[label]=exit_counts.get(label,0)+1
+            if trade.get("net_pct",0)<=0:
+                loss_exit_counts[label]=loss_exit_counts.get(label,0)+1
+        train_win=(train_metrics.get(selected) or {}).get("win_rate_pct") if selected else None
+        val_win=(validation_metrics.get(selected) or {}).get("win_rate_pct") if selected else None
+        hold_win=holdout_measures.get("win_rate_pct")
+        win_rate_drift=(round(hold_win-train_win,2) if
+                        train_win is not None and hold_win is not None else None)
+        diagnosis={
+            "completed_trades":len(selected_trades),
+            "losing_trades":len(loss_trades),
+            "exit_reason_counts":exit_counts,
+            "loss_exit_reason_counts":loss_exit_counts,
+            "training_win_rate_pct":train_win,
+            "validation_win_rate_pct":val_win,
+            "diagnostic_holdout_win_rate_pct":hold_win,
+            "train_to_holdout_win_rate_change_pp":win_rate_drift,
+            "not_truly_independent":True,
+            "warning":"Already-inspected dates: diagnostic only; changes require new future evaluation",
+        }
         base=replay(selected_trades,frames,start=VALID_END,
                     initial_cash=10_000_000 if market in ("KR","KQ") else 100_000)
         stress=replay(selected_trades,frames,start=VALID_END,
@@ -210,6 +236,7 @@ def run(per_market=20):
             "holdout_all_variants_diagnostic_only":test_metrics,
             "holdout_selected_trades":len(selected_trades),
             "holdout_selected_metrics":metrics(selected_trades),
+            "loss_diagnosis":diagnosis,
             "portfolio":compact(base),"stress_portfolio":compact(stress),
             "status":"NOT_LIVE_APPROVED"
         }
