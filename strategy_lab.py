@@ -71,6 +71,27 @@ def qualifying(row,prev,market,variant,prior_high):
             and float(prev.MACDH)<=0 and p>row.MA20 and row.PDI>row.MDI)
     return False
 
+def assess_executable_entry(open_price, stop, take, cost_pct=COST_PCT):
+    """Check the actually executable next-session opening fill, after round-trip cost.
+
+    Profit/risk here is a rule-based payout ratio, not expected value or forecast.
+    """
+    if not _finite(open_price,stop,take,cost_pct):
+        return {"accepted":False,"reason":"가격 또는 비용 정보 부족","net_rr":None}
+    if not (open_price>0 and 0<stop<open_price<take and 0<=cost_pct<=5):
+        return {"accepted":False,"reason":"진입·손절·익절 가격 순서 오류","net_rr":None}
+    fee=open_price*cost_pct/100
+    risk=open_price-stop
+    net_risk=risk+fee
+    net_reward=take-open_price-fee
+    rr=net_reward/net_risk if net_risk>0 else -1
+    accepted=(risk/open_price<=0.07 and net_reward/open_price>=0.03 and rr>=1.30)
+    return {"accepted":bool(accepted),
+            "reason":"진입가 기준 손익비 충족" if accepted else "진입가 기준 손익비·손절폭 불충족",
+            "net_rr":round(rr,3),
+            "net_upside_pct":round(100*net_reward/open_price,3),
+            "stop_risk_pct":round(100*risk/open_price,3)}
+
 def candidates_from_frame(frame,ticker,market):
     x=compute(frame)
     result={key:[] for key in PARAMS}
@@ -94,12 +115,8 @@ def candidates_from_frame(frame,ticker,market):
             # Re-check actual executable net reward/risk after gap and costs:
             # the old rule could approve a 2.5% gap-up despite <1R net payout.
             take=close+param["rr"]*(close-stop)
-            entry_fee=op*(COST_PCT/100.0)
-            net_risk=(op-stop)+entry_fee
-            net_reward=(take-op)-entry_fee
-            actual_rr=net_reward/net_risk if net_risk>0 else -1
-            if not (0<risk/op<=0.07 and net_reward/op>=0.03
-                    and actual_rr>=1.30):
+            entry_quality=assess_executable_entry(op,stop,take)
+            if not entry_quality["accepted"]:
                 continue
             outcome=simulate_exit(x,i,op,stop,take,max_days=HOLD,cost_pct=COST_PCT)
             if not outcome:continue
@@ -107,8 +124,8 @@ def candidates_from_frame(frame,ticker,market):
                 "signal_date":date,"entry_date":str(pd.Timestamp(x.index[i+1]).date()),
                 "exit_date":str(pd.Timestamp(x.index[outcome["exit_index"]]).date()),
                 "entry":op,"stop":stop,"take":take,
-                "entry_net_rr":round(actual_rr,3),
-                "entry_net_upside_pct":round(100*net_reward/op,3),
+                "entry_net_rr":entry_quality["net_rr"],
+                "entry_net_upside_pct":entry_quality["net_upside_pct"],
                 "score":float(r.RSI),**outcome}
             result[name].append(trade)
     # prevent same ticker stacking into its own previous trade
