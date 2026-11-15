@@ -1,4 +1,4 @@
-# manual_generation_request: 2
+# manual_generation_request: 3
 name: Continuing full-history formula evolution
 on:
   schedule:
@@ -26,17 +26,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - id: goal
+        name: Continue until every market reaches 50 percent actual plan wins
+        run: |
+          REACHED="$(python -c 'import json,pathlib; p=pathlib.Path("data/direction3-rolling-latest.json"); j=json.loads(p.read_text()) if p.exists() else {}; print("true" if j.get("target_50_all_markets") else "false")')"
+          echo "reached=$REACHED" >> "$GITHUB_OUTPUT"
+          echo "Previous generation all-market 50 percent status: $REACHED"
       - name: Install market data and analysis dependencies
+        if: steps.goal.outputs.reached != 'true'
         run: pip install -r requirements.txt
       - name: Explore a new formula generation over all historical periods
+        if: steps.goal.outputs.reached != 'true'
         run: python direction_audit.py
       - name: Archive generation report
+        if: steps.goal.outputs.reached != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: full-history-formula-generation
           path: data/direction3-rolling-latest.json
       - name: Publish generation to the existing dashboard
-        if: success()
+        if: success() && steps.goal.outputs.reached != 'true'
         run: |
           git config user.name "stock-radar-research"
           git config user.email "stock-radar-research@users.noreply.github.com"
@@ -44,3 +53,6 @@ jobs:
           git diff --cached --quiet || git commit -m "Advance full-history formula generation [skip ci]"
           git pull --rebase origin main
           git push
+      - name: Record target reached
+        if: steps.goal.outputs.reached == 'true'
+        run: echo "All tracked markets already reached the 50 percent historical research target."
