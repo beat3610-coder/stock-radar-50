@@ -41,10 +41,12 @@ def run_direction3(per_market=100,previous=None):
         previous_market=previous_markets.get(market) or {}
         previous_direction=((previous_market.get("tuning") or {})
                             .get("chosen") or None)
-        previous_buy=((((previous_market.get("buy_success") or {})
-                        .get("tuning") or {}).get("chosen")) or None)
-        previous_plan=(((((previous_market.get("adaptive_plans") or {})
-                          .get("tuning") or {}).get("chosen_plan"))) or None)
+        previous_buy_model=previous_market.get("buy_success") or {}
+        previous_buy=((previous_buy_model.get("tuning") or {})
+                      .get("chosen") or None)
+        previous_adaptive=previous_market.get("adaptive_plans") or {}
+        previous_plan=((previous_adaptive.get("tuning") or {})
+                       .get("chosen_plan") or None)
         plan_candidates=make_plan_candidates(generation,previous_plan)
 
         excluded={"KR":{"472150","0262B0"},"KQ":set(),"US":{"SOXL"}}[market]
