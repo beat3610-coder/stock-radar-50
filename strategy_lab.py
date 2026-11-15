@@ -23,6 +23,7 @@ from trade_execution import entry_quality
 from empirical_edge import walkforward_filter, walkforward_regime_filter
 from predictive_model import walkforward_model_filter, walkforward_model_policies, POLICIES
 from broad_candidates import broad_candidates_from_computed
+from online_edge import score_stream, POLICIES as ONLINE_POLICIES
 
 TRAIN_END="2025-11-01"
 VALID_END="2026-04-01"
@@ -168,7 +169,7 @@ def train_choice(choices):
 def run(per_market=20):
     u=get_universe()
     res={"created_utc":datetime.now(timezone.utc).isoformat(),
-        "type":"research_lab_v7_policy_coverage_diagnostics",
+        "type":"research_lab_v8_online_streaming",
         "method":"train-only selection, fixed validation screening, untouched-in-this-run diagnostic holdout",
         "train_end":TRAIN_END,"validation_end":VALID_END,"holdout_end":HOLDOUT_END,
         "research_target_win_rate_pct":70,
@@ -226,6 +227,17 @@ def run(per_market=20):
             "population_holdout_diagnostic":metrics(_interval(broad_training_pool,"test")),
             "policy_train":{n:metrics(_interval(v,"train")) for n,v in broad_policy_trades.items()},
             "policy_validation":{n:metrics(_interval(v,"validate")) for n,v in broad_policy_trades.items()}}
+        # Independent O(1)-update, bounded-state regime model. All trading
+        # outcomes are available ONLY after their historical exit date.
+        online_trades,online_report=score_stream(broad_training_pool,market)
+        for online_name,online_candidates in online_trades.items():
+            variants[online_name]=online_candidates
+        edge_diagnostics["online_edge"]={"algorithm":"disk-backed market-specific sequential Beta shrinkage",
+            "filters":ONLINE_POLICIES,"diagnostics":online_report,
+            "policy_train":{n:metrics(_interval(v,"train")) for n,v in online_trades.items()},
+            "policy_validation":{n:metrics(_interval(v,"validate")) for n,v in online_trades.items()}}
+        print(f"LAB_ONLINE {market} population={online_report['population']} scored={online_report['scored']} "
+              f"accepted={online_report['by_policy']}",flush=True)
         leader,scores=train_choice(variants)
         train_metrics={k:metrics(_interval(v,"train")) for k,v in variants.items()}
         validation_metrics={k:metrics(_interval(v,"validate")) for k,v in variants.items()}
