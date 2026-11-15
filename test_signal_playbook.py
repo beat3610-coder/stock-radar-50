@@ -28,9 +28,10 @@ class ResearchPlaybookTest(unittest.TestCase):
     def test_no_live_claim(self):
         dates=pd.bdate_range("2024-01-01",periods=221)
         frame=pd.DataFrame({"Close":[100.]*221,"ATR":[2.]*221,"High":[101.]*221},index=dates)
-        # Qualifying requires indicator columns; no claim of a possible buy on invalid data.
-        with self.assertRaises((AttributeError,KeyError)):
-            playbook(frame,"KR")
+        # Incomplete indicator fields must fail closed without crashing.
+        result=playbook(frame,"KR")
+        self.assertEqual(result["setups"],[])
+        self.assertFalse(result["live_approved"])
 
 if __name__=="__main__":
     unittest.main()
