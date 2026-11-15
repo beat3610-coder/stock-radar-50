@@ -38,6 +38,10 @@ class AdaptiveLearningTests(unittest.TestCase):
         _,d=score_stream(seq,"KQ")
         self.assertGreater(d["adaptive_scored"],100)
         self.assertIsNotNone(d["by_window"]["train"]["brier_adaptive"])
+        self.assertIsNotNone(d["by_window"]["train"]["average_adaptive_predicted_win_pct"])
+        self.assertGreaterEqual(d["by_window"]["train"]["average_adaptive_predicted_win_pct"],0)
+        self.assertLessEqual(d["by_window"]["train"]["average_adaptive_predicted_win_pct"],100)
+        self.assertIsNotNone(d["probability_quality"]["average_adaptive_predicted_win_pct"])
     def test_adaptive_policy_trade_win_rates_are_observed_not_predicted(self):
         seq=[]
         for day in range(2,29):
