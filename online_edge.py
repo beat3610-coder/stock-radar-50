@@ -7,6 +7,7 @@ next signal date. This module cannot guarantee any win rate.
 """
 from collections import defaultdict
 from adaptive_online import OnlineLogistic
+from online_mixture import OnlineExpertMixture
 import json
 import math
 import os
@@ -133,6 +134,8 @@ def score_stream(trades, market, *, db_path=None):
         next_exit=next(finished,None)
         model=RunningEdge()
         adaptive=OnlineLogistic()
+        mixture=OnlineExpertMixture()
+        pending_forecasts={}
         # Fixed ex-ante probability policies. No per-market outcome tuning.
         adaptive_thresholds={"adaptive_p50":0.50,"adaptive_p55":0.55}
         selected={k:[] for k in POLICIES}
@@ -143,6 +146,7 @@ def score_stream(trades, market, *, db_path=None):
                      "brier_model_sum":0.0,"brier_market_baseline_sum":0.0,
                      "brier_adaptive_sum":0.0,"adaptive_scored":0,
                      "adaptive_probability_sum":0.0,
+                     "mixture_brier_sum":0.0,"mixture_probability_sum":0.0,"mixture_scored":0,
                      "absolute_probability_error_sum":0.0,
                      "by_regime":{},
                      "by_window":{},
@@ -151,6 +155,10 @@ def score_stream(trades, market, *, db_path=None):
             # Strict before, never same-day settlement or later outcome.
             while next_exit is not None and next_exit[0]<signal:
                 historical_trade=json.loads(next_exit[1])
+                trade_key=(historical_trade.get("ticker"),historical_trade.get("signal_date"),historical_trade.get("entry_date"))
+                cached=pending_forecasts.pop(trade_key,None)
+                if cached is not None:
+                    mixture.update(cached,historical_trade.get("net_pct"))
                 model.add(historical_trade)
                 adaptive.update(historical_trade)
                 next_exit=next(finished,None)
@@ -164,6 +172,14 @@ def score_stream(trades, market, *, db_path=None):
             forecast=estimate["predicted_win_pct"]/100
             baseline=estimate["market_base_win_pct"]/100
             p_adaptive=adaptive.predict(row)
+            experts=(p_adaptive,forecast,baseline)
+            p_mixture=mixture.predict(experts)
+            if p_mixture is not None:
+                trade_key=(row.get("ticker"),row.get("signal_date"),row.get("entry_date"))
+                pending_forecasts[trade_key]=experts
+                diagnostics["mixture_brier_sum"]+=(p_mixture-y)**2
+                diagnostics["mixture_probability_sum"]+=p_mixture
+                diagnostics["mixture_scored"]+=1
             if p_adaptive is not None:
                 diagnostics["brier_adaptive_sum"]+=(p_adaptive-y)**2
                 diagnostics["adaptive_scored"]+=1
@@ -180,13 +196,18 @@ def score_stream(trades, market, *, db_path=None):
             segment=diagnostics["by_window"].setdefault(window,{
                 "count":0,"wins":0,"sum_net":0.0,"brier_model_sum":0.0,
                 "brier_baseline_sum":0.0,"brier_adaptive_sum":0.0,"adaptive_count":0,
-                "adaptive_probability_sum":0.0,"market_probability_sum":0.0})
+                "adaptive_probability_sum":0.0,"market_probability_sum":0.0,
+                "mixture_probability_sum":0.0,"mixture_brier_sum":0.0,"mixture_count":0})
             segment["count"]+=1
             segment["wins"]+=int(observed)
             segment["sum_net"]+=float(row["net_pct"])
             segment["brier_model_sum"]+=(forecast-y)**2
             segment["brier_baseline_sum"]+=(baseline-y)**2
             segment["market_probability_sum"]+=baseline
+            if p_mixture is not None:
+                segment["mixture_probability_sum"]+=p_mixture
+                segment["mixture_brier_sum"]+=(p_mixture-y)**2
+                segment["mixture_count"]+=1
             if p_adaptive is not None:
                 segment["brier_adaptive_sum"]+=(p_adaptive-y)**2
                 segment["adaptive_count"]+=1
@@ -212,11 +233,17 @@ def score_stream(trades, market, *, db_path=None):
             bucket["actual_avg_net_pct"]=round(bucket["sum_net"]/count,3) if count else None
         n=diagnostics["scored"]
         ad_n=diagnostics["adaptive_scored"]
+        mix_n=diagnostics["mixture_scored"]
         diagnostics["probability_quality"]={
             "brier_model":round(diagnostics.pop("brier_model_sum")/n,6) if n else None,
             "brier_market_baseline":round(diagnostics.pop("brier_market_baseline_sum")/n,6) if n else None,
             "brier_adaptive":round(diagnostics.pop("brier_adaptive_sum")/ad_n,6) if ad_n else None,
             "adaptive_scored":ad_n,
+            "brier_mixture":round(diagnostics.pop("mixture_brier_sum")/mix_n,6) if mix_n else None,
+            "mixture_scored":mix_n,
+            "average_mixture_predicted_win_pct":round(100*diagnostics.pop("mixture_probability_sum")/mix_n,3) if mix_n else None,
+            "expert_weights_at_end":list(map(lambda x:round(x,4),mixture.weights())),
+            "expert_weight_updates":mixture.updated,
             "average_adaptive_predicted_win_pct":round(100*diagnostics.pop("adaptive_probability_sum")/ad_n,3) if ad_n else None,
             "mean_absolute_probability_error":round(diagnostics.pop("absolute_probability_error_sum")/n,6) if n else None,
             "interpretation":"Brier lower is better; all scored candidates, including losing ones",
@@ -232,8 +259,14 @@ def score_stream(trades, market, *, db_path=None):
             seg["brier_adaptive"]=round(adaptive_sum/adaptive_count,6) if adaptive_count else None
             seg["average_adaptive_predicted_win_pct"]=round(100*seg.pop("adaptive_probability_sum")/adaptive_count,3) if adaptive_count else None
             seg["average_market_predicted_win_pct"]=round(100*seg.pop("market_probability_sum")/count,3)
+            mn=seg.pop("mixture_count")
+            mix_prob=seg.pop("mixture_probability_sum")
+            mix_err=seg.pop("mixture_brier_sum")
+            seg["average_mixture_predicted_win_pct"]=round(100*mix_prob/mn,3) if mn else None
+            seg["brier_mixture"]=round(mix_err/mn,6) if mn else None
             seg["model_beats_baseline"]=seg["brier_model"]<seg["brier_baseline"]
             seg["adaptive_beats_baseline"]=seg["brier_adaptive"] is not None and seg["brier_adaptive"]<seg["brier_baseline"]
+            seg["mixture_beats_baseline"]=seg["brier_mixture"] is not None and seg["brier_mixture"]<seg["brier_baseline"]
         for state in diagnostics["by_regime"].values():
             m=state["trades"]
             state["win_rate_pct"]=round(100*state["wins"]/m,2)
