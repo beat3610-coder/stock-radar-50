@@ -2,9 +2,14 @@ import datetime as dt
 import pandas as pd
 from engine import normalize
 
-def get_prices(code, market):
+def get_prices(code, market, *, start_date=None):
+    """Live default stays compact; research may ask for longer raw OHLCV history.
+
+    The provider may return less history than requested; caller must inspect
+    the actual first/last dates and observations rather than assume coverage.
+    """
     import FinanceDataReader as fdr
-    start=(dt.date.today()-dt.timedelta(days=850)).isoformat()
+    start=(dt.date.today()-dt.timedelta(days=850)).isoformat() if start_date is None else str(pd.Timestamp(start_date).date())
     failures=[]
     candidates=[f"NAVER:{code}",code] if market in ("KR","KQ") else [f"STOOQ:{code}",code]
     for symbol in candidates:
@@ -18,11 +23,19 @@ def get_prices(code, market):
         ticker=code if market=="US" else code+suffix
         # Keep raw close series (not dividend-adjusted total-return proxy), consistent with
         # the displayed exchange price; critical for distribution-paying ETFs.
-        data=yf.download(ticker,period="2y",interval="1d",auto_adjust=False,progress=False,threads=False,timeout=12)
+        data=yf.download(ticker,period="2y" if start_date is None else None,
+                         start=start if start_date is not None else None,
+                         interval="1d",auto_adjust=False,progress=False,
+                         threads=False,timeout=12)
         return normalize(data),f"Yahoo {ticker}"
     except Exception as e:
         failures.append(f"Yahoo: {str(e)[:110]}")
     raise RuntimeError(" | ".join(failures))
+
+def get_historical_prices(code,market,*,start_date="2006-01-01"):
+    """Explicit research-only historical fetch, never a silent 850-day cap."""
+    return get_prices(code,market,start_date=start_date)
+
 
 def verify_recent_close(code, market, primary_date, primary_price, primary_source,
                         tolerance_pct=0.5):
