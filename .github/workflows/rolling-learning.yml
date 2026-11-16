@@ -9,6 +9,9 @@ on:
     paths:
       - "direction3.py"
       - "direction_audit.py"
+      - "research_integrity.py"
+      - "test_research_integrity.py"
+      - "direction_audit.py"
       - "buy_success.py"
       - "adaptive_trade_plans.py"
       - "engine.py"
@@ -31,33 +34,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - id: goal
-        name: Continue until every market reaches meaningful 60 percent performance
-        run: |
-          REACHED="$(python -c 'import json,pathlib; p=pathlib.Path("data/direction3-rolling-latest.json"); j=json.loads(p.read_text()) if p.exists() else {}; print("true" if j.get("target_quality_all_markets") else "false")')"
-          echo "reached=$REACHED" >> "$GITHUB_OUTPUT"
-          echo "Previous generation all-market 60 percent, positive net, PF 1.1, sample and coverage status: $REACHED"
       - name: Install market data and analysis dependencies
-        if: steps.goal.outputs.reached != 'true'
         run: pip install -r requirements.txt
       - name: Validate permissive-reference indicators and selective plan gate
-        if: steps.goal.outputs.reached != 'true'
         run: |
+          python test_research_integrity.py
           python test_reference_indicators.py
           python test_selective_plan.py
           python test_champion_retention.py
-          python -m compileall -q engine.py reference_indicators.py direction3.py buy_success.py adaptive_trade_plans.py direction_audit.py
+          python -m compileall -q engine.py reference_indicators.py direction3.py buy_success.py adaptive_trade_plans.py direction_audit.py research_integrity.py
       - name: Explore a new formula generation over all historical periods
-        if: steps.goal.outputs.reached != 'true'
         run: python direction_audit.py
       - name: Archive generation report
-        if: steps.goal.outputs.reached != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: full-history-formula-generation
           path: data/direction3-rolling-latest.json
       - name: Publish generation to the existing dashboard
-        if: success() && steps.goal.outputs.reached != 'true'
+        if: success()
         run: |
           git config user.name "stock-radar-research"
           git config user.email "stock-radar-research@users.noreply.github.com"
@@ -65,6 +59,3 @@ jobs:
           git diff --cached --quiet || git commit -m "Advance full-history formula generation [skip ci]"
           git pull --rebase origin main
           git push
-      - name: Record target reached
-        if: steps.goal.outputs.reached == 'true'
-        run: echo "All markets reached 60 percent wins with positive net return, profit factor at least 1.1, minimum sample and coverage."
