@@ -84,6 +84,11 @@ def run(market):
 "ticker_accuracy_change_pp":v.get("ticker_accuracy_change_pp"),
 "ticker_brier_change":v.get("ticker_brier_change"),
 "ticker_macro_f1_change_pp":v.get("ticker_macro_f1_change_pp"),
+"adaptive_accuracy_change_pp":v.get("adaptive_accuracy_change_pp"),
+"adaptive_brier_change":v.get("adaptive_brier_change"),
+"adaptive_macro_f1_change_pp":v.get("adaptive_macro_f1_change_pp"),
+"adaptive_vs_fixed_ticker_accuracy_pp":v.get("adaptive_vs_fixed_ticker_accuracy_pp"),
+"adaptive_vs_fixed_ticker_brier":v.get("adaptive_vs_fixed_ticker_brier"),
 "samples":v.get("paired_samples")} for k,v in report["two_year_robustness"]["calendar_windows"].items()}},ensure_ascii=False),flush=True)
         a=report["comparisons"].get("recent_850d",{})
         b=report["comparisons"].get("five_years",{})
