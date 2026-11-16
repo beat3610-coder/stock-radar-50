@@ -134,16 +134,21 @@ def _causal_recalibration(events, history, raw_probs, reference_prior,
         +[(r[0]["label_available_date"],label) for r,label in
           [(item,item[2]) for item in events]])
     sorted_idxs=sorted(range(len(events)),key=lambda k:events[k][0]["signal_date"])
-    counts=deque(maxlen=window)
+    counts=deque()
+    class_counts=np.zeros(3,dtype=float)
     result=np.zeros_like(raw_probs)
     j=0
     for ix in sorted_idxs:
         day=events[ix][0]["signal_date"]
         while j<len(observations) and observations[j][0]<day:
-            counts.append(observations[j][1])
+            cls=observations[j][1]
+            counts.append(cls)
+            class_counts[cls]+=1
+            if len(counts)>window:
+                class_counts[counts.popleft()]-=1
             j+=1
         if alpha and len(counts)>=60:
-            recent=(np.bincount(counts,minlength=3)+20*reference_prior)
+            recent=class_counts+20*reference_prior
             recent=recent/recent.sum()
             shift=np.power(np.maximum(recent,1e-8)/
                            np.maximum(reference_prior,1e-8),alpha)
