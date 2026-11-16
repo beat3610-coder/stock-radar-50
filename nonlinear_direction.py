@@ -97,37 +97,9 @@ def _predict(model,rows):
         p[:,int(c)]=raw[:,idx]
     return p
 
-def _causal_probabilities(events, historical, raw_probs, reference_prior,
-                          window=1200, alpha=0.0, temperature=1.0):
-    """Adapt to recent matured labels without inspecting the signal's future.
-
-    A fixed model may be shifted toward the most recent *known* class mix,
-    but the normalization reference is from the model's own training sample.
-    """
-    import numpy as np
-    from collections import deque
-    history=sorted(((r[0]["label_available_date"],y) for r,y in
-                    ((row,label) for row,_,label in historical)))
-    ordered=sorted(range(len(events)), key=lambda i:events[i][0]["signal_date"])
-    mature=0
-    last=deque(maxlen=window)
-    result=np.zeros_like(raw_probs)
-    for ix in ordered:
-        day=events[ix][0]["signal_date"]
-        while mature<len(history) and history[mature][0]<day:
-            last.append(history[mature][1])
-            mature+=1
-        # New known outcomes in the evaluation window, always strictly matured.
-        # They may affect only later predictions, not the model fit itself.
-        counts=np.bincount(list(last),minlength=3).astype(float)+30*reference_prior
-        recent=counts/sum(counts)
-        ratio=np.power(np.maximum(recent,1e-6)/np.maximum(reference_prior,1e-6),alpha)
-        q=np.power(np.maximum(raw_probs[ix],1e-7),1/temperature)*ratio
-        result[ix]=q/q.sum()
-    return result
-
 def _causal_recalibration(events, history, raw_probs, reference_prior,
-                          window=1200, alpha=0.0, temperature=1.0):
+                          window=1200, alpha=0.0, temperature=1.0,
+                          prior_blend=0.0):
     """Online latest-observed class frequencies. An event never uses its own label."""
     import numpy as np
     from collections import deque
@@ -150,15 +122,19 @@ def _causal_recalibration(events, history, raw_probs, reference_prior,
             if len(counts)>window:
                 class_counts[counts.popleft()]-=1
             j+=1
-        if alpha and len(counts)>=60:
+        if len(counts)>=60:
             recent=class_counts+20*reference_prior
             recent=recent/recent.sum()
             shift=np.power(np.maximum(recent,1e-8)/
                            np.maximum(reference_prior,1e-8),alpha)
         else:
+            recent=reference_prior
             shift=np.ones(3)
         q=np.power(np.maximum(raw_probs[ix],1e-6),1/temperature)*shift
-        result[ix]=q/q.sum()
+        q=q/q.sum()
+        # Shrink overconfident tree scores toward a *matured* recent base rate.
+        # Unlike relabeling predictions, this makes confidence reflect evidence.
+        result[ix]=(1-prior_blend)*q+prior_blend*recent
     return result
 
 def run_nonlinear(rows,train_end="2025-11-01",
@@ -185,14 +161,14 @@ def run_nonlinear(rows,train_end="2025-11-01",
         for window in (800,2500):
             for alpha in (0.0,0.5,1.0):
                 for temperature in (0.75,1.0,1.25):
-                    p=_causal_recalibration(validation,pretrain,raw,prior,
-                                            window,alpha,temperature)
-                    score=_stats(yv,p)
-                    # Make class collapse explicit in selection.
-                    active=sum(score["predicted"][name]>=20 for name in LABELS)
-                    candidates.append({"model":kind,"window":window,
-                                       "alpha":alpha,"temperature":temperature,
-                                       "active_classes":active,**score})
+                    for blend in (0.0,0.25,0.5,0.75):
+                        p=_causal_recalibration(validation,pretrain,raw,prior,
+                                    window,alpha,temperature,prior_blend=blend)
+                        score=_stats(yv,p)
+                        active=sum(score["predicted"][name]>=20 for name in LABELS)
+                        candidates.append({"model":kind,"window":window,
+                            "alpha":alpha,"temperature":temperature,
+                            "prior_blend":blend,"active_classes":active,**score})
     baseline_brier=_stats(yv,np.tile(prior,(len(yv),1)))["brier"]
     eligible=[r for r in candidates if r["active_classes"]==3]
     if not eligible:
@@ -204,9 +180,29 @@ def run_nonlinear(rows,train_end="2025-11-01",
     refit_prior/=refit_prior.sum()
     raw=_predict(model,diagnostic)
     p=_causal_recalibration(diagnostic,fulltrain,raw,refit_prior,
-                            chosen["window"],chosen["alpha"],chosen["temperature"])
+                            chosen["window"],chosen["alpha"],chosen["temperature"],
+                            prior_blend=chosen["prior_blend"])
     yd=np.asarray([y for _,_,y in diagnostic],dtype=int)
     result=_stats(yd,p)
+    # An uninformative class frequency is a necessary probability baseline.
+    # Without beating it, higher quoted confidence is not justified.
+    prior_only=np.tile(refit_prior,(len(yd),1))
+    result["refit_prior_brier"]=_stats(yd,prior_only)["brier"]
+    result["brier_skill_vs_prior"]=round(
+        1-result["brier"]/result["refit_prior_brier"],5)
+    # Conditional-accuracy numbers are NOT overall success rates; include coverage.
+    predicted=np.argmax(p,axis=1)
+    confidence=np.max(p,axis=1)
+    result["confidence_bins"]={}
+    for low,high in ((0.0,0.4),(0.4,0.5),(0.5,0.6),(0.6,0.7),(0.7,1.01)):
+        keep=(confidence>=low)&(confidence<high)
+        count=int(keep.sum())
+        result["confidence_bins"][f"{low:.1f}-{high:.1f}"]={
+            "count":count,"coverage_pct":round(100*count/len(yd),2),
+            "accuracy_pct":round(100*float((predicted[keep]==yd[keep]).mean()),2)
+                if count else None,
+            "mean_predicted_confidence_pct":round(100*float(confidence[keep].mean()),2)
+                if count else None}
     ticker_metrics={}
     for ticker in sorted({item[0]["ticker"] for item in diagnostic}):
         indices=[i for i,item in enumerate(diagnostic) if item[0]["ticker"]==ticker]
@@ -219,6 +215,7 @@ def run_nonlinear(rows,train_end="2025-11-01",
                "recent_mature_window":chosen["window"],
                "prior_adaptation_strength":chosen["alpha"],
                "temperature":chosen["temperature"],
+               "prior_blend":chosen["prior_blend"],
                "validation_accuracy_pct":chosen["accuracy_pct"],
                "validation_macro_f1_pct":chosen["macro_f1_pct"],
                "validation_brier":chosen["brier"],
