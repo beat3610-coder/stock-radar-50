@@ -14,6 +14,7 @@ from providers import get_historical_prices
 from universe import get_universe
 from direction3 import make_direction_rows
 from nonlinear_direction import run_nonlinear
+from rolling_refit_direction import run_refit
 
 HISTORY_START="2021-01-01"
 RECENT_START="2024-07-20"
@@ -63,11 +64,14 @@ def run(market):
             subset=[r for r in rows if r["signal_date"]>=start]
             try:
                 result=run_nonlinear(subset,eval_end=EVALUATION_END)
+                rolling=(run_refit(subset,result["chosen_on_validation"],eval_end=EVALUATION_END)
+                         if key=="five_years" and result["status"]=="RESEARCH_ONLY" else None)
                 report["comparisons"][key]={"status":result["status"],
                     "label_count":len(subset),
                     "train_mature":result.get("train_mature"),
                     "validation_count":result.get("validation_count"),
                     "diagnostic":result.get("diagnostic"),
+                    "rolling_refit":rolling,
                     "chosen_on_validation":result.get("chosen_on_validation"),
                     "per_ticker_diagnostic":result.get("per_ticker_diagnostic")}
             except Exception as exc:
@@ -101,7 +105,9 @@ def run(market):
     path.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
     slim={k:{"status":v.get("status"),"samples":(v.get("diagnostic") or {}).get("samples"),
             "accuracy":(v.get("diagnostic") or {}).get("accuracy_pct"),
-            "brier":(v.get("diagnostic") or {}).get("brier")}
+            "brier":(v.get("diagnostic") or {}).get("brier"),
+            "rolling_accuracy":((v.get("rolling_refit") or {}).get("diagnostic") or {}).get("accuracy_pct"),
+            "rolling_brier":((v.get("rolling_refit") or {}).get("diagnostic") or {}).get("brier")}
            for k,v in report["comparisons"].items()}
     print("FULL_LONG_RESULT",json.dumps({"market":market,
            "loaded":len(per_stock),"errors":errors,"compared":slim,
