@@ -381,8 +381,42 @@ def score_directions(trades,*,train_end="2025-11-01",
     if not eligible:
         eligible=scored
     chosen=max(eligible,key=_candidate_rank)
+    # Re-score the preceding champion on THIS run's exact same observations.
+    # Comparing the old report's percentages directly to this generation is
+    # invalid when the universe, periods or sample counts have changed.
+    previous_row=next((r for r in scored if r["candidate"]["name"]=="previous_champion"),None)
+    challenger_row=chosen
+    previous_comparison=None
+    incumbent_retained=False
+    if previous_row is not None:
+        previous_comparison={
+            "same_observations":True,
+            "previous_macro_f1_pct":previous_row["whole_history_macro_f1_pct"],
+            "candidate_macro_f1_pct":challenger_row["whole_history_macro_f1_pct"],
+            "previous_weakest_f1_pct":previous_row["weakest_class_f1_pct"],
+            "candidate_weakest_f1_pct":challenger_row["weakest_class_f1_pct"],
+            "previous_brier":previous_row["whole_history_brier"],
+            "candidate_brier":challenger_row["whole_history_brier"],
+        }
+        # Avoid replacing a previous champion for a trivial gain in an already
+        # repeatedly inspected historical sample. New models must improve
+        # worst-class F1 by >=0.5 pp, not worsen macro-F1 by >0.5 pp,
+        # and not worsen probability calibration.
+        weak_gain=challenger_row["weakest_class_f1_pct"]-previous_row["weakest_class_f1_pct"]
+        macro_drop=previous_row["whole_history_macro_f1_pct"]-challenger_row["whole_history_macro_f1_pct"]
+        candidate_brier=challenger_row["whole_history_brier"]
+        prior_brier=previous_row["whole_history_brier"]
+        if (challenger_row is not previous_row and
+            (weak_gain < 0.5 or macro_drop > 0.5 or
+             candidate_brier is None or prior_brier is None or
+             candidate_brier > prior_brier)):
+            chosen=previous_row
+            incumbent_retained=True
     result=chosen["report"]
     result["tuning"]={
+        "previous_champion_same_sample_comparison":previous_comparison,
+        "previous_champion_retained_by_guard":incumbent_retained,
+        "promotion_rule":"최약 방향 F1 >=0.5%p 개선, 전체 Macro F1 하락 <=0.5%p, Brier 비악화; 동일 데이터 재평가",
         "generation":int(search_generation),
         "selection_window":"완료된 전체 과거기간의 반기별 순차평가",
         "selection_metric":"확률 오차의 기준모델 대비 개선 우선, 세 방향 중 최약 F1 강화, Macro F1·기간별 강건성 순 비교",
