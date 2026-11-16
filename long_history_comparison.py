@@ -57,6 +57,7 @@ def run():
                     "status":score["status"],"labels":len(subset),
                     "chosen_on_validation":score.get("chosen_on_validation"),
                     "diagnostic":score.get("diagnostic"),
+                    "per_ticker_diagnostic":score.get("per_ticker_diagnostic"),
                     "training_samples":score.get("train_mature"),
                     "evaluation_samples":score.get("diagnostic_count")}
             except Exception as exc:
