@@ -4,7 +4,7 @@ import csv
 import datetime as dt
 import json
 import pathlib
-from universe import WATCHLIST
+from universe import get_universe
 from engine import compute,evaluate
 from providers import get_prices
 
@@ -35,13 +35,23 @@ def audit_one(entry):
     return result
 
 def main():
+    universe=get_universe()
+    # Verify a fixed 50-symbol maximum and report missing markets explicitly.
+    allocation={"KR":17,"KQ":16,"US":17}
+    selected=[item for market,n in allocation.items()
+              for item in universe.get(market,[])[:n]]
+    if not selected:
+        raise RuntimeError("No valid current universe available")
     with cf.ThreadPoolExecutor(max_workers=4) as executor:
-        results=list(executor.map(audit_one,WATCHLIST))
+        results=list(executor.map(audit_one,selected))
     counts={status:sum(x["status"]==status for x in results)
         for status in ("정상","기준일 오래됨","조회 실패")}
     report={"checked_at_utc":dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
       "environment":"GitHub Actions (Render runtime access may differ)",
-      "count":len(results),"counts":counts,"rows":results}
+      "count":len(results),"requested":50,
+      "coverage_by_market":{m:len(universe.get(m,[])[:n])
+                            for m,n in allocation.items()},
+      "counts":counts,"rows":results}
     (OUT/"verification.json").write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")
     with (OUT/"verification.csv").open("w",encoding="utf-8-sig",newline="") as f:
         w=csv.DictWriter(f,fieldnames=list(results[0]));w.writeheader();w.writerows(results)
