@@ -11,6 +11,8 @@ on:
       - "test_regime_direction.py"
       - "research_integrity.py"
       - "test_research_integrity.py"
+      - "test_three_way_ranking.py"
+      - "test_naver_universe.py"
       - "direction_audit.py"
       - "app.py"
       - ".github/workflows/regime-verification.yml"
@@ -34,6 +36,7 @@ jobs:
           python test_regime_direction.py
           python test_direction3.py
           python test_three_way_ranking.py
+          python test_naver_universe.py
           python test_champion_retention.py
       - name: Fixed-watchlist historical direction smoke (research only)
         run: python regime_audit_sample.py
