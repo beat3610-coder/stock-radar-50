@@ -132,7 +132,24 @@ def score_regime_direction(rows, *, train_end="2025-11-01",
                 and new["macro_f1_pct"] is not None
                 and new["macro_f1_pct"]>old["macro_f1_pct"]),
         }
+    # Select the challenger only from the earlier validation period;
+    # never switch based on the later diagnostic comparison.
+    v=comparison["validation"]
+    eligible=(v["paired_samples"]>=100
+              and v["regime_brier"] is not None
+              and v["pooled_brier"] is not None
+              and v["regime_brier"]<v["pooled_brier"]
+              and v["regime_macro_f1_pct"]>=v["pooled_macro_f1_pct"])
+    selected="regime" if eligible else "pooled"
+    selected_diagnostic=summary[selected]["diagnostic"]
     return {
+        "selected_on_validation":selected,
+        "validation_selection_rule":"n>=100, lower Brier and no macro F1 regression",
+        "selected_diagnostic":{
+            "accuracy_pct":selected_diagnostic["accuracy_pct"],
+            "brier":selected_diagnostic["multiclass_brier"],
+            "macro_f1_pct":selected_diagnostic["macro_f1_pct"],
+            "samples":selected_diagnostic["total"]},
         "research_only":True,"live_approved":False,
         "independent_holdout":False,
         "model":"causal_pooled_plus_regime_mixture",
