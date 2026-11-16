@@ -217,6 +217,31 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
                       "검증 Brier":item.get("validation_brier"),"기준 Brier":item.get("validation_baseline_brier"),
                       "검증 표본":item.get("validation_samples")})
         st.dataframe(pd.DataFrame(rolling_rows),hide_index=True,use_container_width=True)
+
+        st.markdown("**시장국면별 3방향 예측 모델 — 기존 모델과 동일 표본 비교**")
+        regime_rows=[]
+        for key,name in names.items():
+            current=(rolling.get("markets") or {}).get(key) or {}
+            challenger=current.get("regime_challenger") or {}
+            compare=(challenger.get("comparison") or {}).get("diagnostic") or {}
+            fresh=((rolling.get("training_health") or {}).get(key) or {}).get("fresh_training")
+            if fresh is None:
+                fresh=(current.get("learning_attempt_status")!="RETAINED_PREVIOUS_DATA_FAILURE"
+                       and (current.get("latest_attempt_loaded",current.get("loaded",0)) or 0)>=100)
+            regime_rows.append({
+                "시장":name,
+                "이번 실행 신규학습":("확인" if fresh else "실패·과거결과 보존"),
+                "진단 동일표본":compare.get("paired_samples","미검증"),
+                "기존 Macro F1(%)":compare.get("pooled_macro_f1_pct"),
+                "국면모델 Macro F1(%)":compare.get("regime_macro_f1_pct"),
+                "기존 Brier":compare.get("pooled_brier"),
+                "국면모델 Brier":compare.get("regime_brier"),
+                "국면모델 정확도(%)":compare.get("regime_accuracy_pct"),
+                "결과":"비교 완료·실전 미승인" if compare else "신규 비교 전"})
+        st.dataframe(pd.DataFrame(regime_rows),hide_index=True,use_container_width=True)
+        st.caption("상승·하락·횡보를 각각 평가합니다. 이전 우승 수식을 자동 교체하지 않으며, "
+                   "전 기간에 반복 노출된 과거 자료는 독립 검증으로 인정하지 않습니다.")
+
         if candidate_rows:
             cf=pd.DataFrame(candidate_rows)
             markets_filter=st.multiselect("수식 후보 비교 시장",list(names.values()),default=list(names.values()),key="sr50_tuning_market")

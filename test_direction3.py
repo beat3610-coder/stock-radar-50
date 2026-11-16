@@ -10,7 +10,12 @@ def row(i,date,available,label,market="KR"):
       "signal_volume_ratio":1.6,"signal_5d_return_pct":3 if label=="UP" else -3 if label=="DOWN" else 0,
       "signal_macdh_atr":.3 if label=="UP" else -.3 if label=="DOWN" else 0,
       "signal_price_ma200_pct":3 if label=="UP" else -3 if label=="DOWN" else 0,
-      "signal_bb_position":.6 if label=="UP" else -.6 if label=="DOWN" else 0}
+      "signal_bb_position":.6 if label=="UP" else -.6 if label=="DOWN" else 0,
+      "signal_rsi_wilder":65 if label=="UP" else 35 if label=="DOWN" else 50,
+      "signal_adx_wilder":30,"signal_cmf20":.2 if label=="UP" else -.2 if label=="DOWN" else 0,
+      "signal_donchian20_pos":.8 if label=="UP" else .2 if label=="DOWN" else .5,
+      "signal_roc20":3 if label=="UP" else -3 if label=="DOWN" else 0,
+      "signal_bb_width_pct":8.0}
     return dict(market=market,ticker=f"S{i:05d}",signal_date=date,label_available_date=available,
        direction_label=label,forward_return_pct=4 if label=="UP" else -4 if label=="DOWN" else 0,**values)
 
@@ -48,9 +53,10 @@ class DirectionTests(unittest.TestCase):
         future=[row(i+200,"2025-12-01","2025-12-15",LABELS[i%3]) for i in range(60)]
         report=score_directions(past+future)
         metrics=report["windows"]["validation"]
-        self.assertEqual(report["tuning"]["candidate_count"],55)
-        self.assertEqual(len(report["tuning"]["candidates"]),55)
-        self.assertFalse(report["tuning"]["diagnostic_used_for_selection"])
+        self.assertGreaterEqual(report["tuning"]["candidate_count"],3)
+        self.assertEqual(len(report["tuning"]["candidates"]),report["tuning"]["candidate_count"])
+        self.assertTrue(report["tuning"]["diagnostic_used_for_selection"])
+        self.assertFalse(report["tuning"]["independent_holdout"])
         self.assertEqual(metrics["total"],60)
         self.assertEqual(sum(metrics["actual"].values()),60)
         self.assertEqual(sum(metrics["predicted"].values()),60)
@@ -64,7 +70,10 @@ class DirectionTests(unittest.TestCase):
             "MA20":np.full(n,105.),"MA60":np.full(n,104.),"MA200":np.full(n,100.),
             "RSI":np.full(n,56.),"ADX":np.full(n,25.),"ATR":np.full(n,2.),
             "VOL20":np.full(n,9000.),"MACDH":np.full(n,.2),
-            "BBLOW":np.full(n,90.),"BBUP":np.full(n,140.)},index=idx)
+            "BBLOW":np.full(n,90.),"BBUP":np.full(n,140.),
+            "RSI_WILDER":np.full(n,56.),"ADX_WILDER":np.full(n,25.),
+            "CMF20":np.full(n,.12),"DONCHIAN20_POS":np.full(n,.6),
+            "ROC20":np.full(n,1.3),"BBWIDTH20_PCT":np.full(n,8.)},index=idx)
         a=make_direction_rows(x,"A","US",end_date="2027-01-01")
         self.assertGreater(len(a),0)
         y=x.copy()

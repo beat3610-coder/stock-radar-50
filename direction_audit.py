@@ -10,6 +10,8 @@ import os
 from engine import compute
 from providers import get_prices
 from universe import get_universe
+from research_integrity import certify_all, market_health
+from regime_direction import score_regime_direction
 from direction3 import make_direction_rows,score_directions,HORIZON,BAND_PCT
 from buy_success import attach_buy_labels,score_buy_success
 from adaptive_trade_plans import (
@@ -108,6 +110,8 @@ def run_direction3(per_market=100,previous=None):
 
         metrics=score_directions(rows,eval_end=cutoff,
             search_generation=generation,previous_best=previous_direction)
+        regime_challenger=score_regime_direction(
+            rows,eval_end=cutoff,config=(metrics.get('tuning') or {}).get('chosen'))
         buy_metrics=score_buy_success(buy_rows,eval_end=cutoff,
             search_generation=generation,previous_best=previous_buy)
         adaptive_plans=score_plans(
@@ -119,6 +123,7 @@ def run_direction3(per_market=100,previous=None):
                                   "labels_total":len(rows),
                                   "buy_labels_total":len(buy_rows),
                                   "buy_success":buy_metrics,
+                                  "regime_challenger":regime_challenger,
                                   "adaptive_plans":adaptive_plans,**metrics}
         slim=metrics["windows"]["diagnostic"]
         print("DIRECTION_MARKET "+market+" "+json.dumps({
@@ -134,42 +139,18 @@ def run_direction3(per_market=100,previous=None):
             "trained_outcomes":metrics["trained_outcomes"]},
             ensure_ascii=False),flush=True)
 
-    target_status={}
-    for market,data in result["markets"].items():
-        adaptive=data.get("adaptive_plans") or {}
-        challenger=adaptive.get("selective_challenger") or {}
-        diagnostic=((challenger
-                    .get("windows") or {}).get("diagnostic") or {})
-        actual=diagnostic.get("actual_win_pct")
-        mean_net=diagnostic.get("mean_net_pct")
-        profit_factor=diagnostic.get("profit_factor")
-        trades=diagnostic.get("trades")
-        coverage=diagnostic.get("coverage_pct")
-        validation_eligible=bool(challenger.get("validation_eligible"))
-        target_status[market]={
-            "actual_win_pct":actual,
-            "mean_net_pct":mean_net,
-            "profit_factor":profit_factor,
-            "trades":trades,
-            "coverage_pct":coverage,
-            "validation_eligible":validation_eligible,
-            "win_rate_reached":actual is not None and actual>=TARGET_WIN_PCT,
-            "positive_net_reached":mean_net is not None and mean_net>0,
-            "profit_factor_reached":(
-                profit_factor is not None and profit_factor>=1.1),
-            "sample_reached":trades is not None and trades>=300,
-            "coverage_reached":coverage is not None and coverage>=10,
-            "validation_reached":validation_eligible,
-            "reached":(
-                validation_eligible
-                and actual is not None and actual>=TARGET_WIN_PCT
-                and mean_net is not None and mean_net>0
-                and profit_factor is not None and profit_factor>=1.1
-                and trades is not None and trades>=300
-                and coverage is not None and coverage>=10)}
+    # A previous champion is a display-only fallback, NOT a fresh success.
+    target_status, all_reached = certify_all(result, TARGET_WIN_PCT)
     result["target_quality_status"]=target_status
-    result["target_quality_all_markets"]=(
-        bool(target_status) and all(x["reached"] for x in target_status.values()))
+    result["target_quality_all_markets"]=all_reached
+    result["training_health"]={m:market_health(v) for m,v in result["markets"].items()}
+    result["all_markets_fresh"]=all(
+        result["training_health"].get(m,{}).get("fresh_training",False)
+        for m in ("KR","KQ","US"))
+    result["deployment_gate"]="RESEARCH_ONLY_NOT_LIVE_APPROVED"
+    result["evaluation_warning"]=(
+        "기존 모델/과거 결과와 새 학습을 분리합니다. "
+        "전체 과거를 수식 선택에 사용했으며 독립 실전 승률이 아닙니다.")
     # Compatibility aliases for older dashboard versions.
     result["target_50_status"]=target_status
     result["target_50_all_markets"]=result["target_quality_all_markets"]
