@@ -71,6 +71,13 @@ def score_regime_direction(rows, *, train_end="2025-11-01",
     per_regime={r:{model:_empty_direction_stat() for model in ("pooled","regime")}
                 for r in REGIMES}
     skipped={"missing_features":0,"warmup":0,"late_labels":0}
+    # Candidate grid fixed before looking at validation or diagnostic labels.
+    candidate_grid=[(rw,shrink) for rw in (0.0,0.3,0.55,0.85)
+                    for shrink in (0.0,0.25,0.5,0.75)]
+    candidate_stats={f"reg{rw:.2f}_prior{shrink:.2f}":
+                     {window:_empty_direction_stat() for window in
+                      ("train","validation","diagnostic")}
+                     for rw,shrink in candidate_grid}
     expert_coverage=0
     for event in ordered:
         signal=event["signal_date"]
@@ -109,8 +116,17 @@ def score_regime_direction(rows, *, train_end="2025-11-01",
             if window=="diagnostic":
                 _record_direction(per_regime[regime][model],
                                   actual,predicted,probs,prior)
+        for rw,shrink in candidate_grid:
+            key=f"reg{rw:.2f}_prior{shrink:.2f}"
+            ensemble=([(1-rw)*p+rw*q for p,q in zip(base,local)]
+                      if local is not None else base)
+            probs=[(1-shrink)*p+shrink*q for p,q in zip(ensemble,prior)]
+            predicted=max(range(3),key=lambda j:probs[j])
+            _record_direction(candidate_stats[key][window],actual,
+                              predicted,probs,prior)
     summary={key:_summary(stat) for key,stat in summary.items()}
     per_regime={reg:_summary(stat) for reg,stat in per_regime.items()}
+    candidate_stats={name:_summary(w) for name,w in candidate_stats.items()}
     comparison={}
     for window in ("train","validation","diagnostic"):
         old=summary["pooled"][window]
@@ -142,7 +158,40 @@ def score_regime_direction(rows, *, train_end="2025-11-01",
               and v["regime_macro_f1_pct"]>=v["pooled_macro_f1_pct"])
     selected="regime" if eligible else "pooled"
     selected_diagnostic=summary[selected]["diagnostic"]
+    validation_base=summary["pooled"]["validation"]
+    # Keep incumbent unless a challenger improves probability calibration
+    # without degrading balanced three-direction classification.
+    eligible_candidates=[]
+    for name,windows in candidate_stats.items():
+        vstat=windows["validation"]
+        if (vstat["total"]>=100
+            and vstat["multiclass_brier"] is not None
+            and validation_base["multiclass_brier"] is not None
+            and vstat["multiclass_brier"]<validation_base["multiclass_brier"]
+            and vstat["macro_f1_pct"]>=validation_base["macro_f1_pct"]):
+            eligible_candidates.append((name,vstat))
+    winner=min(eligible_candidates,
+               key=lambda item:(item[1]["multiclass_brier"],
+                                -item[1]["macro_f1_pct"]))[0] if eligible_candidates else "pooled"
+    winning_diagnostic=(candidate_stats[winner]["diagnostic"]
+                        if winner!="pooled" else summary["pooled"]["diagnostic"])
     return {
+        "calibrated_selected_on_validation":winner,
+        "calibrated_validation_selection_rule":"Brier < pooled and macro-F1 >= pooled; no diagnostic selection",
+        "calibrated_diagnostic":{
+            "accuracy_pct":winning_diagnostic["accuracy_pct"],
+            "brier":winning_diagnostic["multiclass_brier"],
+            "prior_brier":winning_diagnostic["prior_brier"],
+            "macro_f1_pct":winning_diagnostic["macro_f1_pct"],
+            "class_metrics":winning_diagnostic["class_metrics"],
+            "predicted":winning_diagnostic["predicted"],
+            "samples":winning_diagnostic["total"]},
+        "calibrated_candidates_validation":{
+            name:{"samples":w["validation"]["total"],
+                  "brier":w["validation"]["multiclass_brier"],
+                  "macro_f1_pct":w["validation"]["macro_f1_pct"],
+                  "accuracy_pct":w["validation"]["accuracy_pct"]}
+            for name,w in candidate_stats.items()},
         "selected_on_validation":selected,
         "validation_selection_rule":"n>=100, lower Brier and no macro F1 regression",
         "selected_diagnostic":{
