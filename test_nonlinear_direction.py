@@ -2,7 +2,7 @@
 import unittest
 from datetime import date,timedelta
 from test_regime_direction import event
-from nonlinear_direction import market_features,vectors,run_nonlinear
+from nonlinear_direction import market_features,vectors,run_nonlinear,_causal_recalibration
 
 class NonlinearTests(unittest.TestCase):
     def samples(self):
@@ -38,6 +38,18 @@ class NonlinearTests(unittest.TestCase):
         b=run_nonlinear(changed,**args)
         self.assertEqual(a["chosen_on_validation"],b["chosen_on_validation"])
         self.assertGreater(a["diagnostic"]["samples"],100)
+    def test_online_prior_excludes_current_and_future_labels(self):
+        import numpy as np
+        rows=self.samples()[:100]
+        ctx=market_features(rows)
+        data=vectors(rows,ctx)
+        # Same signal timestamp: changing outcome must not affect prediction.
+        ref=np.array([1/3,1/3,1/3])
+        p=np.tile(ref,(len(data),1))
+        a=_causal_recalibration(data[:30],data[30:],p[:30],ref,alpha=1.0)
+        changed=[(r,x,0) for r,x,y in data[:30]]
+        b=_causal_recalibration(changed,data[30:],p[:30],ref,alpha=1.0)
+        self.assertTrue(np.allclose(a[0],b[0]))
     def test_three_class_probabilities_have_finite_metrics(self):
         rows=self.samples()
         result=run_nonlinear(rows,train_end="2024-09-01",
