@@ -15,6 +15,7 @@ on:
       - "reference_indicators.py"
       - "test_reference_indicators.py"
       - "test_selective_plan.py"
+      - "test_champion_retention.py"
       - ".github/workflows/rolling-learning.yml"
 concurrency:
   group: rolling-research-learning
@@ -44,6 +45,7 @@ jobs:
         run: |
           python test_reference_indicators.py
           python test_selective_plan.py
+          python test_champion_retention.py
           python -m compileall -q engine.py reference_indicators.py direction3.py buy_success.py adaptive_trade_plans.py direction_audit.py
       - name: Explore a new formula generation over all historical periods
         if: steps.goal.outputs.reached != 'true'

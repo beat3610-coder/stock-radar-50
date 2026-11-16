@@ -55,6 +55,10 @@ def make_plan_candidates(search_generation=1,previous_best=None):
     }
     center=previous_best or {"risk_atr":1.8,"reward_rr":1.0,
                              "hold_sessions":7}
+    if previous_best:
+        plans["previous_champion"]=(center.get("risk_atr",1.8),
+                                    center.get("reward_rr",1.0),
+                                    center.get("hold_sessions",7))
     seed=(15485863*int(search_generation)
           +int(float(center.get("risk_atr",1.8))*10000)
           +int(float(center.get("reward_rr",1.0))*10000)

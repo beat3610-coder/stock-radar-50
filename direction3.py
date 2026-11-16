@@ -271,6 +271,10 @@ def _direction_candidates(search_generation,previous_best):
                         learning_rate,l2,prior_mix,sideways_weight)
     center=previous_best or {"learning_rate":0.10,"l2":0.02,
                              "prior_mix":0.0,"sideways_weight":1.0}
+    if previous_best:
+        add("previous_champion",center.get("learning_rate",0.10),
+            center.get("l2",0.02),center.get("prior_mix",0.0),
+            center.get("sideways_weight",1.0))
     seed=(104729*int(search_generation)
           +int(float(center.get("learning_rate",0.10))*100000)
           +int(float(center.get("l2",0.02))*100000)
@@ -342,9 +346,11 @@ def score_directions(trades,*,train_end="2025-11-01",
     eligible=[r for r in scored if r["period_count"]>=2]
     if not eligible:
         eligible=[r for r in scored if r["validation_samples"]>=30]
+    if not eligible:
+        eligible=scored
     chosen=max(eligible,key=lambda r:(
-        r["whole_history_macro_f1_pct"],
-        r["worst_period_macro_f1_pct"],
+        r["whole_history_macro_f1_pct"] or 0,
+        r["worst_period_macro_f1_pct"] or 0,
         r["whole_history_accuracy_pct"] or 0,
         -(r["whole_history_brier"] if r["whole_history_brier"] is not None
           else float("inf"))))

@@ -197,6 +197,9 @@ def _buy_candidates(search_generation,previous_best):
                     lr,l2,prior_mix)
     center=previous_best or {"learning_rate":0.10,"l2":0.065,
                              "prior_mix":0.15}
+    if previous_best:
+        add("previous_champion",center.get("learning_rate",0.10),
+            center.get("l2",0.065),center.get("prior_mix",0.15))
     seed=(130363*int(search_generation)
           +int(float(center.get("learning_rate",0.10))*100000)
           +int(float(center.get("l2",0.065))*100000)
@@ -259,10 +262,14 @@ def score_buy_success(trades,*,train_end="2025-11-01",
     if not eligible:
         eligible=[r for r in scored if r["validation_samples"]>=30
                   and r["validation_brier"] is not None]
+    if not eligible:
+        eligible=[r for r in scored if r["validation_brier"] is not None]
+    if not eligible:
+        eligible=scored
     chosen=min(eligible,key=lambda r:(
-        r["whole_history_brier"],
-        r["worst_period_brier"],
-        r["whole_history_calibration_gap_pp"]))
+        r["whole_history_brier"] if r["whole_history_brier"] is not None else float("inf"),
+        r["worst_period_brier"] if r["worst_period_brier"] is not None else float("inf"),
+        r["whole_history_calibration_gap_pp"] if r["whole_history_calibration_gap_pp"] is not None else float("inf")))
     result=chosen["report"]
     result["tuning"]={
         "generation":int(search_generation),

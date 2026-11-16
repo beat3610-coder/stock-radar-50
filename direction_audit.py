@@ -53,6 +53,23 @@ def run_direction3(per_market=100,previous=None):
 
         excluded={"KR":{"472150","0262B0"},"KQ":set(),"US":{"SOXL"}}[market]
         symbols=[x[0] for x in univ[market] if x[0] not in excluded][:per_market]
+        if len(symbols)<per_market:
+            failure={
+                "learning_attempt_status":"RETAINED_PREVIOUS_DATA_FAILURE",
+                "latest_attempt_loaded":0,
+                "latest_attempt_error":(
+                    f"{market} 구성종목 {len(symbols)}/{per_market}; "
+                    "직전 검증 결과를 유지하고 다음 실행에서 재시도"),
+            }
+            if previous_market:
+                result["markets"][market]={**previous_market,**failure}
+            else:
+                result["markets"][market]={
+                    "loaded":0,"requested":per_market,"errors":[failure],
+                    **failure}
+            print("DIRECTION_MARKET_RETAIN "+market+" "+json.dumps(
+                failure,ensure_ascii=False),flush=True)
+            continue
         rows=[];buy_rows=[];plan_rows=[];loaded=0;errors=[]
         for i,ticker in enumerate(symbols,1):
             try:
@@ -68,6 +85,26 @@ def run_direction3(per_market=100,previous=None):
                 errors.append({"ticker":ticker,"error":str(exc)[:160]})
             if i%20==0:
                 print(f"DIRECTION_PROGRESS {market} {i}/{len(symbols)} loaded={loaded} labels={len(rows)} plans={len(plan_candidates)}",flush=True)
+
+        if (loaded<per_market or not rows or not buy_rows or not plan_rows):
+            failure={
+                "learning_attempt_status":"RETAINED_PREVIOUS_DATA_FAILURE",
+                "latest_attempt_loaded":loaded,
+                "latest_attempt_error":(
+                    f"{market} 가격/라벨 부족: loaded={loaded}/{per_market}, "
+                    f"direction={len(rows)}, buy={len(buy_rows)}, plans={len(plan_rows)}; "
+                    "직전 검증 결과를 유지하고 다음 실행에서 재시도"),
+                "latest_attempt_errors":errors[:10],
+            }
+            if previous_market:
+                result["markets"][market]={**previous_market,**failure}
+            else:
+                result["markets"][market]={
+                    "loaded":loaded,"requested":per_market,"errors":errors[:10],
+                    **failure}
+            print("DIRECTION_MARKET_RETAIN "+market+" "+json.dumps(
+                failure,ensure_ascii=False),flush=True)
+            continue
 
         metrics=score_directions(rows,eval_end=cutoff,
             search_generation=generation,previous_best=previous_direction)
