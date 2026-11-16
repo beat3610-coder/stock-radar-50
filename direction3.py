@@ -184,6 +184,7 @@ def _finalize_direction_stat(st):
         st["class_metrics"][label]={
             "precision_pct":round(100*tp/predicted,2) if predicted else None,
             "recall_pct":round(100*tp/actual,2) if actual else None,
+            "f1_pct":round(200*tp/(predicted+actual),2) if predicted+actual else 0.0,
             "correct":tp,"predicted":predicted,"actual":actual}
 
 
@@ -196,6 +197,26 @@ def _macro_f1(stat):
         scores.append(2*precision*recall/(precision+recall)
                       if precision+recall else 0.0)
     return round(100*sum(scores)/len(LABELS),2)
+
+def _weakest_f1(stat):
+    """Avoid an apparently good average that ignores SIDEWAYS or DOWN."""
+    cm=stat.get("class_metrics") or {}
+    return min(float((cm.get(label) or {}).get("f1_pct") or 0) for label in LABELS)
+
+def _candidate_rank(row):
+    """Research ranking: all three directions matter, not just UP accuracy.
+
+    A probability model worse than a simple rolling class-prior baseline
+    cannot be promoted by a high apparent hit rate alone.
+    """
+    weak=float(row.get("weakest_class_f1_pct") or 0)
+    macro=float(row.get("whole_history_macro_f1_pct") or 0)
+    worst=float(row.get("worst_period_macro_f1_pct") or 0)
+    brier=row.get("whole_history_brier")
+    baseline=row.get("whole_history_prior_brier")
+    calibrated=(brier is not None and baseline is not None and brier<=baseline)
+    return (int(calibrated),weak,macro,worst,
+            -(brier if brier is not None else float("inf")))
 
 
 def _period_key(signal_date):
@@ -316,7 +337,9 @@ def score_directions(trades,*,train_end="2025-11-01",
                 "period":period,"samples":stat["total"],
                 "macro_f1_pct":_macro_f1(stat),
                 "accuracy_pct":stat.get("accuracy_pct"),
-                "brier":stat.get("multiclass_brier")})
+                "brier":stat.get("multiclass_brier"),
+                "prior_brier":stat.get("prior_brier"),
+                "weakest_f1_pct":_weakest_f1(stat)})
         if period_scores:
             mean_f1=round(sum(x["macro_f1_pct"] for x in period_scores)
                           /len(period_scores),2)
@@ -332,12 +355,16 @@ def score_directions(trades,*,train_end="2025-11-01",
             worst_f1=mean_f1
             mean_accuracy=validation.get("accuracy_pct")
             mean_brier=validation.get("multiclass_brier")
+            mean_prior=validation.get("prior_brier")
+            weakest_f1=_weakest_f1(validation)
         scored.append({"candidate":candidate,"report":report,
             "period_scores":period_scores,
             "whole_history_macro_f1_pct":mean_f1,
             "worst_period_macro_f1_pct":worst_f1,
             "whole_history_accuracy_pct":mean_accuracy,
             "whole_history_brier":mean_brier,
+            "whole_history_prior_brier":mean_prior,
+            "weakest_class_f1_pct":weakest_f1,
             "period_count":len(period_scores),
             "validation_macro_f1_pct":_macro_f1(validation),
             "validation_accuracy_pct":validation.get("accuracy_pct"),
@@ -348,17 +375,12 @@ def score_directions(trades,*,train_end="2025-11-01",
         eligible=[r for r in scored if r["validation_samples"]>=30]
     if not eligible:
         eligible=scored
-    chosen=max(eligible,key=lambda r:(
-        r["whole_history_macro_f1_pct"] or 0,
-        r["worst_period_macro_f1_pct"] or 0,
-        r["whole_history_accuracy_pct"] or 0,
-        -(r["whole_history_brier"] if r["whole_history_brier"] is not None
-          else float("inf"))))
+    chosen=max(eligible,key=_candidate_rank)
     result=chosen["report"]
     result["tuning"]={
         "generation":int(search_generation),
         "selection_window":"완료된 전체 과거기간의 반기별 순차평가",
-        "selection_metric":"반기별 Macro F1 평균 최대화, 최악 반기·정확도·Brier 순 보조",
+        "selection_metric":"확률 오차의 기준모델 대비 개선 우선, 세 방향 중 최약 F1 강화, Macro F1·기간별 강건성 순 비교",
         "chosen":chosen["candidate"],
         "previous_best":previous_best,
         "chosen_period_scores":chosen["period_scores"],
@@ -366,6 +388,10 @@ def score_directions(trades,*,train_end="2025-11-01",
                        if k not in ("report","period_scores")}
                       for item in scored],
         "candidate_count":len(candidates),
+        "weakest_class_f1_pct":chosen["weakest_class_f1_pct"],
+        "prior_brier":chosen["whole_history_prior_brier"],
+        "model_brier":chosen["whole_history_brier"],
+        "baseline_brier_beat":_candidate_rank(chosen)[0]==1,
         "period_count":chosen["period_count"],
         "whole_history_used_for_selection":True,
         "diagnostic_used_for_selection":True,
