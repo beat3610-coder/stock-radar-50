@@ -28,6 +28,31 @@ st.warning(
     "최종 투자 판단은 이용자 본인이 해야 하며, 투자 결과에 따른 이익과 손실은 "
     "이용자 본인에게 귀속됩니다. 실제 주문 전 공식 시세와 관련 정보를 직접 확인하세요."
 )
+# Historical model research is displayed separately from live trade signals.
+# These are dated, already-inspected research windows, not independent forward tests.
+with st.expander("🔬 예측모델 개선 현황 · 2025~2026년 과거 검증", expanded=False):
+    st.caption("연구 기준: 10거래일 뒤 +3% 초과 상승 / -3% 미만 하락 / 그 외 횡보. "
+               "과거 표본은 서로 겹칠 수 있으며 현재 상장 종목 기준 생존편향이 있습니다.")
+    st.info("연구용 코드가 배포되더라도 종목별 화면의 실제 매수 확률이 이 모델로 자동 변경되지는 않습니다. "
+            "미래 독립 검증과 거래비용 반영 수익성 검증을 통과하기 전까지 실전 매수 신호로 사용하지 마세요.")
+    research = [
+        {"시장": "코스피", "평가연도": "2025", "비교 표본": 11422,
+         "분기 재학습 적중률 차이(%p)": 2.88, "Brier 변화": -0.004275},
+        {"시장": "코스피", "평가연도": "2026", "비교 표본": 9591,
+         "분기 재학습 적중률 차이(%p)": -2.91, "Brier 변화": 0.009895},
+        {"시장": "코스닥", "평가연도": "2025", "비교 표본": 11293,
+         "분기 재학습 적중률 차이(%p)": 1.13, "Brier 변화": -0.001684},
+        {"시장": "코스닥", "평가연도": "2026", "비교 표본": 9396,
+         "분기 재학습 적중률 차이(%p)": 4.08, "Brier 변화": -0.011201},
+    ]
+    st.dataframe(pd.DataFrame(research), hide_index=True, use_container_width=True)
+    st.caption("기존 고정 학습 모델 대비 분기별 재학습 모델의 동일 표본 과거 성능 차이. "
+               "적중률은 상승·하락·횡보 3방향 분류 정확도이며 매매 승률이 아닙니다. "
+               "Brier 점수는 낮을수록 좋습니다. 2026-11-16 실행 기록 기준.")
+    st.markdown("[🔍 연구 백테스트 실행 기록](https://github.com/beat3610-coder/stock-radar-50/actions/runs/43867675977)")
+    st.warning("현재 판정: 코스닥은 두 연도에서 Brier 개선, 코스피는 2026년에 성능 악화. "
+               "어느 시장도 실전·판매용 예측 성능을 인증받지 않았습니다.")
+
 readiness_path=Path("data/live-readiness-summary.json")
 if readiness_path.exists():
     try:

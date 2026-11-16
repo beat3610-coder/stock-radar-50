@@ -8,7 +8,7 @@ from pathlib import Path
 import json
 import os
 from engine import compute
-from providers import get_prices
+from providers import get_prices,get_historical_prices
 from universe import get_universe
 from research_integrity import certify_all, market_health
 from regime_direction import score_regime_direction
@@ -39,6 +39,12 @@ def run_direction3(per_market=100,previous=None):
             "evaluation_warning":"전체 과거 구간을 수식 선택에 사용한 연구 적합도이며 미래 성공률 보장이 아닙니다.",
             "markets":{}}
     selected=os.environ.get("STOCK_AUDIT_MARKET","").strip().upper()
+    history_start=os.environ.get("STOCK_AUDIT_HISTORY_START","").strip()
+    # Long-history experiments sample every horizon to limit overlapping labels
+    # and avoid multiplying the expensive plan-search workload by ten.
+    history_step=10 if history_start else 2
+    result["historical_request_start"]=history_start or "LIVE_DEFAULT_850_DAYS"
+    result["signal_sampling_step_sessions"]=history_step
     markets=(selected,) if selected in ("KR","KQ","US") else ("KR","KQ","US")
     previous_markets=previous.get("markets") or {}
     for market in markets:
@@ -73,11 +79,19 @@ def run_direction3(per_market=100,previous=None):
                 failure,ensure_ascii=False),flush=True)
             continue
         rows=[];buy_rows=[];plan_rows=[];loaded=0;errors=[]
+        symbol_coverage={}
         for i,ticker in enumerate(symbols,1):
             try:
-                data,_=get_prices(ticker,market)
+                data,source=(get_historical_prices(ticker,market,start_date=history_start)
+                             if history_start else get_prices(ticker,market))
                 x=compute(data)
-                direction_rows=make_direction_rows(x,ticker,market,end_date=cutoff)
+                direction_rows=make_direction_rows(x,ticker,market,end_date=cutoff,
+                                                   step=history_step)
+                symbol_coverage[ticker]={"source":source,
+                    "first":str(data.index[0].date()),
+                    "last":str(data.index[-1].date()),
+                    "price_sessions":len(data),
+                    "labeled_samples":len(direction_rows)}
                 rows.extend(direction_rows)
                 buy_rows.extend(attach_buy_labels(x,direction_rows))
                 plan_rows.extend(label_plans(
@@ -120,6 +134,7 @@ def run_direction3(per_market=100,previous=None):
             target_success_pct=TARGET_WIN_PCT)
         result["markets"][market]={"loaded":loaded,"requested":len(symbols),
                                   "errors":errors[:10],
+                                  "history_coverage_by_ticker":symbol_coverage,
                                   "labels_total":len(rows),
                                   "buy_labels_total":len(buy_rows),
                                   "buy_success":buy_metrics,

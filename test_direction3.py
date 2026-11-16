@@ -55,7 +55,7 @@ class DirectionTests(unittest.TestCase):
         metrics=report["windows"]["validation"]
         self.assertGreaterEqual(report["tuning"]["candidate_count"],3)
         self.assertEqual(len(report["tuning"]["candidates"]),report["tuning"]["candidate_count"])
-        self.assertTrue(report["tuning"]["diagnostic_used_for_selection"])
+        self.assertFalse(report["tuning"]["diagnostic_used_for_selection"])
         self.assertFalse(report["tuning"]["independent_holdout"])
         self.assertEqual(metrics["total"],60)
         self.assertEqual(sum(metrics["actual"].values()),60)
@@ -63,6 +63,16 @@ class DirectionTests(unittest.TestCase):
         self.assertEqual(sum(sum(z.values()) for z in metrics["confusion"].values()),60)
         for cls in LABELS:
             self.assertEqual(metrics["actual"][cls],20)
+    def test_later_diagnostic_outcomes_cannot_change_hyperparameter_choice(self):
+        past=[row(i,"2025-01-01","2025-01-15",LABELS[i%3]) for i in range(150)]
+        validation=[row(i+200,"2025-12-01","2025-12-15",LABELS[i%3]) for i in range(60)]
+        diagnostic=[row(i+400,"2026-05-01","2026-05-15",LABELS[i%3]) for i in range(60)]
+        a=score_directions(past+validation+diagnostic)
+        relabeled=[{**item,"direction_label":"DOWN" if item["direction_label"]!="DOWN" else "UP"}
+                   for item in diagnostic]
+        b=score_directions(past+validation+relabeled)
+        self.assertEqual(a["tuning"]["chosen"],b["tuning"]["chosen"])
+        self.assertFalse(a["tuning"]["diagnostic_used_for_selection"])
     def test_no_hindsight_in_features_for_future_relabel(self):
         n=280
         idx=pd.bdate_range("2025-01-01",periods=n)

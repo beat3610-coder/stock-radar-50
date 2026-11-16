@@ -32,6 +32,32 @@ def market_health(data):
                   else "종목 수집 완료(독립 검증 아님)"),
     }
 
+def direction_quality(data, min_samples=300, min_class_predictions=30):
+    """Reject degenerate 3-way models and models worse than a class-prior baseline.
+
+    Historical diagnostic performance is research evidence, never a fresh holdout.
+    """
+    stat=((data.get("windows") or {}).get("diagnostic") or {})
+    count=finite_number(stat.get("total"))
+    brier=finite_number(stat.get("multiclass_brier"))
+    prior=finite_number(stat.get("prior_brier"))
+    predicted=stat.get("predicted") or {}
+    actual=stat.get("actual") or {}
+    labels=("UP","DOWN","SIDEWAYS")
+    counts={label:finite_number(predicted.get(label)) for label in labels}
+    actual_counts={label:finite_number(actual.get(label)) for label in labels}
+    conditions={
+        "sample_sufficient":count is not None and count>=min_samples,
+        "probability_beats_prior":brier is not None and prior is not None and brier<prior,
+        "all_directions_predicted":all(counts[k] is not None and
+                                    counts[k]>=min_class_predictions for k in labels),
+        "all_directions_observed":all(actual_counts[k] is not None and
+                                   actual_counts[k]>=min_class_predictions for k in labels),
+    }
+    return {"passed":all(conditions.values()),"conditions":conditions,
+            "samples":count,"brier":brier,"prior_brier":prior,
+            "predicted":counts,"historical_only":True}
+
 def certify_market(data, target_win_pct=60):
     """Only a research objective check; never a live trading authorization."""
     health=market_health(data)
@@ -43,8 +69,10 @@ def certify_market(data, target_win_pct=60):
     trades=finite_number(d.get("trades"))
     coverage=finite_number(d.get("coverage_pct"))
     validation=bool(challenger.get("validation_eligible"))
+    direction=direction_quality(data)
     conditions={
         "fresh_training":health["fresh_training"],
+        "direction_quality_passed":direction["passed"],
         "validation_eligible":validation,
         "win_rate_reached":win is not None and win>=target_win_pct,
         "positive_net_reached":net is not None and net>0,
@@ -58,7 +86,7 @@ def certify_market(data, target_win_pct=60):
             "reached":all(conditions.values()),
             "live_approved":False,
             "independent_holdout":False,
-            "data_health":health}
+            "data_health":health,"direction_quality":direction}
 
 def certify_all(report,target_win_pct=60):
     markets=report.get("markets") or {}
