@@ -8,6 +8,9 @@ on:
     branches: [main]
     paths:
       - "direction3.py"
+      - "universe.py"
+      - "naver_universe.py"
+      - "test_naver_universe.py"
       - "direction_audit.py"
       - "research_integrity.py"
       - "test_research_integrity.py"
@@ -38,6 +41,7 @@ jobs:
         run: pip install -r requirements.txt
       - name: Validate permissive-reference indicators and selective plan gate
         run: |
+          python test_naver_universe.py
           python test_research_integrity.py
           python test_three_way_ranking.py
           python test_reference_indicators.py
