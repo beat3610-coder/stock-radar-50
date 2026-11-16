@@ -4,6 +4,7 @@ from datetime import date,timedelta
 from test_regime_direction import event
 from nonlinear_direction import market_features,vectors,run_nonlinear,_causal_recalibration
 from rolling_refit_direction import run_refit
+from robustness_direction import run_two_year_robustness
 
 class NonlinearTests(unittest.TestCase):
     def samples(self):
@@ -81,6 +82,11 @@ class NonlinearTests(unittest.TestCase):
         self.assertEqual(a["periods"][0]["diagnostic"],
                          b["periods"][0]["diagnostic"])
         self.assertGreater(a["samples"],0)
+    def test_frozen_two_year_protocol(self):
+        result=run_two_year_robustness(self.samples())
+        self.assertIn(result["status"],("RESEARCH_ONLY","INCOMPLETE"))
+        self.assertFalse(result["independent_forward_test"])
+        self.assertEqual(set(result["calendar_windows"]),{"2025","2026"})
     def test_three_class_probabilities_have_finite_metrics(self):
         rows=self.samples()
         result=run_nonlinear(rows,train_end="2024-09-01",
