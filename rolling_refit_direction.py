@@ -10,11 +10,11 @@ import numpy as np
 REFIT_STARTS=("2026-04-01","2026-07-01","2026-09-01")
 REFIT_ENDS=("2026-07-01","2026-09-01","2026-11-01")
 
-def run_refit(rows, chosen, eval_end="2026-11-01"):
+def run_refit(rows, chosen, eval_end="2026-11-01",\n              starts=REFIT_STARTS, ends=REFIT_ENDS):
     data=vectors(rows,market_features(rows))
     combined=[]
     periods=[]
-    for start,end in zip(REFIT_STARTS,REFIT_ENDS):
+    for start,end in zip(starts,ends):
         if start>=eval_end:break
         end=min(end,eval_end)
         train=[r for r in data if r[0]["label_available_date"]<start]
