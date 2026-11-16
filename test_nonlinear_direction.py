@@ -50,6 +50,20 @@ class NonlinearTests(unittest.TestCase):
         changed=[(r,x,0) for r,x,y in data[:30]]
         b=_causal_recalibration(changed,data[30:],p[:30],ref,alpha=1.0)
         self.assertTrue(np.allclose(a[0],b[0]))
+    def test_base_rate_blend_is_normalized_and_causal(self):
+        import numpy as np
+        rows=self.samples()[:100]
+        data=vectors(rows,market_features(rows))
+        ref=np.array([0.2,0.5,0.3])
+        probs=np.tile(np.array([0.8,0.1,0.1]),(30,1))
+        a=_causal_recalibration(data[:30],data[30:],probs,ref,
+                                alpha=0.5,prior_blend=0.5)
+        self.assertTrue(np.allclose(a.sum(axis=1),1.0))
+        self.assertTrue(np.all(a>=0))
+        changed=[(r,v,0) for r,v,y in data[:30]]
+        b=_causal_recalibration(changed,data[30:],probs,ref,
+                                alpha=0.5,prior_blend=0.5)
+        self.assertTrue(np.allclose(a[0],b[0]))
     def test_three_class_probabilities_have_finite_metrics(self):
         rows=self.samples()
         result=run_nonlinear(rows,train_end="2024-09-01",
