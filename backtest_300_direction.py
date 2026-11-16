@@ -45,9 +45,11 @@ def run():
         outcome={"requested":100,"symbols_listed":len(symbols),
                  "loaded":len(symbols)-len(errors),"errors":errors[:20],
                  "label_count":len(rows),"status":"INCOMPLETE"}
-        if len(symbols)==100 and not errors and len(rows)>=300:
+        if len(symbols)==100 and len(rows)>=300 and len(symbols)-len(errors)>=90:
             comparison=score_regime_direction(rows,eval_end="2026-11-01")
-            outcome["status"]="HISTORICAL_RESEARCH_ONLY"
+            outcome["status"]=("HISTORICAL_RESEARCH_ONLY" if not errors else "PARTIAL_COVERAGE_RESEARCH_ONLY")
+            outcome["coverage_pct"]=round(100*outcome["loaded"]/outcome["requested"],2)
+            outcome["missing_tickers_excluded_not_imputed"]=True
             outcome["comparison"]=comparison["comparison"]
             outcome["selected_on_validation"]=comparison["selected_on_validation"]
             outcome["selected_diagnostic"]=comparison["selected_diagnostic"]
