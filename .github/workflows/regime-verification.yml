@@ -33,6 +33,7 @@ jobs:
           python test_research_integrity.py
           python test_regime_direction.py
           python test_direction3.py
+          python test_three_way_ranking.py
           python test_champion_retention.py
       - name: Fixed-watchlist historical direction smoke (research only)
         run: python regime_audit_sample.py
