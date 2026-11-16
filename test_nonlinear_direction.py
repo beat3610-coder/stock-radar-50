@@ -72,6 +72,14 @@ class NonlinearTests(unittest.TestCase):
         self.assertGreaterEqual(result["diagnostic"]["brier"],0)
         self.assertEqual(sum(result["diagnostic"]["predicted"].values()),
                          result["diagnostic"]["samples"])
+        self.assertIn(result["chosen_on_validation"]["model"],
+                      ("histgb","extratrees","ensemble50"))
+        self.assertIn("selective_signal",result["diagnostic"])
+        chosen_signal=result["diagnostic"]["selective_signal"]
+        self.assertGreaterEqual(chosen_signal["coverage_pct"],0)
+        self.assertLessEqual(chosen_signal["coverage_pct"],100)
+        if not chosen_signal["validation_target_met"]:
+            self.assertEqual(chosen_signal["signals"],0)
 
 if __name__=="__main__":
     unittest.main()
