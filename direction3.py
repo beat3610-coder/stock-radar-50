@@ -403,6 +403,13 @@ def score_directions(trades,*,train_end="2025-11-01",
     # Comparing the old report's percentages directly to this generation is
     # invalid when the universe, periods or sample counts have changed.
     previous_row=next((r for r in scored if r["candidate"]["name"]=="previous_champion"),None)
+    if previous_row is None and previous_best:
+        # Candidate de-duplication can suppress the previous_champion alias
+        # when its parameters are identical to a predefined baseline.
+        keys=("learning_rate","l2","prior_mix","sideways_weight")
+        previous_row=next((r for r in scored if all(
+            round(float(r["candidate"][k]),5)==round(float(previous_best[k]),5)
+            for k in keys)),None)
     challenger_row=chosen
     previous_comparison=None
     incumbent_retained=False
