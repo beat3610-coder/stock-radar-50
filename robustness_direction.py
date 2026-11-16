@@ -92,11 +92,21 @@ def run_two_year_robustness(rows):
             "brier_change":round(rolling["brier"]-fixed["brier"],6),
             "rolling_better_brier":rolling["brier"]<fixed["brier"]}
     eligible=[v for v in reports.values() if v.get("status")=="RESEARCH_ONLY"]
+    # Model selection is research-only: require consistent probability and
+    # direction accuracy gains with no major macro-F1 regression in BOTH years.
+    ticker_eligible=(len(eligible)==2 and all(
+        v["ticker_brier_change"]<0 and
+        v["ticker_accuracy_change_pp"]>=0 and
+        v["ticker_macro_f1_change_pp"]>=-0.5 and
+        v["paired_samples"]>=1000
+        for v in eligible))
     return {"status":"RESEARCH_ONLY" if len(eligible)==2 else "INCOMPLETE",
             "independent_forward_test":False,
             "frozen_configuration":FROZEN_CONFIG,
             "calendar_windows":reports,
             "ticker_brier_improved_both_years":len(eligible)==2 and all(v["ticker_brier_change"]<0 for v in eligible),
+            "ticker_research_gate_passed":ticker_eligible,
+            "live_approved":False,
             "two_years_probability_improved":len(eligible)==2 and all(
                 v["rolling_better_brier"] for v in eligible),
             "limitations":["Earlier periods were already inspected in ongoing research",
