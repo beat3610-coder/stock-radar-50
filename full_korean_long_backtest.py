@@ -80,7 +80,7 @@ def run(market):
                     "error":str(exc)[:300],"label_count":len(subset)}
         # Prespecified protocol, no model choice based on either test year.
         report["two_year_robustness"]=run_two_year_robustness(rows)
-        print("ROBUSTNESS_MARKET",market,json.dumps({"status":report["two_year_robustness"]["status"],"windows":{k:{"accuracy_change_pp":v.get("accuracy_change_pp"),"macro_f1_change_pp":v.get("macro_f1_change_pp"),"brier_change":v.get("brier_change"),"samples":v.get("paired_samples")} for k,v in report["two_year_robustness"]["calendar_windows"].items()}},ensure_ascii=False),flush=True)
+        print("ROBUSTNESS_MARKET",market,json.dumps({"status":report["two_year_robustness"]["status"],"windows":{k:{"accuracy_change_pp":v.get("accuracy_change_pp"),"macro_f1_change_pp":v.get("macro_f1_change_pp"),"brier_change":v.get("brier_change"),"weighted_accuracy_change_pp":v.get("weighted_accuracy_change_pp"),"weighted_brier_change":v.get("weighted_brier_change"),"weighted_macro_f1_change_pp":v.get("weighted_macro_f1_change_pp"),"samples":v.get("paired_samples")} for k,v in report["two_year_robustness"]["calendar_windows"].items()}},ensure_ascii=False),flush=True)
         a=report["comparisons"].get("recent_850d",{})
         b=report["comparisons"].get("five_years",{})
         if a.get("status")==b.get("status")=="RESEARCH_ONLY":
