@@ -12,7 +12,6 @@ on:
       - "research_integrity.py"
       - "test_research_integrity.py"
       - "test_three_way_ranking.py"
-      - "direction_audit.py"
       - "buy_success.py"
       - "adaptive_trade_plans.py"
       - "engine.py"
