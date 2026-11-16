@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - "universe.py"
+      - "naver_universe.py"
+      - "test_naver_universe.py"
       - "providers.py"
       - "engine.py"
       - "app.py"
@@ -27,12 +29,14 @@ jobs:
           import ast,json,datetime
           for filename in ("universe.py","providers.py","engine.py","app.py"):
               ast.parse(open(filename,encoding="utf-8").read())
-          from universe import kosdaq_top100
+          from universe import get_universe
           from providers import get_prices
           from engine import compute,evaluate
           result={"time":datetime.datetime.now(datetime.timezone.utc).isoformat()}
           try:
-              rows,source=kosdaq_top100()
+              universe=get_universe()
+              rows=[(code,name,sector) for code,name,market,sector in universe["KQ"]]
+              source=universe["KQ_source"]
               assert len(rows)==100 and len({r[0] for r in rows})==100
               result["kosdaq"]={"count":len(rows),"source":source,"sample":[list(x) for x in rows[:5]]}
           except Exception as e:
@@ -65,5 +69,5 @@ jobs:
             git config user.name "stock-radar-diagnostics"
             git config user.email "stock-radar-diagnostics@users.noreply.github.com"
             git add data/kosdaq-smoke.json
-            git diff --cached --quiet || (git commit -m "Record KOSDAQ universe smoke result [skip ci]" && git push)
+            git diff --cached --quiet || (git commit -m "Record KOSDAQ universe smoke result [skip ci]" && (git pull --rebase origin main && git push))
           fi
