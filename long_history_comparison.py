@@ -55,6 +55,8 @@ def run():
                 score=run_nonlinear(subset,eval_end=EVAL_END)
                 result["windows"][label]={
                     "status":score["status"],"labels":len(subset),
+                    "insufficient_counts":({k:score.get(k) for k in ("train","validation","diagnostic")}
+                                           if score["status"]=="INSUFFICIENT" else None),
                     "chosen_on_validation":score.get("chosen_on_validation"),
                     "diagnostic":score.get("diagnostic"),
                     "per_ticker_diagnostic":score.get("per_ticker_diagnostic"),
