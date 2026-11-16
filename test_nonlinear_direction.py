@@ -5,6 +5,7 @@ from test_regime_direction import event
 from nonlinear_direction import market_features,vectors,run_nonlinear,_causal_recalibration
 from rolling_refit_direction import run_refit
 from robustness_direction import run_two_year_robustness
+from price_volume_features import interact_rows
 
 class NonlinearTests(unittest.TestCase):
     def samples(self):
@@ -87,6 +88,26 @@ class NonlinearTests(unittest.TestCase):
         self.assertIn(result["status"],("RESEARCH_ONLY","INCOMPLETE"))
         self.assertFalse(result["independent_forward_test"])
         self.assertEqual(set(result["calendar_windows"]),{"2025","2026"})
+        self.assertFalse(result["live_approved"])
+        self.assertIsInstance(result["price_volume_research_gate_passed"],bool)
+        for period in result["calendar_windows"].values():
+            if period["status"]=="RESEARCH_ONLY":
+                self.assertEqual(period["rolling"]["samples"],
+                                 period["price_volume"]["samples"])
+    def test_price_volume_features_are_close_only_and_finite(self):
+        import numpy as np
+        rows=self.samples()[:90]
+        original=vectors(rows,market_features(rows))
+        enhanced=interact_rows(original)
+        self.assertEqual(len(enhanced),len(original))
+        self.assertEqual(len(enhanced[0][1]),len(original[0][1])+8)
+        self.assertTrue(np.all(np.isfinite(enhanced[0][1])))
+        changed=[(dict(r,direction_label="DOWN"),v,(label+1)%3)
+                 for r,v,label in original]
+        # Changing the future label cannot change any signal-date features.
+        other=interact_rows(changed)
+        self.assertEqual(enhanced[0][1],other[0][1])
+
     def test_three_class_probabilities_have_finite_metrics(self):
         rows=self.samples()
         result=run_nonlinear(rows,train_end="2024-09-01",
