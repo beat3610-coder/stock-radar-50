@@ -9,7 +9,8 @@ import numpy as np
 
 def causal_ticker_shrink(events, history, base_probs, *, blend=0.3,
                          prior_strength=80.0, min_ticker_count=25,
-                         global_window=2500, ticker_window=180):
+                         global_window=2500, ticker_window=180,
+                         adaptive_blend=False):
     if not 0<=blend<=1 or prior_strength<=0:
         raise ValueError("Invalid probability shrinkage parameters")
     base=np.asarray(base_probs,dtype=float)
@@ -45,5 +46,6 @@ def causal_ticker_shrink(events, history, base_probs, *, blend=0.3,
             continue
         pooled=(global_counts+1)/(global_counts.sum()+3)
         posterior=(ticker_counts[ticker]+prior_strength*pooled)/(n+prior_strength)
-        output[i]=(1-blend)*base[i]+blend*posterior
+        confidence=blend*(n/(n+prior_strength)) if adaptive_blend else blend
+        output[i]=(1-confidence)*base[i]+confidence*posterior
     return output
