@@ -11,7 +11,7 @@ on:
       - "direction_audit.py"
       - "research_integrity.py"
       - "test_research_integrity.py"
-      - "direction_audit.py"
+      - "test_three_way_ranking.py"
       - "buy_success.py"
       - "adaptive_trade_plans.py"
       - "engine.py"
@@ -39,6 +39,7 @@ jobs:
       - name: Validate permissive-reference indicators and selective plan gate
         run: |
           python test_research_integrity.py
+          python test_three_way_ranking.py
           python test_reference_indicators.py
           python test_selective_plan.py
           python test_champion_retention.py
