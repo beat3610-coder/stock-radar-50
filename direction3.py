@@ -350,6 +350,11 @@ def score_directions(trades,*,train_end="2025-11-01",
             mean_brier=round(sum(x["brier"] for x in period_scores
                                  if x["brier"] is not None)
                              /len(period_scores),6)
+            valid_prior=[x["prior_brier"] for x in period_scores
+                         if x["prior_brier"] is not None]
+            mean_prior=(round(sum(valid_prior)/len(valid_prior),6)
+                        if valid_prior else None)
+            weakest_f1=min(x["weakest_f1_pct"] for x in period_scores)
         else:
             mean_f1=_macro_f1(validation)
             worst_f1=mean_f1
