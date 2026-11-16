@@ -35,6 +35,7 @@ jobs:
           python test_research_integrity.py
           python test_regime_direction.py
           python test_nonlinear_direction.py
+          python test_historical_provider.py
           python test_direction3.py
           python test_three_way_ranking.py
           python test_naver_universe.py
@@ -67,4 +68,24 @@ jobs:
         with:
           name: backtest-300-direction
           path: data/backtest-300-direction-20261116.json
+          if-no-files-found: warn
+
+  long-history-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install research dependencies
+        run: pip install -r requirements.txt
+      - name: Compare 850d and 5/10/15-year training windows on fixed stocks
+        run: python -u long_history_comparison.py
+      - name: Archive per-stock history coverage and comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: long-history-research
+          path: data/long-history-comparison.json
           if-no-files-found: warn
