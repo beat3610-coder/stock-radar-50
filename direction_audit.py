@@ -11,6 +11,7 @@ from engine import compute
 from providers import get_prices
 from universe import get_universe
 from research_integrity import certify_all, market_health
+from regime_direction import score_regime_direction
 from direction3 import make_direction_rows,score_directions,HORIZON,BAND_PCT
 from buy_success import attach_buy_labels,score_buy_success
 from adaptive_trade_plans import (
@@ -109,6 +110,8 @@ def run_direction3(per_market=100,previous=None):
 
         metrics=score_directions(rows,eval_end=cutoff,
             search_generation=generation,previous_best=previous_direction)
+        regime_challenger=score_regime_direction(
+            rows,eval_end=cutoff,config=(metrics.get('tuning') or {}).get('chosen'))
         buy_metrics=score_buy_success(buy_rows,eval_end=cutoff,
             search_generation=generation,previous_best=previous_buy)
         adaptive_plans=score_plans(
@@ -120,6 +123,7 @@ def run_direction3(per_market=100,previous=None):
                                   "labels_total":len(rows),
                                   "buy_labels_total":len(buy_rows),
                                   "buy_success":buy_metrics,
+                                  "regime_challenger":regime_challenger,
                                   "adaptive_plans":adaptive_plans,**metrics}
         slim=metrics["windows"]["diagnostic"]
         print("DIRECTION_MARKET "+market+" "+json.dumps({
