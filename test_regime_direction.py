@@ -55,6 +55,22 @@ class RegimeDirectionTest(unittest.TestCase):
         self.assertGreater(sum(x["paired_samples"] for x in out["comparison"].values()),0)
         self.assertGreater(out["regime_expert_predictions"],0)
 
+    def test_calibration_choice_ignores_later_diagnostic_labels(self):
+        regimes=("RANGE","UPTREND","DOWNTREND")
+        labels=("SIDEWAYS","UP","DOWN")
+        rows=[event(i,regime=regimes[i%3],label=labels[i%3])
+              for i in range(550)]
+        params={"train_end":"2024-06-01",
+                "validation_end":"2025-01-01","eval_end":"2026-01-01"}
+        a=score_regime_direction(rows,**params)
+        altered=[{**r,"direction_label":"DOWN" if r["direction_label"]!="DOWN" else "UP"}
+                 if r["signal_date"]>="2025-01-01" else r for r in rows]
+        b=score_regime_direction(altered,**params)
+        self.assertEqual(a["calibrated_selected_on_validation"],
+                         b["calibrated_selected_on_validation"])
+        self.assertIn("calibrated_diagnostic",a)
+        self.assertEqual(a["calibrated_diagnostic"]["samples"],
+                         a["summary"]["pooled"]["diagnostic"]["total"])
     def test_no_unmatured_future_training(self):
         # No labels mature before next signal; neither learner can predict.
         rows=[event(i, maturity=1000) for i in range(150)]
