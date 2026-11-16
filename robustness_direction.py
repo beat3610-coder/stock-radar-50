@@ -78,12 +78,25 @@ def run_two_year_robustness(rows):
             prior_strength=80.0,min_ticker_count=25,
             global_window=2500,ticker_window=180)
         ticker_model=_diagnostic(y,ticker_probs)
+        # Preregistered challenger: strength tapers to zero for sparse tickers.
+        # Fixed candidate; results from either year must not select settings.
+        adaptive_probs=causal_ticker_shrink(
+            all_test,history,rolling_probs,blend=0.3,
+            prior_strength=80.0,min_ticker_count=25,
+            global_window=2500,ticker_window=180,adaptive_blend=True)
+        adaptive_model=_diagnostic(y,adaptive_probs)
         reports[year]={
             "status":"RESEARCH_ONLY",
             "paired_samples":len(y),
             "frozen_config":FROZEN_CONFIG,
             "fixed":fixed,"rolling":rolling,
-            "ticker_shrunk":ticker_model,"periods":periods,
+            "ticker_shrunk":ticker_model,
+            "ticker_adaptive":adaptive_model,"periods":periods,
+            "adaptive_accuracy_change_pp":round(adaptive_model["accuracy_pct"]-rolling["accuracy_pct"],2),
+            "adaptive_macro_f1_change_pp":round(adaptive_model["macro_f1_pct"]-rolling["macro_f1_pct"],2),
+            "adaptive_brier_change":round(adaptive_model["brier"]-rolling["brier"],6),
+            "adaptive_vs_fixed_ticker_accuracy_pp":round(adaptive_model["accuracy_pct"]-ticker_model["accuracy_pct"],2),
+            "adaptive_vs_fixed_ticker_brier":round(adaptive_model["brier"]-ticker_model["brier"],6),
             "ticker_accuracy_change_pp":round(ticker_model["accuracy_pct"]-rolling["accuracy_pct"],2),
             "ticker_macro_f1_change_pp":round(ticker_model["macro_f1_pct"]-rolling["macro_f1_pct"],2),
             "ticker_brier_change":round(ticker_model["brier"]-rolling["brier"],6),
@@ -100,12 +113,17 @@ def run_two_year_robustness(rows):
         v["ticker_macro_f1_change_pp"]>=-0.5 and
         v["paired_samples"]>=1000
         for v in eligible))
+    adaptive_eligible=(len(eligible)==2 and all(
+        v["adaptive_brier_change"]<0 and v["adaptive_accuracy_change_pp"]>=0 and
+        v["adaptive_macro_f1_change_pp"]>=-0.5 and v["paired_samples"]>=1000
+        for v in eligible))
     return {"status":"RESEARCH_ONLY" if len(eligible)==2 else "INCOMPLETE",
             "independent_forward_test":False,
             "frozen_configuration":FROZEN_CONFIG,
             "calendar_windows":reports,
             "ticker_brier_improved_both_years":len(eligible)==2 and all(v["ticker_brier_change"]<0 for v in eligible),
             "ticker_research_gate_passed":ticker_eligible,
+            "adaptive_research_gate_passed":adaptive_eligible,
             "live_approved":False,
             "two_years_probability_improved":len(eligible)==2 and all(
                 v["rolling_better_brier"] for v in eligible),
