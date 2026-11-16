@@ -88,6 +88,8 @@ class NonlinearTests(unittest.TestCase):
         self.assertIn(result["status"],("RESEARCH_ONLY","INCOMPLETE"))
         self.assertFalse(result["independent_forward_test"])
         self.assertEqual(set(result["calendar_windows"]),{"2025","2026"})
+        self.assertFalse(result["live_approved"])
+        self.assertIsInstance(result["ticker_research_gate_passed"],bool)
         for yr in result["calendar_windows"].values():
             if yr["status"]=="RESEARCH_ONLY":
                 self.assertEqual(yr["rolling"]["samples"],yr["ticker_shrunk"]["samples"])
