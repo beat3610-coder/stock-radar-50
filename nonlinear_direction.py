@@ -94,58 +94,127 @@ def _predict(model,rows):
         p[:,int(c)]=raw[:,idx]
     return p
 
+def _causal_probabilities(events, historical, raw_probs, reference_prior,
+                          window=1200, alpha=0.0, temperature=1.0):
+    """Adapt to recent matured labels without inspecting the signal's future.
+
+    A fixed model may be shifted toward the most recent *known* class mix,
+    but the normalization reference is from the model's own training sample.
+    """
+    import numpy as np
+    from collections import deque
+    history=sorted(((r[0]["label_available_date"],y) for r,y in
+                    ((row,label) for row,_,label in historical)))
+    ordered=sorted(range(len(events)), key=lambda i:events[i][0]["signal_date"])
+    mature=0
+    last=deque(maxlen=window)
+    result=np.zeros_like(raw_probs)
+    for ix in ordered:
+        day=events[ix][0]["signal_date"]
+        while mature<len(history) and history[mature][0]<day:
+            last.append(history[mature][1])
+            mature+=1
+        # New known outcomes in the evaluation window, always strictly matured.
+        # They may affect only later predictions, not the model fit itself.
+        counts=np.bincount(list(last),minlength=3).astype(float)+30*reference_prior
+        recent=counts/sum(counts)
+        ratio=np.power(np.maximum(recent,1e-6)/np.maximum(reference_prior,1e-6),alpha)
+        q=np.power(np.maximum(raw_probs[ix],1e-7),1/temperature)*ratio
+        result[ix]=q/q.sum()
+    return result
+
+def _causal_recalibration(events, history, raw_probs, reference_prior,
+                          window=1200, alpha=0.0, temperature=1.0):
+    """Online latest-observed class frequencies. An event never uses its own label."""
+    import numpy as np
+    from collections import deque
+    observations=sorted(
+        [(r[0]["label_available_date"],label) for r,label in
+         [(item,item[2]) for item in history]]
+        +[(r[0]["label_available_date"],label) for r,label in
+          [(item,item[2]) for item in events]])
+    sorted_idxs=sorted(range(len(events)),key=lambda k:events[k][0]["signal_date"])
+    counts=deque(maxlen=window)
+    result=np.zeros_like(raw_probs)
+    j=0
+    for ix in sorted_idxs:
+        day=events[ix][0]["signal_date"]
+        while j<len(observations) and observations[j][0]<day:
+            counts.append(observations[j][1])
+            j+=1
+        if alpha and len(counts)>=60:
+            recent=(np.bincount(counts,minlength=3)+20*reference_prior)
+            recent=recent/recent.sum()
+            shift=np.power(np.maximum(recent,1e-8)/
+                           np.maximum(reference_prior,1e-8),alpha)
+        else:
+            shift=np.ones(3)
+        q=np.power(np.maximum(raw_probs[ix],1e-6),1/temperature)*shift
+        result[ix]=q/q.sum()
+    return result
+
 def run_nonlinear(rows,train_end="2025-11-01",
                   validation_end="2026-04-01",eval_end="2026-11-01"):
     import numpy as np
-    from sklearn.metrics import log_loss
     context=market_features(rows)
     valid=vectors(rows,context)
     pretrain=[r for r in valid if r[0]["label_available_date"]<train_end]
     validation=[r for r in valid if train_end<=r[0]["signal_date"]<validation_end
                 and r[0]["label_available_date"]<validation_end]
-    # The second fit uses only outcomes already observable before the
-    # diagnostic period; no late labels and no diagnostic labels.
     fulltrain=[r for r in valid if r[0]["label_available_date"]<validation_end]
     diagnostic=[r for r in valid if validation_end<=r[0]["signal_date"]<eval_end
                 and r[0]["label_available_date"]<eval_end]
     if min(len(pretrain),len(validation),len(diagnostic))<100:
         return {"status":"INSUFFICIENT","train":len(pretrain),
                 "validation":len(validation),"diagnostic":len(diagnostic)}
-    chosen=None
-    variants=[]
     yv=np.asarray([y for _,_,y in validation],dtype=int)
-    for name in ("histgb","extratrees"):
-        model=_fit(pretrain,name)
-        valprobs=_predict(model,validation)
-        prior=np.bincount([y for _,_,y in pretrain],minlength=3).astype(float)+1
-        prior/=sum(prior)
-        for shrink in (0.0,0.2,0.4,0.6):
-            p=(1-shrink)*valprobs+shrink*prior
-            metrics=_stats(yv,p)
-            # Select on validation only; prefer baseline-beating calibration
-            # and macro F1, then balanced accuracy.
-            variants.append({"model":name,"shrink":shrink,**metrics})
-    valid_prior=np.bincount([y for _,_,y in pretrain],minlength=3).astype(float)+1
-    valid_prior/=sum(valid_prior)
-    baseline_brier=_stats(yv,np.tile(valid_prior,(len(yv),1)))["brier"]
-    # Selection by Brier, with minimum macro-F1. Do not optimize test period.
-    chosen=min(variants,key=lambda r:(r["brier"],-r["macro_f1_pct"]))
+    prior=np.bincount([y for _,_,y in pretrain],minlength=3).astype(float)+1
+    prior/=prior.sum()
+    candidates=[]
+    for kind in ("histgb","extratrees"):
+        model=_fit(pretrain,kind)
+        raw=_predict(model,validation)
+        for window in (800,2500):
+            for alpha in (0.0,0.5,1.0):
+                for temperature in (0.75,1.0,1.25):
+                    p=_causal_recalibration(validation,pretrain,raw,prior,
+                                            window,alpha,temperature)
+                    score=_stats(yv,p)
+                    # Make class collapse explicit in selection.
+                    active=sum(score["predicted"][name]>=20 for name in LABELS)
+                    candidates.append({"model":kind,"window":window,
+                                       "alpha":alpha,"temperature":temperature,
+                                       "active_classes":active,**score})
+    baseline_brier=_stats(yv,np.tile(prior,(len(yv),1)))["brier"]
+    eligible=[r for r in candidates if r["active_classes"]==3]
+    if not eligible:
+        eligible=candidates
+    chosen=min(eligible,key=lambda r:(r["brier"],
+                       -r["macro_f1_pct"],-r["accuracy_pct"]))
     model=_fit(fulltrain,chosen["model"])
-    prior=np.bincount([y for _,_,y in fulltrain],minlength=3).astype(float)+1
-    prior/=sum(prior)
-    pd=_predict(model,diagnostic)
-    pd=(1-chosen["shrink"])*pd+chosen["shrink"]*prior
+    refit_prior=np.bincount([y for _,_,y in fulltrain],minlength=3).astype(float)+1
+    refit_prior/=refit_prior.sum()
+    raw=_predict(model,diagnostic)
+    p=_causal_recalibration(diagnostic,fulltrain,raw,refit_prior,
+                            chosen["window"],chosen["alpha"],chosen["temperature"])
     yd=np.asarray([y for _,_,y in diagnostic],dtype=int)
-    return {"status":"RESEARCH_ONLY",
-            "train_mature":len(pretrain),"validation_count":len(validation),
-            "refit_mature":len(fulltrain),"diagnostic_count":len(diagnostic),
-            "chosen_on_validation":{"model":chosen["model"],"prior_shrink":chosen["shrink"],
-                "validation_accuracy_pct":chosen["accuracy_pct"],
-                "validation_macro_f1_pct":chosen["macro_f1_pct"],
-                "validation_brier":chosen["brier"],
-                "prior_only_brier":baseline_brier},
-            "diagnostic":_stats(yd,pd),
-            "notes":["Strictly mature labels before each training cutoff",
-                     "Market-wide features from same-day signals only",
-                     "Historical diagnostic period was previously inspected",
-                     "This is not an executable trading strategy backtest"]}
+    result=_stats(yd,p)
+    return {"status":"RESEARCH_ONLY","train_mature":len(pretrain),
+            "validation_count":len(validation),"refit_mature":len(fulltrain),
+            "diagnostic_count":len(diagnostic),
+            "chosen_on_validation":{"model":chosen["model"],
+               "recent_mature_window":chosen["window"],
+               "prior_adaptation_strength":chosen["alpha"],
+               "temperature":chosen["temperature"],
+               "validation_accuracy_pct":chosen["accuracy_pct"],
+               "validation_macro_f1_pct":chosen["macro_f1_pct"],
+               "validation_brier":chosen["brier"],
+               "prior_only_brier":baseline_brier,
+               "validation_predicted":chosen["predicted"]},
+            "diagnostic":result,
+            "diagnostic_collapse":any(v<20 for v in result["predicted"].values()),
+            "notes":["Nonlinear model with causal rolling class prior",
+                     "No signal-day label used in any prediction",
+                     "Validation-only hyperparameter choice",
+                     "Historical diagnostic previously inspected; not forward proof",
+                     "Trade profitability not evaluated here"]}
