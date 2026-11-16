@@ -26,7 +26,7 @@ def run():
     report["historical_data_previously_inspected"]=False
     report["markets"]["KR"]["holdout_selected_metrics"]["win_rate_pct"]=20.0
     failed=assess(report)
-    assert any("KR: win rate below 55%" in r for r in failed["reasons"])
+    assert any("KR: win rate below 60%" in r for r in failed["reasons"])
     print("PASS: certification refuses in-sample performance, stale evidence and failed holdouts")
 
 if __name__=="__main__":

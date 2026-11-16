@@ -9,6 +9,7 @@ from math import sqrt
 
 MIN_SYMBOLS_PER_MARKET=100
 MIN_TRADES_PER_MARKET=30
+MIN_WIN_RATE_PCT=60.0
 MIN_PAPER_DAYS=90
 MIN_PAPER_TRADES=60
 MAX_PORTFOLIO_DRAWDOWN_PCT=12.0
@@ -43,7 +44,8 @@ def assess(report, *, portfolio=None, paper=None):
         wr=h.get("win_rate_pct")
         pf=h.get("profit_factor")
         net=h.get("mean_net_pct")
-        if wr is None or wr<55:reasons.append(market+": win rate below 55%")
+        if wr is None or wr<MIN_WIN_RATE_PCT:
+            reasons.append(market+": win rate below 60%")
         if pf is None or pf<1.3:reasons.append(market+": profit factor below 1.30")
         if net is None or net<=0:reasons.append(market+": nonpositive mean net return")
         lower=wilson_lower(round(n*wr/100),n) if wr is not None else None

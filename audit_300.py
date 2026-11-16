@@ -152,7 +152,7 @@ def run(per_market=100):
              "loaded":successes,"date_split":cut,
              "train":metrics(train),"holdout":m,
              "status":"PASS" if (len(items)==per_market and successes==per_market
-                     and m["trades"]>=30 and m["win_rate_pct"]>=55
+                     and m["trades"]>=30 and m["win_rate_pct"]>=60
                      and m["mean_net_pct"]>0 and m["profit_factor"] is not None
                      and m["profit_factor"]>=1.3) else "FAIL_OR_INSUFFICIENT"}
         result["trades"].extend(trades)

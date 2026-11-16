@@ -1,8 +1,8 @@
-# manual_generation_request: 4
+# manual_generation_request: 5
 name: Continuing full-history formula evolution
 on:
   schedule:
-    - cron: "0 0,6,12,18 * * *"
+    - cron: "17 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
@@ -31,11 +31,11 @@ jobs:
         with:
           python-version: "3.11"
       - id: goal
-        name: Continue until every market reaches meaningful 55 percent performance
+        name: Continue until every market reaches meaningful 60 percent performance
         run: |
           REACHED="$(python -c 'import json,pathlib; p=pathlib.Path("data/direction3-rolling-latest.json"); j=json.loads(p.read_text()) if p.exists() else {}; print("true" if j.get("target_quality_all_markets") else "false")')"
           echo "reached=$REACHED" >> "$GITHUB_OUTPUT"
-          echo "Previous generation all-market 55 percent, positive net, PF 1.1, sample and coverage status: $REACHED"
+          echo "Previous generation all-market 60 percent, positive net, PF 1.1, sample and coverage status: $REACHED"
       - name: Install market data and analysis dependencies
         if: steps.goal.outputs.reached != 'true'
         run: pip install -r requirements.txt
@@ -65,4 +65,4 @@ jobs:
           git push
       - name: Record target reached
         if: steps.goal.outputs.reached == 'true'
-        run: echo "All markets reached 55 percent wins with positive net return, profit factor at least 1.1, minimum sample and coverage."
+        run: echo "All markets reached 60 percent wins with positive net return, profit factor at least 1.1, minimum sample and coverage."
