@@ -1,5 +1,5 @@
 import unittest
-from direction3 import _empty_direction_stat, _record_direction, _finalize_direction_stat, _weakest_f1, _candidate_rank
+from direction3 import _empty_direction_stat, _record_direction, _finalize_direction_stat, _weakest_f1, _candidate_rank, score_directions, LABELS, FEATURE_KEYS
 
 class ThreeWayRankingTests(unittest.TestCase):
     def test_sideways_failure_is_not_hidden_by_average(self):
@@ -27,4 +27,18 @@ class ThreeWayRankingTests(unittest.TestCase):
            "whole_history_prior_brier":0.7}
         b={**a,"weakest_class_f1_pct":30,"whole_history_macro_f1_pct":53}
         self.assertGreater(_candidate_rank(b),_candidate_rank(a))
+# A replay must always report apples-to-apples incumbent comparisons.
+class ChampionSelectionTests(unittest.TestCase):
+    def test_previous_champion_is_compared_on_identical_observations(self):
+        from test_direction3 import row
+        training=[row(i,"2025-01-01","2025-01-15",LABELS[i%3]) for i in range(150)]
+        evaluation=[row(i+200,"2025-12-01","2025-12-15",LABELS[i%3]) for i in range(60)]
+        champion={"learning_rate":0.13,"l2":0.06,"prior_mix":0.15,
+                  "sideways_weight":1.0}
+        result=score_directions(training+evaluation,previous_best=champion)
+        tune=result["tuning"]
+        self.assertIsNotNone(tune["previous_champion_same_sample_comparison"])
+        self.assertTrue(tune["previous_champion_same_sample_comparison"]["same_observations"])
+        self.assertIn("previous_champion_retained_by_guard",tune)
+
 if __name__=="__main__":unittest.main()
