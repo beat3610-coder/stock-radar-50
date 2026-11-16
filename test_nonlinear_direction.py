@@ -90,6 +90,11 @@ class NonlinearTests(unittest.TestCase):
         self.assertEqual(set(result["calendar_windows"]),{"2025","2026"})
         self.assertFalse(result["live_approved"])
         self.assertIsInstance(result["ticker_research_gate_passed"],bool)
+        self.assertIsInstance(result["adaptive_research_gate_passed"],bool)
+        for yearly in result["calendar_windows"].values():
+            if yearly["status"]=="RESEARCH_ONLY":
+                self.assertEqual(yearly["ticker_adaptive"]["samples"],
+                                 yearly["ticker_shrunk"]["samples"])
         for yr in result["calendar_windows"].values():
             if yr["status"]=="RESEARCH_ONLY":
                 self.assertEqual(yr["rolling"]["samples"],yr["ticker_shrunk"]["samples"])
@@ -105,6 +110,10 @@ class NonlinearTests(unittest.TestCase):
         changed=[(r,v,(y+1)%3) for r,v,y in data[100:]]
         b=causal_ticker_shrink(changed,data[:100],base,**opts)
         self.assertTrue(np.allclose(a[0],b[0]))
+        adaptive=causal_ticker_shrink(data[100:],data[:100],base,
+                                      adaptive_blend=True,**opts)
+        self.assertTrue(np.allclose(adaptive.sum(axis=1),1))
+        self.assertTrue(np.all(adaptive>=0))
         nohistory=causal_ticker_shrink(data[:5],[],base[:5],**opts)
         self.assertTrue(np.allclose(nohistory,base[:5]))
 
