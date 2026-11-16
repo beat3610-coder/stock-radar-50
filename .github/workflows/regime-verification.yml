@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - "regime_direction.py"
+      - "regime_audit_sample.py"
       - "test_regime_direction.py"
       - "research_integrity.py"
       - "test_research_integrity.py"
@@ -33,3 +34,12 @@ jobs:
           python test_regime_direction.py
           python test_direction3.py
           python test_champion_retention.py
+      - name: Fixed-watchlist historical direction smoke (research only)
+        run: python regime_audit_sample.py
+      - name: Archive raw market smoke results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regime-three-way-smoke
+          path: data/regime-smoke-latest.json
+          if-no-files-found: warn
