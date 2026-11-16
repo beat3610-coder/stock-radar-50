@@ -114,6 +114,9 @@ class NonlinearTests(unittest.TestCase):
                                       adaptive_blend=True,**opts)
         self.assertTrue(np.allclose(adaptive.sum(axis=1),1))
         self.assertTrue(np.all(adaptive>=0))
+        # An adaptive blend never exceeds the configured maximum correction.
+        self.assertLessEqual(float(np.max(np.abs(adaptive-base))),
+                             float(np.max(np.abs(a-base)))+1e-9)
         nohistory=causal_ticker_shrink(data[:5],[],base[:5],**opts)
         self.assertTrue(np.allclose(nohistory,base[:5]))
 
