@@ -15,6 +15,7 @@ from universe import get_universe
 from direction3 import make_direction_rows
 from nonlinear_direction import run_nonlinear
 from rolling_refit_direction import run_refit
+from robustness_direction import run_two_year_robustness
 
 HISTORY_START="2021-01-01"
 RECENT_START="2024-07-20"
@@ -77,6 +78,9 @@ def run(market):
             except Exception as exc:
                 report["comparisons"][key]={"status":"FAILED",
                     "error":str(exc)[:300],"label_count":len(subset)}
+        # Prespecified protocol, no model choice based on either test year.
+        report["two_year_robustness"]=run_two_year_robustness(rows)
+        print("ROBUSTNESS_MARKET",market,json.dumps({"status":report["two_year_robustness"]["status"],"windows":{k:{"accuracy_change_pp":v.get("accuracy_change_pp"),"macro_f1_change_pp":v.get("macro_f1_change_pp"),"brier_change":v.get("brier_change"),"samples":v.get("paired_samples")} for k,v in report["two_year_robustness"]["calendar_windows"].items()}},ensure_ascii=False),flush=True)
         a=report["comparisons"].get("recent_850d",{})
         b=report["comparisons"].get("five_years",{})
         if a.get("status")==b.get("status")=="RESEARCH_ONLY":
