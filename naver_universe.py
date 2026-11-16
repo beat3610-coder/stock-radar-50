@@ -36,14 +36,14 @@ def naver_top100(market,session=None):
                 if anchor is None:
                     continue
                 href=anchor.get("href","")
-                match=re.search(r"(?:\\?|&)code=(\\d{6})(?:&|$)",href)
+                match=re.search(r"code=([0-9]{6})(?:&|$)",href)
                 if not match:
                     continue
                 code=match.group(1)
                 if code in seen:
                     continue
                 name=anchor.get_text(" ",strip=True)
-                if not name or re.search(r"스팩|SPAC|ETF|ETN|우선주|우$|우B$|우C$|우\\d",name,re.I):
+                if not name or re.search(r"스팩|SPAC|ETF|ETN|우선주|우$|우B$|우C$|우[0-9]",name,re.I):
                     continue
                 values=[td.get_text(" ",strip=True).replace(",","") for td in tr.select("td")]
                 # Rank comes from Naver market-cap page, never infer market cap
