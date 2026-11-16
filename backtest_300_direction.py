@@ -12,6 +12,7 @@ from providers import get_prices
 from universe import get_universe
 from direction3 import make_direction_rows
 from regime_direction import score_regime_direction
+from nonlinear_direction import run_nonlinear
 
 def run():
     report={"created_utc":datetime.now(timezone.utc).isoformat(),
@@ -55,6 +56,12 @@ def run():
             outcome["selected_diagnostic"]=comparison["selected_diagnostic"]
             outcome["calibrated_selected_on_validation"]=comparison["calibrated_selected_on_validation"]
             outcome["calibrated_diagnostic"]=comparison["calibrated_diagnostic"]
+            nonlinear=run_nonlinear(rows)
+            outcome["nonlinear"]=nonlinear
+            if nonlinear.get("status")=="RESEARCH_ONLY":
+                d=nonlinear["diagnostic"]
+                prior_model=outcome["direction_diagnostic"] if "direction_diagnostic" in outcome else None
+                print("NONLINEAR_MARKET",market,json.dumps({"chosen":nonlinear["chosen_on_validation"],"diagnostic":d},ensure_ascii=False),flush=True)
             outcome["direction_diagnostic"]={
                 model:{"accuracy_pct":comparison["summary"][model]["diagnostic"]["accuracy_pct"],
                        "brier":comparison["summary"][model]["diagnostic"]["multiclass_brier"],
