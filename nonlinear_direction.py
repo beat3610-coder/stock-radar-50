@@ -19,7 +19,10 @@ def market_features(rows):
         momentum=np.array([float(r["signal_5d_return_pct"]) for r in batch],dtype=float)
         volatility=np.array([float(r["signal_atr_pct"]) for r in batch],dtype=float)
         spread=np.array([float(r["signal_ma20_ma60_pct"]) for r in batch],dtype=float)
-        if len(batch)<3:
+        # Sparse fixed-watchlist studies may have nonaligned 2-session signal
+        # sampling. Even one observed constituent is causal; mark low breadth
+        # as a research limitation rather than dropping the entire session.
+        if not batch:
             continue
         context[day]=(float(np.median(momentum)),
                       float(np.median(volatility)),
