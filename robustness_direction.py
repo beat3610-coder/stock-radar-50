@@ -29,7 +29,7 @@ def _one_fit(train,test):
         prior_blend=FROZEN_CONFIG["prior_blend"])
 
 def _diagnostic(y,p):
-    s=_stats(np.array(y,dtype=int),np.asarray(p))
+    s=_stats(np.asarray(y,dtype=int),np.asarray(p))
     counts=s["predicted"]
     s["three_class_coverage"]=all(v>=10 for v in counts.values())
     return s
@@ -66,7 +66,7 @@ def run_two_year_robustness(rows):
             rolling_probs.extend(list(p))
             periods.append({"start":start,"end":end,"train_mature":len(matured),
                 "samples":len(period),"accuracy_pct":_stats(
-                    [r[2] for r in period],p)["accuracy_pct"]})
+                    np.asarray([r[2] for r in period],dtype=int),p)["accuracy_pct"]})
         fixed=_diagnostic(y,fixed_probs)
         rolling=_diagnostic(y,rolling_probs)
         reports[year]={
