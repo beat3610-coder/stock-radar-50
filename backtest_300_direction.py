@@ -53,6 +53,8 @@ def run():
             outcome["comparison"]=comparison["comparison"]
             outcome["selected_on_validation"]=comparison["selected_on_validation"]
             outcome["selected_diagnostic"]=comparison["selected_diagnostic"]
+            outcome["calibrated_selected_on_validation"]=comparison["calibrated_selected_on_validation"]
+            outcome["calibrated_diagnostic"]=comparison["calibrated_diagnostic"]
             outcome["direction_diagnostic"]={
                 model:{"accuracy_pct":comparison["summary"][model]["diagnostic"]["accuracy_pct"],
                        "brier":comparison["summary"][model]["diagnostic"]["multiclass_brier"],
