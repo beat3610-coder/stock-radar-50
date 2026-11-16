@@ -155,9 +155,14 @@ def run_nonlinear(rows,train_end="2025-11-01",
     prior=np.bincount([y for _,_,y in pretrain],minlength=3).astype(float)+1
     prior/=prior.sum()
     candidates=[]
+    # Train both genuinely different nonlinear learners, then test a
+    # *predeclared* equal-weight ensemble on the very same validation samples.
+    validation_predictions={}
     for kind in ("histgb","extratrees"):
-        model=_fit(pretrain,kind)
-        raw=_predict(model,validation)
+        validation_predictions[kind]=_predict(_fit(pretrain,kind),validation)
+    validation_predictions["ensemble50"]=(
+        validation_predictions["histgb"]+validation_predictions["extratrees"])/2
+    for kind,raw in validation_predictions.items():
         for window in (800,2500):
             for alpha in (0.0,0.5,1.0):
                 for temperature in (0.75,1.0,1.25):
@@ -175,10 +180,13 @@ def run_nonlinear(rows,train_end="2025-11-01",
         eligible=candidates
     chosen=min(eligible,key=lambda r:(r["brier"],
                        -r["macro_f1_pct"],-r["accuracy_pct"]))
-    model=_fit(fulltrain,chosen["model"])
+    if chosen["model"]=="ensemble50":
+        raw=(_predict(_fit(fulltrain,"histgb"),diagnostic)+
+             _predict(_fit(fulltrain,"extratrees"),diagnostic))/2
+    else:
+        raw=_predict(_fit(fulltrain,chosen["model"]),diagnostic)
     refit_prior=np.bincount([y for _,_,y in fulltrain],minlength=3).astype(float)+1
     refit_prior/=refit_prior.sum()
-    raw=_predict(model,diagnostic)
     p=_causal_recalibration(diagnostic,fulltrain,raw,refit_prior,
                             chosen["window"],chosen["alpha"],chosen["temperature"],
                             prior_blend=chosen["prior_blend"])
@@ -203,6 +211,36 @@ def run_nonlinear(rows,train_end="2025-11-01",
                 if count else None,
             "mean_predicted_confidence_pct":round(100*float(confidence[keep].mean()),2)
                 if count else None}
+    # Coverage is explicit: abstaining can improve conditional precision at
+    # the cost of missing most opportunities. Threshold fixed on validation.
+    val_raw=validation_predictions[chosen["model"]]
+    val_p=_causal_recalibration(validation,pretrain,val_raw,prior,
+        chosen["window"],chosen["alpha"],chosen["temperature"],
+        prior_blend=chosen["prior_blend"])
+    val_pred=np.argmax(val_p,axis=1)
+    val_conf=np.max(val_p,axis=1)
+    candidates_cutoffs=[]
+    for cutoff in (0.4,0.45,0.5,0.55,0.6):
+        mask=val_conf>=cutoff
+        coverage=float(mask.mean())
+        accuracy=float(np.mean(val_pred[mask]==yv[mask])) if mask.any() else 0.0
+        if coverage>=0.10 and int(mask.sum())>=100:
+            candidates_cutoffs.append((cutoff,coverage,accuracy))
+    passing=[x for x in candidates_cutoffs if x[2]>=0.55]
+    # Never advertise an unvalidated selective-success rate.
+    chosen_cutoff=min(passing,key=lambda t:(-t[1],-t[2]))[0] if passing else None
+    if chosen_cutoff is not None:
+        keep=confidence>=chosen_cutoff
+        selected=int(keep.sum())
+        selective={"threshold":chosen_cutoff,"signals":selected,
+                   "coverage_pct":round(100*selected/len(yd),2),
+                   "conditional_accuracy_pct":round(100*float(
+                       np.mean(predicted[keep]==yd[keep])),2) if selected else None,
+                   "validation_target_met":True}
+    else:
+        selective={"threshold":None,"signals":0,"coverage_pct":0.0,
+                   "conditional_accuracy_pct":None,"validation_target_met":False}
+    result["selective_signal"]=selective
     ticker_metrics={}
     for ticker in sorted({item[0]["ticker"] for item in diagnostic}):
         indices=[i for i,item in enumerate(diagnostic) if item[0]["ticker"]==ticker]
