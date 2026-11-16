@@ -49,6 +49,8 @@ def run():
             comparison=score_regime_direction(rows,eval_end="2026-11-01")
             outcome["status"]="HISTORICAL_RESEARCH_ONLY"
             outcome["comparison"]=comparison["comparison"]
+            outcome["selected_on_validation"]=comparison["selected_on_validation"]
+            outcome["selected_diagnostic"]=comparison["selected_diagnostic"]
             outcome["direction_diagnostic"]={
                 model:{"accuracy_pct":comparison["summary"][model]["diagnostic"]["accuracy_pct"],
                        "brier":comparison["summary"][model]["diagnostic"]["multiclass_brier"],
