@@ -3,6 +3,7 @@ import unittest
 from datetime import date,timedelta
 from test_regime_direction import event
 from nonlinear_direction import market_features,vectors,run_nonlinear,_causal_recalibration
+from rolling_refit_direction import run_refit
 
 class NonlinearTests(unittest.TestCase):
     def samples(self):
@@ -64,6 +65,19 @@ class NonlinearTests(unittest.TestCase):
         b=_causal_recalibration(changed,data[30:],probs,ref,
                                 alpha=0.5,prior_blend=0.5)
         self.assertTrue(np.allclose(a[0],b[0]))
+    def test_rolling_refit_uses_only_matured_labels(self):
+        rows=self.samples()
+        params={"model":"extratrees","recent_mature_window":800,
+                "prior_adaptation_strength":0.5,"temperature":1.0,"prior_blend":0.25}
+        a=run_refit(rows,params,eval_end="2026-11-01")
+        self.assertEqual(a["status"],"RESEARCH_ONLY")
+        changed=[{**r,"direction_label":"DOWN"} if r["signal_date"]>="2026-09-01"
+                 else r for r in rows]
+        b=run_refit(changed,params,eval_end="2026-11-01")
+        # Earlier periods cannot change when late outcomes are modified.
+        self.assertEqual(a["periods"][0]["diagnostic"],
+                         b["periods"][0]["diagnostic"])
+        self.assertGreater(a["samples"],0)
     def test_three_class_probabilities_have_finite_metrics(self):
         rows=self.samples()
         result=run_nonlinear(rows,train_end="2024-09-01",
