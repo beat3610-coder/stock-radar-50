@@ -204,6 +204,11 @@ def run_nonlinear(rows,train_end="2025-11-01",
                             chosen["window"],chosen["alpha"],chosen["temperature"])
     yd=np.asarray([y for _,_,y in diagnostic],dtype=int)
     result=_stats(yd,p)
+    ticker_metrics={}
+    for ticker in sorted({item[0]["ticker"] for item in diagnostic}):
+        indices=[i for i,item in enumerate(diagnostic) if item[0]["ticker"]==ticker]
+        if indices:
+            ticker_metrics[ticker]=_stats(yd[indices],p[indices])
     return {"status":"RESEARCH_ONLY","train_mature":len(pretrain),
             "validation_count":len(validation),"refit_mature":len(fulltrain),
             "diagnostic_count":len(diagnostic),
@@ -216,7 +221,7 @@ def run_nonlinear(rows,train_end="2025-11-01",
                "validation_brier":chosen["brier"],
                "prior_only_brier":baseline_brier,
                "validation_predicted":chosen["predicted"]},
-            "diagnostic":result,
+            "diagnostic":result,"per_ticker_diagnostic":ticker_metrics,
             "diagnostic_collapse":any(v<20 for v in result["predicted"].values()),
             "notes":["Nonlinear model with causal rolling class prior",
                      "No signal-day label used in any prediction",
