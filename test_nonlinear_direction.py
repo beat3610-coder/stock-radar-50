@@ -69,11 +69,14 @@ class NonlinearTests(unittest.TestCase):
         rows=self.samples()
         params={"model":"extratrees","recent_mature_window":800,
                 "prior_adaptation_strength":0.5,"temperature":1.0,"prior_blend":0.25}
-        a=run_refit(rows,params,eval_end="2026-11-01")
+        kwargs=dict(eval_end="2026-04-01",
+                    starts=("2025-03-01","2025-06-01","2025-09-01"),
+                    ends=("2025-06-01","2025-09-01","2026-04-01"))
+        a=run_refit(rows,params,**kwargs)
         self.assertEqual(a["status"],"RESEARCH_ONLY")
-        changed=[{**r,"direction_label":"DOWN"} if r["signal_date"]>="2026-09-01"
+        changed=[{**r,"direction_label":"DOWN"} if r["signal_date"]>="2025-09-01"
                  else r for r in rows]
-        b=run_refit(changed,params,eval_end="2026-11-01")
+        b=run_refit(changed,params,**kwargs)
         # Earlier periods cannot change when late outcomes are modified.
         self.assertEqual(a["periods"][0]["diagnostic"],
                          b["periods"][0]["diagnostic"])
