@@ -375,12 +375,30 @@ def score_directions(trades,*,train_end="2025-11-01",
             "validation_accuracy_pct":validation.get("accuracy_pct"),
             "validation_brier":validation.get("multiclass_brier"),
             "validation_samples":validation.get("total",0)})
-    eligible=[r for r in scored if r["period_count"]>=2]
+    # Candidate selection must NOT inspect diagnostic (post-validation) outcomes.
+    # Compute ranking on pre-diagnostic validation only. This remains historical
+    # hyperparameter search, not independent evidence, but avoids direct holdout tuning.
+    for item in scored:
+        val=item["report"]["windows"]["validation"]
+        item["selection_weakest_f1_pct"]=_weakest_f1(val)
+        item["selection_macro_f1_pct"]=_macro_f1(val)
+        item["selection_brier"]=val.get("multiclass_brier")
+        item["selection_prior_brier"]=val.get("prior_brier")
+        item["selection_samples"]=val.get("total",0)
+    eligible=[r for r in scored if r["selection_samples"]>=100]
     if not eligible:
-        eligible=[r for r in scored if r["validation_samples"]>=30]
+        eligible=[r for r in scored if r["selection_samples"]>=30]
     if not eligible:
         eligible=scored
-    chosen=max(eligible,key=_candidate_rank)
+    def validation_rank(item):
+        val_brier=item["selection_brier"]
+        prior=item["selection_prior_brier"]
+        skill=(val_brier is not None and prior is not None and val_brier<prior)
+        # Require honest calibration first; then balanced directional skill.
+        return (int(skill),item["selection_weakest_f1_pct"],
+                item["selection_macro_f1_pct"],
+                -(val_brier if val_brier is not None else float("inf")))
+    chosen=max(eligible,key=validation_rank)
     # Re-score the preceding champion on THIS run's exact same observations.
     # Comparing the old report's percentages directly to this generation is
     # invalid when the universe, periods or sample counts have changed.
@@ -402,10 +420,10 @@ def score_directions(trades,*,train_end="2025-11-01",
         # repeatedly inspected historical sample. New models must improve
         # worst-class F1 by >=0.5 pp, not worsen macro-F1 by >0.5 pp,
         # and not worsen probability calibration.
-        weak_gain=challenger_row["weakest_class_f1_pct"]-previous_row["weakest_class_f1_pct"]
-        macro_drop=previous_row["whole_history_macro_f1_pct"]-challenger_row["whole_history_macro_f1_pct"]
-        candidate_brier=challenger_row["whole_history_brier"]
-        prior_brier=previous_row["whole_history_brier"]
+        weak_gain=challenger_row["selection_weakest_f1_pct"]-previous_row["selection_weakest_f1_pct"]
+        macro_drop=previous_row["selection_macro_f1_pct"]-challenger_row["selection_macro_f1_pct"]
+        candidate_brier=challenger_row["selection_brier"]
+        prior_brier=previous_row["selection_brier"]
         if (challenger_row is not previous_row and
             (weak_gain < 0.5 or macro_drop > 0.5 or
              candidate_brier is None or prior_brier is None or
@@ -418,8 +436,8 @@ def score_directions(trades,*,train_end="2025-11-01",
         "previous_champion_retained_by_guard":incumbent_retained,
         "promotion_rule":"최약 방향 F1 >=0.5%p 개선, 전체 Macro F1 하락 <=0.5%p, Brier 비악화; 동일 데이터 재평가",
         "generation":int(search_generation),
-        "selection_window":"완료된 전체 과거기간의 반기별 순차평가",
-        "selection_metric":"확률 오차의 기준모델 대비 개선 우선, 세 방향 중 최약 F1 강화, Macro F1·기간별 강건성 순 비교",
+        "selection_window":"검증 종료일 이전(validation)만 사용; 이후 diagnostic은 점수 비교에 사용하지 않음",
+        "selection_metric":"검증기간 Brier 기준모델 개선 우선, 최약 방향 F1 및 Macro F1 비교",
         "chosen":chosen["candidate"],
         "previous_best":previous_best,
         "chosen_period_scores":chosen["period_scores"],
@@ -432,10 +450,10 @@ def score_directions(trades,*,train_end="2025-11-01",
         "model_brier":chosen["whole_history_brier"],
         "baseline_brier_beat":_candidate_rank(chosen)[0]==1,
         "period_count":chosen["period_count"],
-        "whole_history_used_for_selection":True,
-        "diagnostic_used_for_selection":True,
+        "whole_history_used_for_selection":False,
+        "diagnostic_used_for_selection":False,
         "independent_holdout":False,
-        "warning":"전체 과거 구간을 수식 선택에 사용한 연구 적합도입니다. 미래 성공률 보장이 아닙니다."
+        "warning":"과거 검증구간만 후보 선택에 사용합니다. 반복적으로 살펴본 이후 진단기간은 독립 미래 검증이 아닙니다."
     }
-    result["note"]="전 기간을 반기별로 순환 학습·비교하며 미달 결과도 그대로 기록합니다."
+    result["note"]="모델 선택은 검증기간만 사용하고 이후 진단기간은 관찰용으로 유지합니다."
     return result
