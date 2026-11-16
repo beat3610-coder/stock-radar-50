@@ -89,3 +89,29 @@ jobs:
           name: long-history-research
           path: data/long-history-comparison.json
           if-no-files-found: warn
+
+  korean-100-stock-long-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      matrix:
+        market: ["KR", "KQ"]
+    env:
+      STOCK_LONG_MARKET: ${{ matrix.market }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Compare 100 stocks using identical diagnostic observations
+        run: python -u full_korean_long_backtest.py
+      - name: Save complete market results even when errors reported
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-korean-long-${{ matrix.market }}
+          path: data/full-long-${{ matrix.market }}-20261116.json
+          if-no-files-found: warn
