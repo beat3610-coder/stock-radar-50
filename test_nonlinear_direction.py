@@ -6,6 +6,7 @@ from nonlinear_direction import market_features,vectors,run_nonlinear,_causal_re
 from rolling_refit_direction import run_refit
 from robustness_direction import run_two_year_robustness
 from ticker_probability import causal_ticker_shrink
+from price_volume_features import interact_rows
 
 class NonlinearTests(unittest.TestCase):
     def samples(self):
@@ -90,6 +91,11 @@ class NonlinearTests(unittest.TestCase):
         self.assertEqual(set(result["calendar_windows"]),{"2025","2026"})
         self.assertFalse(result["live_approved"])
         self.assertIsInstance(result["ticker_research_gate_passed"],bool)
+        self.assertFalse(result["live_approved"])
+        self.assertIsInstance(result["combo_research_gate_passed"],bool)
+        for period in result["calendar_windows"].values():
+            if period["status"]=="RESEARCH_ONLY":
+                self.assertEqual(period["ticker_shrunk"]["samples"],period["combo"]["samples"])
         for yr in result["calendar_windows"].values():
             if yr["status"]=="RESEARCH_ONLY":
                 self.assertEqual(yr["rolling"]["samples"],yr["ticker_shrunk"]["samples"])
@@ -107,6 +113,16 @@ class NonlinearTests(unittest.TestCase):
         self.assertTrue(np.allclose(a[0],b[0]))
         nohistory=causal_ticker_shrink(data[:5],[],base[:5],**opts)
         self.assertTrue(np.allclose(nohistory,base[:5]))
+
+    def test_price_volume_interactions_remain_finite_and_label_blind(self):
+        import numpy as np
+        original=vectors(self.samples()[:100],market_features(self.samples()[:100]))
+        extra=interact_rows(original)
+        self.assertEqual(len(extra[0][1]),len(original[0][1])+8)
+        self.assertTrue(np.isfinite(extra[0][1]).all())
+        changed=[(row,x,(label+1)%3) for row,x,label in original]
+        new=interact_rows(changed)
+        self.assertEqual(extra[0][1],new[0][1])
 
     def test_three_class_probabilities_have_finite_metrics(self):
         rows=self.samples()
