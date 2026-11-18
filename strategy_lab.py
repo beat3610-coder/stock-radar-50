@@ -24,6 +24,7 @@ from empirical_edge import walkforward_filter, walkforward_regime_filter
 from predictive_model import walkforward_model_filter, walkforward_model_policies, POLICIES
 from three_round_trade_model import three_round_audit
 from profit_selector51 import discover as discover_51
+from regime_selector60 import report as regime60_report
 from broad_candidates import broad_candidates_from_computed
 from online_edge import score_stream, POLICIES as ONLINE_POLICIES
 
@@ -234,6 +235,8 @@ def run(per_market=20):
         # never choose a live model using already-inspected historical outcomes.
         three_round_report=three_round_audit(broad_training_pool,market)
         target51_report=discover_51(broad_training_pool,market)
+        target60_report=regime60_report(broad_training_pool,market)
+        print('LAB_TARGET60 '+market+' '+json.dumps(target60_report,ensure_ascii=False),flush=True)
         print('LAB_TARGET51 '+market+' '+json.dumps(target51_report,ensure_ascii=False),flush=True)
         print('LAB_THREE_ROUNDS '+market+' '+json.dumps(three_round_report,ensure_ascii=False),flush=True)
         broad_policy_trades,broad_model_report=walkforward_model_policies(broad_training_pool)
@@ -331,6 +334,7 @@ def run(per_market=20):
             "edge_calibration":edge_diagnostics,
             "three_round_probability":three_round_report,
             "target51_research":target51_report,
+            "target60_regime":target60_report,
             "evaluation_policy":"diagnostic_heldout_even_if_validation_rejected; never live approve",
             "selected_for_diagnostic":selected,
             "rejected_candidate":leader if not accepted else None,
