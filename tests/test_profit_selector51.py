@@ -2,12 +2,12 @@ import unittest
 from datetime import date,timedelta
 from profit_selector51 import discover, obey
 
-def example(n=560, future_flip=False):
+def example(n=900, future_flip=False):
  out=[]
  for i in range(n):
   day=date(2024,1,1)+timedelta(days=i)
   good=i%4!=0
-  if future_flip and i>400:good=not good
+  if future_flip and i>780:good=not good
   out.append({"market":"KR","signal_date":day.isoformat(),
    "exit_date":(day+timedelta(days=1)).isoformat(),
    "ticker":"A","net_pct":2.0 if good else -1.0,
