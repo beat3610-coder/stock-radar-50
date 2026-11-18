@@ -127,6 +127,25 @@ if strategy_report.exists():
             else:
                 st.info("3회 비교 백테스트 결과가 아직 생성되지 않았습니다. 검증 전 수익률이나 예측 정확도를 표시하지 않습니다.")
             st.warning("학습·검증·진단 구간은 이미 과거 개발 과정에서 노출된 자료입니다. 진단 기간의 우수한 모델을 자동으로 실전 채택하지 않습니다.")
+        with st.expander("🎯 매수 성공률 60% 목표 · 국면별 실측 검증", expanded=False):
+            records=[]
+            for m,label in (("KR","코스피"),("KQ","코스닥"),("US","나스닥")):
+                result=(lab.get("markets",{}).get(m,{}) or {}).get("target60_regime") or {}
+                chosen=result.get("selected_policy")
+                for period,period_label in (("train","학습"),("validation","검증"),("diagnostic","과거 진단")):
+                    info=((result.get("by_policy") or {}).get(chosen or "base") or {}).get(period) or {}
+                    records.append({"시장":label,"기간":period_label,
+                        "선택 정책":chosen or "선택 실패",
+                        "매수 건수":info.get("n"),
+                        "매수 성공률(%)":info.get("win_pct"),
+                        "거래당 순손익(%)":info.get("mean_net_pct"),
+                        "매수 비중(%)":info.get("coverage_pct"),
+                        "연구 판정":result.get("status","검증 전")})
+            if any(row["매수 성공률(%)"] is not None for row in records):
+                st.dataframe(pd.DataFrame(records).fillna("미산정"),hide_index=True,use_container_width=True)
+            else:
+                st.info("60% 모델의 실제 역사적 성능 평가 결과가 없습니다.")
+            st.caption("과거 진단기간 수치로 모델을 선택하지 않으며, 수익률 개선이 확인되기 전까지 운영 매수 신호는 유지됩니다.")
         with st.expander("📊 시장별 매매전략 비교 · 100종목 역사적 평가"):
             st.caption("고점 돌파·눌림목 반등·MACD 재상승 전략을 과거 자료에서 개발·검증·평가로 나누어 비교합니다. 이미 검토한 과거 기간이므로 실전 독립 검증은 아닙니다.")
             table=[]
