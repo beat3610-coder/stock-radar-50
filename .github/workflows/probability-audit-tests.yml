@@ -55,3 +55,22 @@ jobs:
             three-round-results.json
             three-round-research.log
           if-no-files-found: warn
+      - name: Enforce 300-stock data integrity
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("data/strategy-lab-latest.json")
+          if not p.exists():
+              raise SystemExit("FAILED: research report missing")
+          r=json.loads(p.read_text(encoding="utf-8"))
+          for key in ("KR","KQ","US"):
+              row=r.get("markets",{}).get(key,{})
+              count=row.get("loaded",0)
+              if count<100:
+                  print(f"FAILED {key}: {count}/100 OHLCV price histories available")
+          if r.get("data_integrity_status")!="PASS":
+              raise SystemExit("FAILED: data integrity; partial research must not count as complete")
+          print("DATA_INTEGRITY_PASS 300/300")
+          PY
