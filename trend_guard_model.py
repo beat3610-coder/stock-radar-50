@@ -11,7 +11,7 @@ from feature_selector60 import _clean
 from profit_selector51 import TRAIN, VALID, END, stats
 
 GUARDS={
- "trend_basic": lambda r: (r["signal_ma20_ma60_pct"]>0 and
+ "trend_relaxed": lambda r: (r["signal_ma20_ma60_pct"]>=-0.5 and\n    40<=r["signal_rsi"]<=75 and r["signal_adx"]>=14 and\n    r["signal_5d_return_pct"]>=-5),\n "trend_basic": lambda r: (r["signal_ma20_ma60_pct"]>0 and
     43<=r["signal_rsi"]<=72 and r["signal_adx"]>=18 and
     r["signal_5d_return_pct"]>-3),
  "trend_quality": lambda r: (r["signal_ma20_ma60_pct"]>=1 and
@@ -57,6 +57,8 @@ def audit(trades,market=None):
             return report
         folds.append((fit,check))
     comparisons=[]
+    rejection_counts=Counter()
+    candidate_diagnostics=[]
     for kind in ("ridge","forest"):
         trained=[(_fit(fit,kind),check) for fit,check in folds]
         if any(m is None for m,_ in trained):continue
@@ -66,13 +68,24 @@ def audit(trades,market=None):
             for guard in GUARDS:
                 selected=[r for r in plain if GUARDS[guard](r)]
                 scores=stats(selected)
-                if scores["n"]<25 or scores["mean_net_pct"]<=0:continue
+                reason = ("too_few_trades" if scores["n"]<25 else
+                          "nonpositive_net" if scores["mean_net_pct"]<=0 else
+                          "no_improvement" if plain_s["n"]>0 and
+                          (scores["win_pct"]<=plain_s["win_pct"] or
+                           scores["mean_net_pct"]<=plain_s["mean_net_pct"]) else "eligible")
+                rejection_counts[reason]+=1
+                candidate_diagnostics.append({"model":kind,"policy":policy,
+                    "guard":guard,"reason":reason,"development":scores,
+                    "unguarded":plain_s})
+                if reason!="eligible":continue
                 # Guard must improve training win fraction and mean net return
                 # vs same unguarded model and preserve enough opportunity.
                 if plain_s["n"]>0 and (scores["win_pct"]<=plain_s["win_pct"]
                    or scores["mean_net_pct"]<=plain_s["mean_net_pct"]):continue
                 reward=scores["mean_net_pct"]-1.5/np.sqrt(scores["n"])
                 comparisons.append((reward,scores["n"],kind,policy,guard,scores,plain_s))
+    report["development_rejection_counts"]=dict(rejection_counts)
+    report["development_candidates"]=candidate_diagnostics
     if not comparisons:
         report["status"]="NO_TRAINING_EDGE"
         return report
