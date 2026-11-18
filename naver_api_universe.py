@@ -36,11 +36,19 @@ def naver_api_top100(market,session=None):
         if not items:break
         for item in items:
             if not isinstance(item,dict):continue
-            code=str(item.get("itemCode") or item.get("code") or item.get("stockCode") or "").strip()
-            name=str(item.get("stockName") or item.get("itemName") or item.get("name") or "").strip()
+            code=str(item.get("itemcode") or item.get("itemCode") or item.get("code") or item.get("stockCode") or "").strip()
+            name=str(item.get("itemname") or item.get("stockName") or item.get("itemName") or item.get("name") or "").strip()
             classification=str(item.get("marketType") or item.get("market") or "").upper()
-            if classification and target not in classification and classification not in (("STK",) if market=="KR" else ("KSQ",)):
+            sosok=item.get("sosok")
+            if sosok is not None:
+                if str(sosok)!=("0" if market=="KR" else "1"):
+                    problems.append("sosok mismatch")
+                    continue
+            elif classification and target not in classification and classification not in (("STK",) if market=="KR" else ("KSQ",)):
                 problems.append("mixed-market item")
+                continue
+            elif not classification:
+                problems.append("missing market classifier")
                 continue
             if (not re.fullmatch(r"[0-9]{6}",code) or not name or code in seen or
                 re.search(r"스팩|SPAC|ETF|ETN|우선주|우$|우B$|우C$|우[0-9]",name,re.I)):
