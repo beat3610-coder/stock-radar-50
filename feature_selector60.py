@@ -70,8 +70,8 @@ def audit(trades,market=None):
           "diagnostic":stats([x[0] for x in diagnostic])},
         "selected":None}
     days=sorted(set(r[0]["signal_date"] for r in dev))
-    if len(days)<65 or len(dev)<125:return result
-    cuts=[days[int(len(days)*k)] for k in (.52,.75)]
+    if len(days)<18 or len(dev)<125:return result
+    cuts=[days[int(len(days)*k)] for k in (.40,.70)]
     folds=[]
     for i,cut in enumerate(cuts):
         until=cuts[i+1] if i+1<len(cuts) else TRAIN
