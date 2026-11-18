@@ -281,25 +281,37 @@ def get_universe():
     except Exception as e:
         kr_error=str(e)
         try:
-            from naver_universe import naver_top100
-            kr,kr_source=naver_top100("KR")
+            from naver_api_universe import naver_api_top100
+            kr,kr_source=naver_api_top100("KR")
             kr_source+=" / FDR 오류: "+kr_error[:85]
             kr_error=None
         except Exception as fallback_exc:
-            kr=[];kr_source="시총 상위 100종목 조회 실패 (FDR/Naver)"
-            kr_error=kr_error+" | Naver: "+str(fallback_exc)
+            try:
+                from naver_universe import naver_top100
+                kr,kr_source=naver_top100("KR")
+                kr_source+=" / API 오류: "+str(fallback_exc)[:85]
+                kr_error=None
+            except Exception as legacy_exc:
+                kr=[];kr_source="시총 상위 100종목 조회 실패 (FDR/Naver API/HTML)"
+                kr_error=kr_error+" | Naver API: "+str(fallback_exc)+" | HTML: "+str(legacy_exc)
     kq_error=None
     try: kq,kq_source=kosdaq_top100()
     except Exception as e:
         kq_error=str(e)
         try:
-            from naver_universe import naver_top100
-            kq,kq_source=naver_top100("KQ")
+            from naver_api_universe import naver_api_top100
+            kq,kq_source=naver_api_top100("KQ")
             kq_source+=" / FDR 오류: "+kq_error[:85]
             kq_error=None
         except Exception as fallback_exc:
-            kq=[];kq_source="코스닥 상위 100종목 조회 실패 (FDR/Naver)"
-            kq_error=kq_error+" | Naver: "+str(fallback_exc)
+            try:
+                from naver_universe import naver_top100
+                kq,kq_source=naver_top100("KQ")
+                kq_source+=" / API 오류: "+str(fallback_exc)[:85]
+                kq_error=None
+            except Exception as legacy_exc:
+                kq=[];kq_source="코스닥 상위 100종목 조회 실패 (FDR/Naver API/HTML)"
+                kq_error=kq_error+" | Naver API: "+str(fallback_exc)+" | HTML: "+str(legacy_exc)
     us,us_source=nasdaq_top100()
     try:
         us,cap_source=sort_nasdaq_by_market_cap(us)
