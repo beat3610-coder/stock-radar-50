@@ -22,6 +22,13 @@ from portfolio_audit import replay
 from trade_execution import entry_quality
 from empirical_edge import walkforward_filter, walkforward_regime_filter
 from predictive_model import walkforward_model_filter, walkforward_model_policies, POLICIES
+from three_round_trade_model import three_round_audit
+from profit_selector51 import discover as discover_51
+from regime_selector60 import report as regime60_report
+from feature_selector60 import audit as feature60_audit
+from net_edge_model import audit as net_edge_audit
+from trend_guard_model import audit as trend_guard_audit
+from market_breadth_gate import audit as market_breadth_audit
 from broad_candidates import broad_candidates_from_computed
 from online_edge import score_stream, POLICIES as ONLINE_POLICIES
 
@@ -187,6 +194,13 @@ def run(per_market=20):
     for market in ("KR","KQ","US"):
         items=[x for x in u[market] if x[0] not in
                ({"KR":{"472150","0262B0"},"KQ":set(),"US":{"SOXL"}}[market])][:per_market]
+        if len(items)<per_market:
+            res.setdefault("input_failures",{})[market]={
+                "requested":per_market,"available":len(items),
+                "error":u.get(market+"_error"),
+                "source":u.get(market+"_source"),
+                "status":"INSUFFICIENT_UNIVERSE_NOT_A_BACKTEST"}
+            print("LAB_INPUT_FAILURE "+market+" "+json.dumps(res["input_failures"][market],ensure_ascii=False),flush=True)
         frames={}
         variants={k:[] for k in PARAMS}
         broad_training_pool=[]
@@ -203,6 +217,11 @@ def run(per_market=20):
                 failures.append({"ticker":ticker,"error":str(exc)[:160]})
             if idx%5==0:
                 print(f"LAB_PROGRESS {market} {idx}/{len(items)} loaded={len(frames)}",flush=True)
+        if len(frames)<per_market:
+            res.setdefault("price_failures",{})[market]={
+                "requested":per_market,"loaded":len(frames),
+                "errors":failures[:5],"status":"INCOMPLETE_PRICE_DATA_NO_PERFORMANCE_CLAIM"}
+            print("LAB_PRICE_FAILURE "+market+" "+json.dumps(res["price_failures"][market],ensure_ascii=False),flush=True)
         # Compare the original three technical variants with prospective,
         # cost-adjusted probability/expectancy filters. Every calibration uses
         # ONLY prior trades that were fully exited before its signal date.
@@ -216,6 +235,22 @@ def run(per_market=20):
             variants[original+"_ml_edge"]=ml_filtered
             edge_diagnostics[original]={**report,"regime_filter":high_confidence_report,
                                         "predictive_model":ml_report}
+        # Three distinct prequential probability challengers; log diagnostics,
+        # never choose a live model using already-inspected historical outcomes.
+        three_round_report=three_round_audit(broad_training_pool,market)
+        target51_report=discover_51(broad_training_pool,market)
+        target60_report=regime60_report(broad_training_pool,market)
+        feature60_report=feature60_audit(broad_training_pool,market)
+        net_edge_report=net_edge_audit(broad_training_pool,market)
+        trend_guard_report=trend_guard_audit(broad_training_pool,market)
+        market_breadth_report=market_breadth_audit(broad_training_pool,frames,market)
+        print('LAB_MARKET_BREADTH '+market+' '+json.dumps(market_breadth_report,ensure_ascii=False),flush=True)
+        print('LAB_TREND_GUARD '+market+' '+json.dumps(trend_guard_report,ensure_ascii=False),flush=True)
+        print('LAB_NET_EDGE '+market+' '+json.dumps(net_edge_report,ensure_ascii=False),flush=True)
+        print('LAB_FEATURE60 '+market+' '+json.dumps(feature60_report,ensure_ascii=False),flush=True)
+        print('LAB_TARGET60 '+market+' '+json.dumps(target60_report,ensure_ascii=False),flush=True)
+        print('LAB_TARGET51 '+market+' '+json.dumps(target51_report,ensure_ascii=False),flush=True)
+        print('LAB_THREE_ROUNDS '+market+' '+json.dumps(three_round_report,ensure_ascii=False),flush=True)
         broad_policy_trades,broad_model_report=walkforward_model_policies(broad_training_pool)
         for policy_name,policy_trades in broad_policy_trades.items():
             variants["broad_market_ml_"+policy_name]=policy_trades
@@ -309,6 +344,13 @@ def run(per_market=20):
             "training_selected":leader,"training_scores":scores,
             "validation_accepted":accepted,
             "edge_calibration":edge_diagnostics,
+            "three_round_probability":three_round_report,
+            "target51_research":target51_report,
+            "target60_regime":target60_report,
+            "target60_features":feature60_report,
+            "net_edge_research":net_edge_report,
+            "trend_guard_research":trend_guard_report,
+            "market_breadth_research":market_breadth_report,
             "evaluation_policy":"diagnostic_heldout_even_if_validation_rejected; never live approve",
             "selected_for_diagnostic":selected,
             "rejected_candidate":leader if not accepted else None,
@@ -330,6 +372,7 @@ def run(per_market=20):
             "stress_return":stress.get("total_return_pct"),
             "loaded":len(frames)},default=str),flush=True)
     res["release_status"]="NOT_LIVE_APPROVED"
+    res["data_integrity_status"]=("FAIL" if res.get("input_failures") or res.get("price_failures") else "PASS")
     return res
 
 if __name__=="__main__":
