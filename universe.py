@@ -275,7 +275,7 @@ def sort_nasdaq_by_market_cap(rows):
     ranked=sorted(rows,key=lambda x:(-float(caps.get(x[0],0)),x[0]))
     return ranked,f"NASDAQ 시총순 {known}/{len(rows)}개 확인 / 조회일 {dt.date.today().isoformat()} (미확인 종목 후순위)"
 
-def get_universe():
+def get_universe(include_us=True):
     kr_error=None
     try: kr,kr_source=kospi_top100()
     except Exception as e:
@@ -312,14 +312,16 @@ def get_universe():
             except Exception as legacy_exc:
                 kq=[];kq_source="코스닥 상위 100종목 조회 실패 (FDR/Naver API/HTML)"
                 kq_error=kq_error+" | Naver API: "+str(fallback_exc)+" | HTML: "+str(legacy_exc)
-    us,us_source=nasdaq_top100()
-    try:
-        us,cap_source=sort_nasdaq_by_market_cap(us)
-        us_source=us_source+" | "+cap_source
-        us_cap_sorted=True
-    except Exception as e:
-        us_source=us_source+" | 시총순 확인 불가: "+str(e)[:135]
-        us_cap_sorted=False
+    us=[];us_source="미국 일반주식 제외 (SOXL만 별도 추적)";us_cap_sorted=False
+    if include_us:
+        us,us_source=nasdaq_top100()
+        try:
+            us,cap_source=sort_nasdaq_by_market_cap(us)
+            us_source=us_source+" | "+cap_source
+            us_cap_sorted=True
+        except Exception as e:
+            us_source=us_source+" | 시총순 확인 불가: "+str(e)[:135]
+            us_cap_sorted=False
     kr_codes={code for code,_,_ in kr}
     us_codes={code for code,_,_ in us}
     # In the event a mandatory instrument qualifies for the index, do not duplicate.
