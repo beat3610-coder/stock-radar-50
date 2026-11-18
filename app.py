@@ -108,6 +108,25 @@ strategy_report=Path("data/strategy-lab-latest.json")
 if strategy_report.exists():
     try:
         lab=json.loads(strategy_report.read_text(encoding="utf-8"))
+        with st.expander("🧪 3회 확률 개선 연구 · 동일 표본 검증", expanded=False):
+            rows=[]
+            for market_code, market_name in (("KR","코스피"),("KQ","코스닥"),("US","나스닥")):
+                model=(lab.get("markets",{}).get(market_code,{}) or {}).get("three_round_probability") or {}
+                for key,label in (("baseline","기존 확률 기준"),("round1","1차 최근 승률"),("round2","2차 시장 국면"),("round3","3차 오차 기반 앙상블")):
+                    info=(model.get("rounds") or {}).get(key) or {}
+                    test=((model.get("by_window") or {}).get("diagnostic") or {}).get(key) or {}
+                    trades=test.get("fixed_55pct_trades") or {}
+                    rows.append({"시장":market_name,"모델":label,
+                        "진단 표본":test.get("n"),"진단 Brier(낮을수록 좋음)":test.get("brier"),
+                        "55% 이상 신호수":trades.get("n"),
+                        "해당 신호 승률(%)":trades.get("win_pct"),
+                        "거래당 순손익(%)":trades.get("mean_net_pct"),
+                        "전체기간 Brier":info.get("brier")})
+            if any(r["진단 표본"] is not None for r in rows):
+                st.dataframe(pd.DataFrame(rows).fillna("검증 전"),hide_index=True,use_container_width=True)
+            else:
+                st.info("3회 비교 백테스트 결과가 아직 생성되지 않았습니다. 검증 전 수익률이나 예측 정확도를 표시하지 않습니다.")
+            st.warning("학습·검증·진단 구간은 이미 과거 개발 과정에서 노출된 자료입니다. 진단 기간의 우수한 모델을 자동으로 실전 채택하지 않습니다.")
         with st.expander("📊 시장별 매매전략 비교 · 100종목 역사적 평가"):
             st.caption("고점 돌파·눌림목 반등·MACD 재상승 전략을 과거 자료에서 개발·검증·평가로 나누어 비교합니다. 이미 검토한 과거 기간이므로 실전 독립 검증은 아닙니다.")
             table=[]
