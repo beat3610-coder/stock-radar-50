@@ -1,0 +1,20 @@
+name: Probability walk-forward audit unit tests
+on:
+  push:
+    branches:
+      - feature/probability-walkforward-audit-20261118
+  pull_request:
+    paths:
+      - probability_walkforward_audit.py
+      - tests/test_probability_walkforward_audit.py
+      - .github/workflows/probability-audit-tests.yml
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install 'numpy>=1.26,<3' 'pandas>=2.2,<3'
+      - run: python -m unittest discover -s tests -p test_probability_walkforward_audit.py -v
