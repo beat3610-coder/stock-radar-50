@@ -173,8 +173,8 @@ def train_choice(choices):
                key=lambda k:scores[k],default=None)
     return chosen,scores
 
-def run(per_market=20):
-    u=get_universe()
+def run(per_market=30):
+    u=get_universe(include_us=False)
     res={"created_utc":datetime.now(timezone.utc).isoformat(),
         "type":"research_lab_v8_online_streaming",
         "method":"train-only selection, fixed validation screening, untouched-in-this-run diagnostic holdout",
@@ -191,12 +191,14 @@ def run(per_market=20):
                    "2026 historical holdout was already examined; revised filters are development hypotheses, not new independent evidence",
                    "Never approve live trading without future independently observed paper results"],
         "markets":{}}
+    # 30 KOSPI + 30 KOSDAQ stocks, two TIGER ETFs, and SOXL only.
     for market in ("KR","KQ","US"):
-        items=[x for x in u[market] if x[0] not in
-               ({"KR":{"472150","0262B0"},"KQ":set(),"US":{"SOXL"}}[market])][:per_market]
-        if len(items)<per_market:
+        target_count=1 if market=="US" else per_market+(2 if market=="KR" else 0)
+        items=(u["US"][-1:] if market=="US" else
+               u[market][:per_market]+(u["KR"][-2:] if market=="KR" else []))
+        if len(items)<target_count:
             res.setdefault("input_failures",{})[market]={
-                "requested":per_market,"available":len(items),
+                "requested":target_count,"available":len(items),
                 "error":u.get(market+"_error"),
                 "source":u.get(market+"_source"),
                 "status":"INSUFFICIENT_UNIVERSE_NOT_A_BACKTEST"}
@@ -217,9 +219,9 @@ def run(per_market=20):
                 failures.append({"ticker":ticker,"error":str(exc)[:160]})
             if idx%5==0:
                 print(f"LAB_PROGRESS {market} {idx}/{len(items)} loaded={len(frames)}",flush=True)
-        if len(frames)<per_market:
+        if len(frames)<target_count:
             res.setdefault("price_failures",{})[market]={
-                "requested":per_market,"loaded":len(frames),
+                "requested":target_count,"loaded":len(frames),
                 "errors":failures[:5],"status":"INCOMPLETE_PRICE_DATA_NO_PERFORMANCE_CLAIM"}
             print("LAB_PRICE_FAILURE "+market+" "+json.dumps(res["price_failures"][market],ensure_ascii=False),flush=True)
         # Compare the original three technical variants with prospective,
@@ -328,7 +330,7 @@ def run(per_market=20):
         # Fail-closed deployment screen. Never retune parameters from these
         # previously inspected test-period results.
         research_eligible=bool(
-            selected and len(frames)==per_market
+            selected and len(frames)==target_count
             and holdout_measures["trades"]>=30
             and holdout_measures["win_rate_pct"] is not None
             and holdout_measures["win_rate_pct"]>=55
@@ -340,7 +342,7 @@ def run(per_market=20):
             and base.get("max_drawdown_pct",100)<=12)
         def compact(r):return {k:v for k,v in r.items() if k not in ("daily_equity","executions")}
         res["markets"][market]={
-            "requested":per_market,"loaded":len(frames),"errors":failures,
+            "requested":target_count,"loaded":len(frames),"errors":failures,
             "training_selected":leader,"training_scores":scores,
             "validation_accepted":accepted,
             "edge_calibration":edge_diagnostics,
