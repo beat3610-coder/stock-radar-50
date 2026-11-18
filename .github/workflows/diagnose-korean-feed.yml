@@ -1,0 +1,38 @@
+name: Diagnose Korean market-cap feed schema
+on:
+  push:
+    branches:
+      - feature/probability-walkforward-audit-20261118
+    paths:
+      - .github/workflows/diagnose-korean-feed.yml
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install 'requests>=2.31,<3'
+      - name: Check Naver API market parameters and response shapes
+        run: |
+          python - <<'PY'
+          import requests,json
+          url="https://stock.naver.com/api/domestic/market/stock/default"
+          s=requests.Session()
+          s.headers.update({"User-Agent":"Mozilla/5.0", "Referer":"https://stock.naver.com/","Accept":"application/json, text/plain, */*"})
+          for market in ("ALL","KOSPI","KOSDAQ"):
+              params={"tradeType":"KRX","marketType":market,"orderType":"marketSum","startIdx":0,"pageSize":20}
+              try:
+                  r=s.get(url,params=params,timeout=12)
+                  print("MARKET",market,"STATUS",r.status_code,"TYPE",r.headers.get("content-type"),"BYTES",len(r.content),flush=True)
+                  try:
+                      obj=r.json()
+                      if isinstance(obj,dict):
+                          print("TOP_KEYS",list(obj.keys())[:15])
+                          items=obj.get("items") or obj.get("data") or obj.get("result")
+                      else:items=obj
+                      if isinstance(items,dict):items=items.get("items")
+                      print("SAMPLE",json.dumps((items or [])[:2] if isinstance(items,list) else str(items)[:250],ensure_ascii=False)[:1200],flush=True)
+                  except Exception as ex:print("JSON_ERROR",str(ex),"TEXT",r.text[:200],flush=True)
+              except Exception as ex:print("REQUEST_ERROR",market,str(ex)[:200],flush=True)
+          PY
