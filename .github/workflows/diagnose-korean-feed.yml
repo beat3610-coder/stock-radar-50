@@ -5,6 +5,9 @@ on:
       - feature/probability-walkforward-audit-20261118
     paths:
       - .github/workflows/diagnose-korean-feed.yml
+  pull_request:
+    paths:
+      - .github/workflows/diagnose-korean-feed.yml
   workflow_dispatch:
 jobs:
   probe:
