@@ -7,9 +7,12 @@ on:
     paths:
       - probability_walkforward_audit.py
       - three_round_trade_model.py
+      - naver_api_universe.py
+      - universe.py
       - strategy_lab.py
       - tests/test_probability_walkforward_audit.py
       - tests/test_three_round_trade_model.py
+      - tests/test_naver_api_universe.py
       - .github/workflows/probability-audit-tests.yml
 jobs:
   validate:
@@ -22,7 +25,8 @@ jobs:
       - run: pip install 'numpy>=1.26,<3' 'pandas>=2.2,<3'
       - run: python -m unittest discover -s tests -p test_probability_walkforward_audit.py -v
       - run: python -m unittest discover -s tests -p test_three_round_trade_model.py -v
-      - run: python -m py_compile strategy_lab.py three_round_trade_model.py
+      - run: python -m unittest discover -s tests -p test_naver_api_universe.py -v
+      - run: python -m py_compile strategy_lab.py three_round_trade_model.py universe.py naver_api_universe.py
 
   historical_300:
     runs-on: ubuntu-latest
