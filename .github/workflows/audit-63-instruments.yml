@@ -8,6 +8,11 @@ on:
       - 'strategy_lab.py'
       - 'audit_63_fast.py'
       - 'universe.py'
+  pull_request:
+    paths:
+      - '.github/workflows/audit-63-instruments.yml'
+      - 'audit_63_fast.py'
+      - 'universe.py'
   workflow_dispatch:
 jobs:
   audit_63:
