@@ -6,7 +6,10 @@ on:
   pull_request:
     paths:
       - probability_walkforward_audit.py
+      - three_round_trade_model.py
+      - strategy_lab.py
       - tests/test_probability_walkforward_audit.py
+      - tests/test_three_round_trade_model.py
       - .github/workflows/probability-audit-tests.yml
 jobs:
   validate:
@@ -18,3 +21,5 @@ jobs:
           python-version: '3.11'
       - run: pip install 'numpy>=1.26,<3' 'pandas>=2.2,<3'
       - run: python -m unittest discover -s tests -p test_probability_walkforward_audit.py -v
+      - run: python -m unittest discover -s tests -p test_three_round_trade_model.py -v
+      - run: python -m py_compile strategy_lab.py three_round_trade_model.py
