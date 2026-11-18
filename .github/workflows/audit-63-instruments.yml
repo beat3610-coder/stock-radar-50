@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/audit-63-instruments.yml'
       - 'strategy_lab.py'
+      - 'audit_63_fast.py'
       - 'universe.py'
   workflow_dispatch:
 jobs:
@@ -20,12 +21,12 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Run 30 KOSPI 30 KOSDAQ 2 TIGER ETFs and SOXL
         run: |
-          python -u strategy_lab.py > audit-63.log 2>&1 || { tail -100 audit-63.log; exit 1; }
+          python -u audit_63_fast.py > audit-63.log 2>&1 || { tail -100 audit-63.log; exit 1; }
           tail -100 audit-63.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: audit-63-buy-success-results
           path: |
-            data/strategy-lab-latest.json
+            data/audit-63-latest.json
             audit-63.log
