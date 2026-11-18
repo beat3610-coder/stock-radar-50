@@ -23,3 +23,35 @@ jobs:
       - run: python -m unittest discover -s tests -p test_probability_walkforward_audit.py -v
       - run: python -m unittest discover -s tests -p test_three_round_trade_model.py -v
       - run: python -m py_compile strategy_lab.py three_round_trade_model.py
+
+  historical_300:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run 100 symbols per market against real historical OHLCV
+        run: |
+          python - <<'PY' > three-round-research.log 2>&1
+          from strategy_lab import run
+          from pathlib import Path
+          import json
+          result=run(per_market=100)
+          Path("data").mkdir(exist_ok=True)
+          Path("data/strategy-lab-latest.json").write_text(json.dumps(result,ensure_ascii=False,indent=2,default=str),encoding="utf-8")
+          out={key:row.get("three_round_probability") for key,row in result.get("markets",{}).items()}
+          Path("three-round-results.json").write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding="utf-8")
+          print(json.dumps(out,ensure_ascii=False),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: three-round-300-stock-results
+          path: |
+            three-round-results.json
+            three-round-research.log
+          if-no-files-found: warn
