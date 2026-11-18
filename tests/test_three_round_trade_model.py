@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta
 from three_round_trade_model import three_round_audit
 
 def make_trades(n=180, perturbed_future=False):
@@ -8,9 +9,10 @@ def make_trades(n=180, perturbed_future=False):
         win=(i%5 in (0,1,2))
         if perturbed_future and i>=150:
             win=not win
+        day=datetime(2024,1,1)+timedelta(days=3*i)
         rows.append({"market":"KR","ticker":f"T{i%20:03d}",
-            "signal_date":f"2025-{1+(i//30):02d}-{1+(i%30):02d}",
-            "exit_date":f"2025-{1+(i//30):02d}-{3+(i%30):02d}",
+            "signal_date":day.date().isoformat(),
+            "exit_date":(day+timedelta(days=2)).date().isoformat(),
             "net_pct":2.0 if win else -1.0,
             "signal_rsi":60 if i%2 else 45,
             "signal_adx":30 if i%3 else 15,
