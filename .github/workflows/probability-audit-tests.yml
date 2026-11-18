@@ -12,6 +12,7 @@ on:
       - feature_selector60.py
       - net_edge_model.py
       - trend_guard_model.py
+      - market_breadth_gate.py
       - naver_api_universe.py
       - universe.py
       - strategy_lab.py
@@ -22,6 +23,7 @@ on:
       - tests/test_feature_selector60.py
       - tests/test_net_edge_model.py
       - tests/test_trend_guard_model.py
+      - tests/test_market_breadth_gate.py
       - tests/test_naver_api_universe.py
       - .github/workflows/probability-audit-tests.yml
 jobs:
@@ -40,8 +42,9 @@ jobs:
       - run: python -m unittest discover -s tests -p test_feature_selector60.py -v
       - run: python -m unittest discover -s tests -p test_net_edge_model.py -v
       - run: python -m unittest discover -s tests -p test_trend_guard_model.py -v
+      - run: python -m unittest discover -s tests -p test_market_breadth_gate.py -v
       - run: python -m unittest discover -s tests -p test_naver_api_universe.py -v
-      - run: python -m py_compile strategy_lab.py three_round_trade_model.py profit_selector51.py regime_selector60.py feature_selector60.py net_edge_model.py trend_guard_model.py universe.py naver_api_universe.py
+      - run: python -m py_compile strategy_lab.py three_round_trade_model.py profit_selector51.py regime_selector60.py feature_selector60.py net_edge_model.py trend_guard_model.py market_breadth_gate.py universe.py naver_api_universe.py
 
   historical_300:
     runs-on: ubuntu-latest
@@ -62,7 +65,7 @@ jobs:
           result=run(per_market=100)
           Path("data").mkdir(exist_ok=True)
           Path("data/strategy-lab-latest.json").write_text(json.dumps(result,ensure_ascii=False,indent=2,default=str),encoding="utf-8")
-          out={key:{"rounds":row.get("three_round_probability"),"target51":row.get("target51_research"),"target60":row.get("target60_regime"),"feature60":row.get("target60_features"),"net_edge":row.get("net_edge_research"),"trend_guard":row.get("trend_guard_research"),"loaded":row.get("loaded")} for key,row in result.get("markets",{}).items()}
+          out={key:{"rounds":row.get("three_round_probability"),"target51":row.get("target51_research"),"target60":row.get("target60_regime"),"feature60":row.get("target60_features"),"net_edge":row.get("net_edge_research"),"trend_guard":row.get("trend_guard_research"),"market_breadth":row.get("market_breadth_research"),"loaded":row.get("loaded")} for key,row in result.get("markets",{}).items()}
           Path("three-round-results.json").write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding="utf-8")
           print(json.dumps(out,ensure_ascii=False),flush=True)
           PY
