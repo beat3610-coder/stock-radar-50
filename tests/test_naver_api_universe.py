@@ -21,6 +21,23 @@ class NaverApiUniverseTests(unittest.TestCase):
     def test_100_kosdaq(self):
         rows,source=naver_api_top100("KQ",session=mocked_session("KOSDAQ"))
         self.assertEqual(len(rows),100)
+    def test_real_live_field_shape(self):
+        session=mocked_session()
+        session.get.return_value.json.return_value={"items":[
+            {"itemcode":f"{i:06d}","itemname":f"상장회사{i}",
+             "sosok":"0","type":"ST"} for i in range(1,101)]}
+        rows,_=naver_api_top100("KR",session=session)
+        self.assertEqual(len(rows),100)
+        self.assertEqual(rows[0][0],"000001")
+
+    def test_sosok_wrong_market_rejected(self):
+        session=mocked_session()
+        session.get.return_value.json.return_value={"items":[
+            {"itemcode":f"{i:06d}","itemname":f"상장회사{i}",
+             "sosok":"1","type":"ST"} for i in range(1,101)]}
+        with self.assertRaises(RuntimeError):
+            naver_api_top100("KR",session=session)
+
     def test_wrong_market_rejected(self):
         with self.assertRaises(RuntimeError):
             naver_api_top100("KR",session=mocked_session("KOSDAQ"))
