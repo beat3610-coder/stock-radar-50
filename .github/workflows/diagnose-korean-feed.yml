@@ -39,3 +39,16 @@ jobs:
                   except Exception as ex:print("JSON_ERROR",str(ex),"TEXT",r.text[:200],flush=True)
               except Exception as ex:print("REQUEST_ERROR",market,str(ex)[:200],flush=True)
           PY
+      - name: Verify 100 actual constituents in both Korean markets
+        run: |
+          python - <<'PY'
+          from naver_api_universe import naver_api_top100
+          for m in ("KR","KQ"):
+              try:
+                  rows,source=naver_api_top100(m)
+                  print("CONFIRMED",m,len(rows),"first",rows[:3],"source",source,flush=True)
+                  if len(rows)!=100:raise AssertionError("Not 100 items")
+              except Exception as ex:
+                  print("FAILED",m,type(ex).__name__,str(ex)[:250],flush=True)
+                  raise
+          PY
