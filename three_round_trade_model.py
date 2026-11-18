@@ -11,6 +11,7 @@ MIN_PAST=35
 REGIME_PRIOR=24.0
 DECAY=0.985
 TRADE_THRESHOLD=0.55
+PREDECLARED_THRESHOLDS=(0.45,0.50,0.55)
 
 def _date(value):
     return str(value)[:10]
@@ -128,6 +129,47 @@ def three_round_audit(trades, market=None, min_past=MIN_PAST, include_rows=False
         result.setdefault("by_window",{})[key]={name:{"n":len(filtered),"brier":_brier(filtered,name),
             "fixed_55pct_trades":_metrics([r for r in filtered if r[name]>=TRADE_THRESHOLD])}
             for name in ("baseline","round1","round2","round3")}
+    # Fixed ex-ante thresholds, not optimized on inspected diagnostic outcomes.
+    # Report coverage as well as profitability; a 100% hit rate on 1 trade
+    # is not an acceptable improvement by itself.
+    result["policy_windows"]={}
+    for period in ("train","validation","diagnostic"):
+        pool=[r for r in audit if ((r["signal_date"]<"2025-11-01") if period=="train"
+                 else ("2025-11-01"<=r["signal_date"]<"2026-04-01") if period=="validation"
+                 else ("2026-04-01"<=r["signal_date"]<"2026-11-01"))]
+        result["policy_windows"][period]={}
+        for model in ("baseline","round1","round2","round3"):
+            result["policy_windows"][period][model]={}
+            for t in PREDECLARED_THRESHOLDS:
+                picked=[r for r in pool if r[model]>=t]
+                m=_metrics(picked)
+                m["coverage_pct"]=round(100*len(picked)/len(pool),3) if pool else None
+                result["policy_windows"][period][model][str(t)]=m
+    # Choose policy solely on historical training, then reject using validation.
+    # Never select a winner using diagnostic observations.
+    eligible=[]
+    for model in ("baseline","round1","round2","round3"):
+        for t in PREDECLARED_THRESHOLDS:
+            key=str(t)
+            train=result["policy_windows"]["train"][model][key]
+            valid=result["policy_windows"]["validation"][model][key]
+            if (train["n"]>=30 and valid["n"]>=30 and
+                train["mean_net_pct"] is not None and valid["mean_net_pct"] is not None and
+                train["mean_net_pct"]>0 and valid["mean_net_pct"]>0 and
+                train["win_pct"]>=50 and valid["win_pct"]>=50 and
+                train["coverage_pct"]>=5 and valid["coverage_pct"]>=5):
+                eligible.append((valid["mean_net_pct"],-abs(train["win_pct"]-valid["win_pct"]),model,t))
+    if eligible:
+        winner=max(eligible)
+        model,t=winner[2],winner[3]
+        result["development_candidate"]={"model":model,"threshold":t,
+            "validation":result["policy_windows"]["validation"][model][str(t)],
+            "diagnostic_research_only":result["policy_windows"]["diagnostic"][model][str(t)],
+            "status":"RESEARCH_CANDIDATE_NOT_LIVE_APPROVED"}
+    else:
+        result["development_candidate"]={"status":"REJECTED_NO_VALIDATED_PROFITABLE_POLICY"}
+    # Do not silently certify 0 symbols or a 0-trade strategy.
+    result["data_adequacy"] = "PASS" if len(audit)>=300 else "FAIL_INSUFFICIENT_SIGNALS"
     result["limitations"]=[
         "Historical forecasts are computed on previously inspected periods; not untouched holdout",
         "3 rounds are candidate formulas, not three proven accuracy gains",
