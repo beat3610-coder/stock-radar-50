@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install 'numpy>=1.26,<3' 'pandas>=2.2,<3'
+      - run: pip install 'numpy>=1.26,<3' 'pandas>=2.2,<3' 'requests>=2.31,<3'
       - run: python -m unittest discover -s tests -p test_probability_walkforward_audit.py -v
       - run: python -m unittest discover -s tests -p test_three_round_trade_model.py -v
       - run: python -m unittest discover -s tests -p test_naver_api_universe.py -v
