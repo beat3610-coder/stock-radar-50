@@ -65,7 +65,7 @@ def discover(trades,market=None):
  sample={k:stats([r for r in rows if obey(r,rule)]) for k,rows in windows.items()}
  v=sample["validation"]
  passed=(v["n"]>=30 and v["win_pct"]>=51 and v["mean_net_pct"]>0 and
-  v["profit_factor"] is not None and v["profit_factor"]>1)
+  (v["profit_factor"] is None and v["win_pct"]==100 or v["profit_factor"] is not None and v["profit_factor"]>1))
  result.update({"status":"VALIDATION_PASS_RESEARCH_ONLY" if passed else "VALIDATION_REJECTED",
   "selected":{"conditions":[{"feature":k,"op":o,"threshold":t} for k,o,t in rule],
   "train":sample["train"],"validation":v,"diagnostic_research_only":sample["diagnostic"],
