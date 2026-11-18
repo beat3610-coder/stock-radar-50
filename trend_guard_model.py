@@ -67,12 +67,19 @@ def audit(trades,market=None):
         trained=[(_fit(fit,kind),check) for fit,check in folds]
         if any(m is None for m,_ in trained):continue
         for policy in POLICIES:
-            plain=[r for m,check in trained for r in _score(m,check,policy)]
+            plain_folds=[_score(m,check,policy) for m,check in trained]
+            plain=[r for fold in plain_folds for r in fold]
             plain_s=stats(plain)
             for guard in GUARDS:
                 selected=[r for r in plain if GUARDS[guard](r)]
                 scores=stats(selected)
-                reason = ("too_few_trades" if scores["n"]<25 else
+                fold_scores=[stats([r for r in fold if GUARDS[guard](r)])
+                             for fold in plain_folds]
+                # Reject candidates that depend on a single lucky development fold.
+                unstable=(any(f["n"]<8 for f in fold_scores) or
+                          any(f["mean_net_pct"] is None or f["mean_net_pct"]<=0
+                              for f in fold_scores))
+                reason = ("unstable_folds" if scores["n"]>=25 and unstable else ("too_few_trades" if scores["n"]<25 else
                           "nonpositive_net" if scores["mean_net_pct"]<=0 else
                           "no_improvement" if guard!="no_extra_guard" and plain_s["n"]>0 and
                           (scores["win_pct"]<=plain_s["win_pct"] and
@@ -80,11 +87,14 @@ def audit(trades,market=None):
                 rejection_counts[reason]+=1
                 candidate_diagnostics.append({"model":kind,"policy":policy,
                     "guard":guard,"reason":reason,"development":scores,
+                    "development_folds":fold_scores,
                     "unguarded":plain_s})
                 if reason!="eligible":continue
                 # Prefer net expectancy, penalize small samples and weak win rates.
+                # Lower-tail penalty prevents large winners masking frequent stops.
+                downside=np.mean([min(0,r["net_pct"])**2 for r in selected])**0.5
                 reward=(scores["mean_net_pct"]-1.5/np.sqrt(scores["n"])
-                        -0.02*max(0,60-scores["win_pct"]))
+                        -0.02*max(0,60-scores["win_pct"])-0.15*downside)
                 comparisons.append((reward,scores["n"],kind,policy,guard,scores,plain_s))
     report["development_rejection_counts"]=dict(rejection_counts)
     report["development_candidates"]=candidate_diagnostics
