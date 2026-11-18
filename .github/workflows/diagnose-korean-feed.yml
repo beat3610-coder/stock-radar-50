@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - run: pip install 'requests>=2.31,<3'
+      - run: pip install -r requirements.txt
       - name: Check Naver API market parameters and response shapes
         run: |
           python - <<'PY'
@@ -51,4 +51,21 @@ jobs:
               except Exception as ex:
                   print("FAILED",m,type(ex).__name__,str(ex)[:250],flush=True)
                   raise
+          PY
+      - name: Verify representative Korean historical OHLCV
+        run: |
+          python - <<'PY'
+          from naver_api_universe import naver_api_top100
+          from providers import get_prices
+          failures=[]
+          for m in ("KR","KQ"):
+              rows,_=naver_api_top100(m)
+              for code,_,_ in rows[:3]:
+                  try:
+                      frame,source=get_prices(code,m)
+                      print("OHLCV",m,code,len(frame),source,frame.index.min(),frame.index.max(),flush=True)
+                      if len(frame)<250:raise ValueError("OHLCV history <250 bars")
+                  except Exception as e:
+                      failures.append((m,code,str(e)[:140]))
+          if failures:raise RuntimeError("Korean historical price preflight failed: "+repr(failures))
           PY
