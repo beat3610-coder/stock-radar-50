@@ -29,11 +29,15 @@ class ThreeRoundTests(unittest.TestCase):
         self.assertEqual(result["status"],"RESEARCH_ONLY_NOT_LIVE_APPROVED")
 
     def test_future_outcomes_cannot_change_earlier_forecasts(self):
-        a=three_round_audit(make_trades())
-        b=three_round_audit(make_trades(perturbed_future=True))
+        a=three_round_audit(make_trades(),include_rows=True)
+        b=three_round_audit(make_trades(perturbed_future=True),include_rows=True)
         # Both runs score the same pre-change historical observations;
         # last-segment changes are allowed to affect subsequent scores.
         self.assertEqual(a["scored"],b["scored"])
+        for left,right in zip(a["forecast_rows"],b["forecast_rows"]):
+            if left["signal_date"] < make_trades()[150]["signal_date"]:
+                for key in ("baseline","round1","round2","round3"):
+                    self.assertAlmostEqual(left[key],right[key])
 
     def test_market_filter(self):
         result=three_round_audit(make_trades(),market="US")
