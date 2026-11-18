@@ -40,7 +40,7 @@ def _metrics(rows):
             "win_pct":round(100*wins/len(rows),3),
             "mean_net_pct":round(sum(r["net_pct"] for r in rows)/len(rows),4)}
 
-def three_round_audit(trades, market=None, min_past=MIN_PAST):
+def three_round_audit(trades, market=None, min_past=MIN_PAST, include_rows=False):
     """Outcomes are used for training only once exit_date < signal_date.
     Never pick an iterative winner based on diagnostic test-period scores.
     """
@@ -120,9 +120,19 @@ def three_round_audit(trades, market=None, min_past=MIN_PAST):
         b=result["rounds"][name]["brier"]
         result["rounds"][name]["brier_improvement_vs_base"] = (
             round(baseline_brier-b,6) if b is not None and baseline_brier is not None else None)
+    # Same fixed calendar boundaries used by the existing research lab.
+    for key in ("train", "validation", "diagnostic"):
+        filtered=[r for r in audit if ((r["signal_date"]<"2025-11-01") if key=="train"
+                  else ("2025-11-01"<=r["signal_date"]<"2026-04-01") if key=="validation"
+                  else ("2026-04-01"<=r["signal_date"]<"2026-11-01"))]
+        result.setdefault("by_window",{})[key]={name:{"n":len(filtered),"brier":_brier(filtered,name),
+            "fixed_55pct_trades":_metrics([r for r in filtered if r[name]>=TRADE_THRESHOLD])}
+            for name in ("baseline","round1","round2","round3")}
     result["limitations"]=[
         "Historical forecasts are computed on previously inspected periods; not untouched holdout",
         "3 rounds are candidate formulas, not three proven accuracy gains",
         "Win-rate improvement on selected trades is not direction classification accuracy",
         "No model promotion without new prospective test and positive net expectancy"]
+    if include_rows:
+        result["forecast_rows"]=audit
     return result
