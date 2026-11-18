@@ -22,6 +22,7 @@ from portfolio_audit import replay
 from trade_execution import entry_quality
 from empirical_edge import walkforward_filter, walkforward_regime_filter
 from predictive_model import walkforward_model_filter, walkforward_model_policies, POLICIES
+from three_round_trade_model import three_round_audit
 from broad_candidates import broad_candidates_from_computed
 from online_edge import score_stream, POLICIES as ONLINE_POLICIES
 
@@ -216,6 +217,10 @@ def run(per_market=20):
             variants[original+"_ml_edge"]=ml_filtered
             edge_diagnostics[original]={**report,"regime_filter":high_confidence_report,
                                         "predictive_model":ml_report}
+        # Three distinct prequential probability challengers; log diagnostics,
+        # never choose a live model using already-inspected historical outcomes.
+        three_round_report=three_round_audit(broad_training_pool,market)
+        print('LAB_THREE_ROUNDS '+market+' '+json.dumps(three_round_report,ensure_ascii=False),flush=True)
         broad_policy_trades,broad_model_report=walkforward_model_policies(broad_training_pool)
         for policy_name,policy_trades in broad_policy_trades.items():
             variants["broad_market_ml_"+policy_name]=policy_trades
@@ -309,6 +314,7 @@ def run(per_market=20):
             "training_selected":leader,"training_scores":scores,
             "validation_accepted":accepted,
             "edge_calibration":edge_diagnostics,
+            "three_round_probability":three_round_report,
             "evaluation_policy":"diagnostic_heldout_even_if_validation_rejected; never live approve",
             "selected_for_diagnostic":selected,
             "rejected_candidate":leader if not accepted else None,
