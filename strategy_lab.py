@@ -28,6 +28,7 @@ from regime_selector60 import report as regime60_report
 from feature_selector60 import audit as feature60_audit
 from net_edge_model import audit as net_edge_audit
 from trend_guard_model import audit as trend_guard_audit
+from market_breadth_gate import audit as market_breadth_audit
 from broad_candidates import broad_candidates_from_computed
 from online_edge import score_stream, POLICIES as ONLINE_POLICIES
 
@@ -242,6 +243,8 @@ def run(per_market=20):
         feature60_report=feature60_audit(broad_training_pool,market)
         net_edge_report=net_edge_audit(broad_training_pool,market)
         trend_guard_report=trend_guard_audit(broad_training_pool,market)
+        market_breadth_report=market_breadth_audit(broad_training_pool,frames,market)
+        print('LAB_MARKET_BREADTH '+market+' '+json.dumps(market_breadth_report,ensure_ascii=False),flush=True)
         print('LAB_TREND_GUARD '+market+' '+json.dumps(trend_guard_report,ensure_ascii=False),flush=True)
         print('LAB_NET_EDGE '+market+' '+json.dumps(net_edge_report,ensure_ascii=False),flush=True)
         print('LAB_FEATURE60 '+market+' '+json.dumps(feature60_report,ensure_ascii=False),flush=True)
@@ -347,6 +350,7 @@ def run(per_market=20):
             "target60_features":feature60_report,
             "net_edge_research":net_edge_report,
             "trend_guard_research":trend_guard_report,
+            "market_breadth_research":market_breadth_report,
             "evaluation_policy":"diagnostic_heldout_even_if_validation_rejected; never live approve",
             "selected_for_diagnostic":selected,
             "rejected_candidate":leader if not accepted else None,
