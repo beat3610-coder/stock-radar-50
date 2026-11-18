@@ -83,7 +83,7 @@ def audit(trades,market=None):
                           "nonpositive_net" if scores["mean_net_pct"]<=0 else
                           "no_improvement" if guard!="no_extra_guard" and plain_s["n"]>0 and
                           (scores["win_pct"]<=plain_s["win_pct"] and
-                           scores["mean_net_pct"]<=plain_s["mean_net_pct"]) else "eligible")
+                           scores["mean_net_pct"]<=plain_s["mean_net_pct"]) else "eligible"))
                 rejection_counts[reason]+=1
                 candidate_diagnostics.append({"model":kind,"policy":policy,
                     "guard":guard,"reason":reason,"development":scores,
