@@ -69,15 +69,30 @@ def audit(trades,market=None):
           "validation":stats([x[0] for x in validation]),
           "diagnostic":stats([x[0] for x in diagnostic])},
         "selected":None}
+    # Fixed prior model when nested folds cannot be built; no holdout tuning.
+    def fixed_logistic(reason):
+        frozen=_fit(dev,"logistic")
+        if frozen is None:
+            result["insufficient_reason"]=reason
+            return result
+        prior=np.mean([r[2] for r in dev])
+        vm=_score(validation,_predict(frozen,validation,prior),0.50)
+        dm=_score(diagnostic,_predict(frozen,diagnostic,prior),0.50)
+        result.update({"status":"FIXED_BASELINE_RESEARCH_ONLY",
+          "selected":{"model":"logistic_fixed_fallback","threshold":0.50,
+            "internal_training":None,"validation":vm,
+            "diagnostic_research_only":dm,"validation_pass":False},
+          "insufficient_reason":reason})
+        return result
     days=sorted(set(r[0]["signal_date"] for r in dev))
-    if len(days)<18 or len(dev)<125:return result
+    if len(days)<18 or len(dev)<125:return fixed_logistic("too_few_distinct_training_dates_or_trades")
     cuts=[days[int(len(days)*k)] for k in (.40,.70)]
     folds=[]
     for i,cut in enumerate(cuts):
         until=cuts[i+1] if i+1<len(cuts) else TRAIN
         fit=[r for r in dev if r[0]["exit_date"]<cut]
         out=[r for r in dev if cut<=r[0]["signal_date"]<until]
-        if len(fit)<60 or len(out)<15:return result
+        if len(fit)<60 or len(out)<15:return fixed_logistic("time_fold_insufficient_training_or_test_rows")
         folds.append((fit,out))
     candidates=[]
     for kind in ("logistic","forest","boost"):
@@ -96,7 +111,7 @@ def audit(trades,market=None):
             candidates.append((utility,kind,threshold,m))
     if not candidates:
         result["status"]="REJECTED_NO_POSITIVE_DEVELOPMENT_POLICY"
-        return result
+        return fixed_logistic("no_eligible_positive_internal_policy")
     candidates.sort(key=lambda r:(-r[0],r[1],r[2]))
     _,kind,threshold,internal=candidates[0]
     frozen=_fit(dev,kind)
