@@ -39,6 +39,16 @@ class ThreeRoundTests(unittest.TestCase):
                 for key in ("baseline","round1","round2","round3"):
                     self.assertAlmostEqual(left[key],right[key])
 
+    def test_profit_and_coverage_reported_for_all_thresholds(self):
+        result=three_round_audit(make_trades())
+        for window in ("train","validation","diagnostic"):
+            for model in ("baseline","round1","round2","round3"):
+                for threshold in ("0.45","0.5","0.55"):
+                    policy=result["policy_windows"][window][model][threshold]
+                    self.assertIn("coverage_pct",policy)
+                    self.assertIn("mean_net_pct",policy)
+        self.assertNotEqual(result["development_candidate"].get("status"),"LIVE_APPROVED")
+
     def test_market_filter(self):
         result=three_round_audit(make_trades(),market="US")
         self.assertEqual(result["scored"],0)
