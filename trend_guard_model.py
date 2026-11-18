@@ -104,6 +104,8 @@ def audit(trades,market=None):
                 comparisons.append((reward,scores["n"],kind,policy,guard,scores,plain_s))
     report["development_rejection_counts"]=dict(rejection_counts)
     report["development_candidates"]=candidate_diagnostics
+    # Always expose a research benchmark even if no candidate meets the
+    # stringent promotion requirements. Never conflate it with live approval.
     if not comparisons:
         report["status"]="NO_TRAINING_EDGE"
         # Explain rejection without presenting a rejected candidate as a buy signal.
@@ -113,6 +115,30 @@ def audit(trades,market=None):
             key=lambda c:(-c["development"]["n"],c["model"],c["policy"],c["guard"]))
         report["largest_rejected_candidate"]=eligible_counts[0] if eligible_counts else None
         report["rejected_candidate_count"]=len(candidate_diagnostics)
+        # A development-only fallback is chosen without peeking at validation
+        # or diagnostic outcomes. Show its observed win rate and sample count.
+        ranked=sorted(
+            (c for c in candidate_diagnostics if c["development"]["n"]>0
+             and c["development"]["mean_net_pct"] is not None),
+            key=lambda c:(-c["development"]["mean_net_pct"]
+                           + 2.0/np.sqrt(c["development"]["n"]),
+                           -c["development"]["n"],c["model"],c["policy"],c["guard"]))
+        if ranked:
+            candidate=ranked[0]
+            model=_fit(dev,candidate["model"])
+            if model is not None:
+                policy=candidate["policy"]
+                guard=candidate["guard"]
+                def fallback_window(rows):
+                    selected=[r for r in _score(model,rows,policy) if GUARDS[guard](r)]
+                    return {"selected":stats(selected),"population":len(rows),
+                            "coverage_pct":round(100*len(selected)/len(rows),2) if rows else None}
+                report["research_fallback"]={
+                    "model":candidate["model"],"base_policy":policy,"guard":guard,
+                    "development":candidate["development"],
+                    "validation":fallback_window(val),
+                    "diagnostic":fallback_window(diag),
+                    "promotion_eligible":False,"live_approved":False}
         return report
     comparisons.sort(key=lambda z:(-z[0],-z[1],z[2],z[3],z[4]))
     _,_,kind,policy,guard,internal,unfiltered_internal=comparisons[0]
