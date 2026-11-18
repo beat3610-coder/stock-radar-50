@@ -23,6 +23,11 @@ GUARDS={
     r["signal_atr_pct"]<=4.0 and
     0.85<=r["signal_volume_ratio"]<=2.5 and
     -2<=r["signal_5d_return_pct"]<=6),
+ "trend_volatility": lambda r: (r["signal_atr_pct"]<=3.0 and
+    r["signal_5d_return_pct"]>=0 and r["signal_adx"]>=20),
+ "trend_momentum": lambda r: (r["signal_ma20_ma60_pct"]>=0 and
+    0<=r["signal_5d_return_pct"]<=8 and
+    45<=r["signal_rsi"]<=70),
  "trend_lowrisk": lambda r: (r["signal_ma20_ma60_pct"]>0 and
     48<=r["signal_rsi"]<=68 and r["signal_adx"]>=20 and
     r["signal_atr_pct"]<=3.0 and
@@ -91,7 +96,7 @@ def audit(trades,market=None):
                     "unguarded":plain_s})
                 if reason!="eligible":continue
                 # Prefer net expectancy, penalize small samples and weak win rates.
-                # Lower-tail penalty prevents large winners masking frequent stops.
+                # Rank only pre-validation development results.\n                # Lower-tail penalty prevents large winners masking frequent stops.
                 downside=np.mean([min(0,r["net_pct"])**2 for r in selected])**0.5
                 reward=(scores["mean_net_pct"]-1.5/np.sqrt(scores["n"])
                         -0.02*max(0,60-scores["win_pct"])-0.15*downside)
