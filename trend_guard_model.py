@@ -96,7 +96,8 @@ def audit(trades,market=None):
                     "unguarded":plain_s})
                 if reason!="eligible":continue
                 # Prefer net expectancy, penalize small samples and weak win rates.
-                # Rank only pre-validation development results.\n                # Lower-tail penalty prevents large winners masking frequent stops.
+                # Rank only pre-validation development results.
+                # Lower-tail penalty prevents large winners masking frequent stops.
                 downside=np.mean([min(0,r["net_pct"])**2 for r in selected])**0.5
                 reward=(scores["mean_net_pct"]-1.5/np.sqrt(scores["n"])
                         -0.02*max(0,60-scores["win_pct"])-0.15*downside)
@@ -105,6 +106,13 @@ def audit(trades,market=None):
     report["development_candidates"]=candidate_diagnostics
     if not comparisons:
         report["status"]="NO_TRAINING_EDGE"
+        # Explain rejection without presenting a rejected candidate as a buy signal.
+        # This is a development-only diagnosis; never relax deployment standards.
+        eligible_counts=sorted(
+            (c for c in candidate_diagnostics if c["development"]["n"]>=15),
+            key=lambda c:(-c["development"]["n"],c["model"],c["policy"],c["guard"]))
+        report["largest_rejected_candidate"]=eligible_counts[0] if eligible_counts else None
+        report["rejected_candidate_count"]=len(candidate_diagnostics)
         return report
     comparisons.sort(key=lambda z:(-z[0],-z[1],z[2],z[3],z[4]))
     _,_,kind,policy,guard,internal,unfiltered_internal=comparisons[0]
