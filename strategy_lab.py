@@ -26,6 +26,7 @@ from three_round_trade_model import three_round_audit
 from profit_selector51 import discover as discover_51
 from regime_selector60 import report as regime60_report
 from feature_selector60 import audit as feature60_audit
+from net_edge_model import audit as net_edge_audit
 from broad_candidates import broad_candidates_from_computed
 from online_edge import score_stream, POLICIES as ONLINE_POLICIES
 
@@ -238,6 +239,8 @@ def run(per_market=20):
         target51_report=discover_51(broad_training_pool,market)
         target60_report=regime60_report(broad_training_pool,market)
         feature60_report=feature60_audit(broad_training_pool,market)
+        net_edge_report=net_edge_audit(broad_training_pool,market)
+        print('LAB_NET_EDGE '+market+' '+json.dumps(net_edge_report,ensure_ascii=False),flush=True)
         print('LAB_FEATURE60 '+market+' '+json.dumps(feature60_report,ensure_ascii=False),flush=True)
         print('LAB_TARGET60 '+market+' '+json.dumps(target60_report,ensure_ascii=False),flush=True)
         print('LAB_TARGET51 '+market+' '+json.dumps(target51_report,ensure_ascii=False),flush=True)
@@ -339,6 +342,7 @@ def run(per_market=20):
             "target51_research":target51_report,
             "target60_regime":target60_report,
             "target60_features":feature60_report,
+            "net_edge_research":net_edge_report,
             "evaluation_policy":"diagnostic_heldout_even_if_validation_rejected; never live approve",
             "selected_for_diagnostic":selected,
             "rejected_candidate":leader if not accepted else None,
