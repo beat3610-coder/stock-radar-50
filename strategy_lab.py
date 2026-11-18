@@ -188,6 +188,13 @@ def run(per_market=20):
     for market in ("KR","KQ","US"):
         items=[x for x in u[market] if x[0] not in
                ({"KR":{"472150","0262B0"},"KQ":set(),"US":{"SOXL"}}[market])][:per_market]
+        if len(items)<per_market:
+            res.setdefault("input_failures",{})[market]={
+                "requested":per_market,"available":len(items),
+                "error":u.get(market+"_error"),
+                "source":u.get(market+"_source"),
+                "status":"INSUFFICIENT_UNIVERSE_NOT_A_BACKTEST"}
+            print("LAB_INPUT_FAILURE "+market+" "+json.dumps(res["input_failures"][market],ensure_ascii=False),flush=True)
         frames={}
         variants={k:[] for k in PARAMS}
         broad_training_pool=[]
@@ -204,6 +211,11 @@ def run(per_market=20):
                 failures.append({"ticker":ticker,"error":str(exc)[:160]})
             if idx%5==0:
                 print(f"LAB_PROGRESS {market} {idx}/{len(items)} loaded={len(frames)}",flush=True)
+        if len(frames)<per_market:
+            res.setdefault("price_failures",{})[market]={
+                "requested":per_market,"loaded":len(frames),
+                "errors":failures[:5],"status":"INCOMPLETE_PRICE_DATA_NO_PERFORMANCE_CLAIM"}
+            print("LAB_PRICE_FAILURE "+market+" "+json.dumps(res["price_failures"][market],ensure_ascii=False),flush=True)
         # Compare the original three technical variants with prospective,
         # cost-adjusted probability/expectancy filters. Every calibration uses
         # ONLY prior trades that were fully exited before its signal date.
@@ -336,6 +348,7 @@ def run(per_market=20):
             "stress_return":stress.get("total_return_pct"),
             "loaded":len(frames)},default=str),flush=True)
     res["release_status"]="NOT_LIVE_APPROVED"
+    res["data_integrity_status"]=("FAIL" if res.get("input_failures") or res.get("price_failures") else "PASS")
     return res
 
 if __name__=="__main__":
