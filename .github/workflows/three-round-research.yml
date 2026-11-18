@@ -1,0 +1,50 @@
+name: Three-round 300-stock research audit
+on:
+  push:
+    branches:
+      - feature/probability-walkforward-audit-20261118
+    paths:
+      - three_round_trade_model.py
+      - strategy_lab.py
+      - tests/test_three_round_trade_model.py
+      - .github/workflows/three-round-research.yml
+  workflow_dispatch:
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Three-round unit tests
+        run: python -m unittest discover -s tests -p test_three_round_trade_model.py -v
+      - name: 300-current-constituent historical comparison
+        run: python strategy_lab.py > three-round-research.log 2>&1
+      - name: Extract three-round diagnostic report
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("data/strategy-lab-latest.json")
+          if p.exists():
+              report=json.loads(p.read_text(encoding="utf-8"))
+              out={m:v.get("three_round_probability",{}) for m,v in report.get("markets",{}).items()}
+              Path("three-round-results.json").write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding="utf-8")
+              print(json.dumps(out,ensure_ascii=False,indent=2))
+          else:
+              print("Research did not produce a report; see attached log")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: three-round-research-diagnostics
+          path: |
+            three-round-research.log
+            three-round-results.json
+            data/strategy-lab-latest.json
+          if-no-files-found: warn
