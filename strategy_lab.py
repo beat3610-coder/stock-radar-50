@@ -25,6 +25,7 @@ from predictive_model import walkforward_model_filter, walkforward_model_policie
 from three_round_trade_model import three_round_audit
 from profit_selector51 import discover as discover_51
 from regime_selector60 import report as regime60_report
+from feature_selector60 import audit as feature60_audit
 from broad_candidates import broad_candidates_from_computed
 from online_edge import score_stream, POLICIES as ONLINE_POLICIES
 
@@ -236,6 +237,8 @@ def run(per_market=20):
         three_round_report=three_round_audit(broad_training_pool,market)
         target51_report=discover_51(broad_training_pool,market)
         target60_report=regime60_report(broad_training_pool,market)
+        feature60_report=feature60_audit(broad_training_pool,market)
+        print('LAB_FEATURE60 '+market+' '+json.dumps(feature60_report,ensure_ascii=False),flush=True)
         print('LAB_TARGET60 '+market+' '+json.dumps(target60_report,ensure_ascii=False),flush=True)
         print('LAB_TARGET51 '+market+' '+json.dumps(target51_report,ensure_ascii=False),flush=True)
         print('LAB_THREE_ROUNDS '+market+' '+json.dumps(three_round_report,ensure_ascii=False),flush=True)
@@ -335,6 +338,7 @@ def run(per_market=20):
             "three_round_probability":three_round_report,
             "target51_research":target51_report,
             "target60_regime":target60_report,
+            "target60_features":feature60_report,
             "evaluation_policy":"diagnostic_heldout_even_if_validation_rejected; never live approve",
             "selected_for_diagnostic":selected,
             "rejected_candidate":leader if not accepted else None,
