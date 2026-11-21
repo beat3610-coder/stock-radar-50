@@ -5,6 +5,7 @@ from test_regime_direction import event
 from nonlinear_direction import market_features,vectors,run_nonlinear,_causal_recalibration
 from rolling_refit_direction import run_refit
 from robustness_direction import run_two_year_robustness
+from regime_probability import causal_regime_shrink
 
 class NonlinearTests(unittest.TestCase):
     def samples(self):
@@ -87,6 +88,25 @@ class NonlinearTests(unittest.TestCase):
         self.assertIn(result["status"],("RESEARCH_ONLY","INCOMPLETE"))
         self.assertFalse(result["independent_forward_test"])
         self.assertEqual(set(result["calendar_windows"]),{"2025","2026"})
+        for period in result["calendar_windows"].values():
+            if period["status"]=="RESEARCH_ONLY":
+                self.assertEqual(period["rolling"]["samples"],
+                                 period["regime_shrunk"]["samples"])
+    def test_regime_causality_and_probability_normalization(self):
+        import numpy as np
+        rows=self.samples()[:250]
+        data=vectors(rows,market_features(rows))
+        context=market_features(rows)
+        base=np.tile(np.array([0.3,0.4,0.3]),(len(data[100:]),1))
+        a=causal_regime_shrink(data[100:],data[:100],base,context,
+                              min_regime_samples=5)
+        self.assertTrue(np.allclose(a.sum(axis=1),1))
+        self.assertTrue(np.all(a>=0))
+        changed=[(r,v,(y+1)%3) for r,v,y in data[100:]]
+        b=causal_regime_shrink(changed,data[:100],base,context,
+                              min_regime_samples=5)
+        self.assertTrue(np.allclose(a[0],b[0]))
+
     def test_three_class_probabilities_have_finite_metrics(self):
         rows=self.samples()
         result=run_nonlinear(rows,train_end="2024-09-01",

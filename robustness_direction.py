@@ -7,6 +7,7 @@ their fit cutoff. This remains retrospective research with survivor bias.
 """
 from nonlinear_direction import market_features,vectors,_fit,_predict,_stats,_causal_recalibration
 import numpy as np
+from regime_probability import causal_regime_shrink
 
 # This is a fixed protocol, not a winner tuned on 2025/2026 outcomes.
 FROZEN_CONFIG={"model":"extratrees","recent_mature_window":800,
@@ -35,7 +36,8 @@ def _diagnostic(y,p):
     return s
 
 def run_two_year_robustness(rows):
-    data=vectors(rows,market_features(rows))
+    context=market_features(rows)
+    data=vectors(rows,context)
     reports={}
     for year,(starts,ends) in WINDOWS.items():
         base=[r for r in data if r[0]["label_available_date"]<starts[0]]
@@ -69,11 +71,23 @@ def run_two_year_robustness(rows):
                     np.asarray([r[2] for r in period],dtype=int),p)["accuracy_pct"]})
         fixed=_diagnostic(y,fixed_probs)
         rolling=_diagnostic(y,rolling_probs)
+        # Candidate deliberately has fixed parameters; no 2025/2026 fit.
+        # Exclude evaluation events from the history argument because the
+        # shrinker already inserts their labels when they mature.
+        prior_history=[r for r in data if r[0]["signal_date"]<starts[0]]
+        regime_probs=causal_regime_shrink(
+            all_test,prior_history,rolling_probs,context,
+            blend=0.25,recent_window=1500,min_regime_samples=80)
+        regime=_diagnostic(y,regime_probs)
         reports[year]={
             "status":"RESEARCH_ONLY",
             "paired_samples":len(y),
             "frozen_config":FROZEN_CONFIG,
-            "fixed":fixed,"rolling":rolling,"periods":periods,
+            "fixed":fixed,"rolling":rolling,
+            "regime_shrunk":regime,"periods":periods,
+            "regime_accuracy_change_pp":round(regime["accuracy_pct"]-rolling["accuracy_pct"],2),
+            "regime_macro_f1_change_pp":round(regime["macro_f1_pct"]-rolling["macro_f1_pct"],2),
+            "regime_brier_change":round(regime["brier"]-rolling["brier"],6),
             "accuracy_change_pp":round(rolling["accuracy_pct"]-fixed["accuracy_pct"],2),
             "macro_f1_change_pp":round(rolling["macro_f1_pct"]-fixed["macro_f1_pct"],2),
             "brier_change":round(rolling["brier"]-fixed["brier"],6),
@@ -83,6 +97,8 @@ def run_two_year_robustness(rows):
             "independent_forward_test":False,
             "frozen_configuration":FROZEN_CONFIG,
             "calendar_windows":reports,
+            "regime_brier_improved_both_years":len(eligible)==2 and all(
+                v["regime_brier_change"]<0 for v in eligible),
             "two_years_probability_improved":len(eligible)==2 and all(
                 v["rolling_better_brier"] for v in eligible),
             "limitations":["Earlier periods were already inspected in ongoing research",
