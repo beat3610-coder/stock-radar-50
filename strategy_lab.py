@@ -15,7 +15,7 @@ import math
 import numpy as np
 import pandas as pd
 from engine import compute
-from providers import get_prices
+from providers import get_historical_prices
 from universe import get_universe
 from audit_300 import simulate_exit, metrics
 from portfolio_audit import replay
@@ -191,11 +191,11 @@ def run(per_market=30):
                    "2026 historical holdout was already examined; revised filters are development hypotheses, not new independent evidence",
                    "Never approve live trading without future independently observed paper results"],
         "markets":{}}
-    # 30 KOSPI + 30 KOSDAQ stocks, two TIGER ETFs, and SOXL only.
+    # Research calibration uses 100 ordinary shares from each major market.
+    # The separate 63-instrument audit handles TIGER ETFs and SOXL.
     for market in ("KR","KQ","US"):
-        target_count=1 if market=="US" else per_market+(2 if market=="KR" else 0)
-        items=(u["US"][-1:] if market=="US" else
-               u[market][:per_market]+(u["KR"][-2:] if market=="KR" else []))
+        target_count=per_market
+        items=u[market][:per_market]
         if len(items)<target_count:
             res.setdefault("input_failures",{})[market]={
                 "requested":target_count,"available":len(items),
@@ -203,15 +203,16 @@ def run(per_market=30):
                 "source":u.get(market+"_source"),
                 "status":"INSUFFICIENT_UNIVERSE_NOT_A_BACKTEST"}
             print("LAB_INPUT_FAILURE "+market+" "+json.dumps(res["input_failures"][market],ensure_ascii=False),flush=True)
-        frames={}
+        frames={};price_sources={}
         variants={k:[] for k in PARAMS}
         broad_training_pool=[]
         failures=[]
         for idx,(ticker,_,_,_) in enumerate(items,1):
             try:
-                raw,_=get_prices(ticker,market)
+                raw,source=get_historical_prices(ticker,market)
                 x,trades=candidates_from_frame(raw,ticker,market)
                 frames[ticker]=raw
+                price_sources[ticker]=source
                 broad_training_pool.extend(broad_candidates_from_computed(x,ticker,market,
                      end_date=HOLDOUT_END,cost_pct=COST_PCT))
                 for k in variants:variants[k].extend(trades[k])
@@ -343,6 +344,7 @@ def run(per_market=30):
         def compact(r):return {k:v for k,v in r.items() if k not in ("daily_equity","executions")}
         res["markets"][market]={
             "requested":target_count,"loaded":len(frames),"errors":failures,
+            "price_sources":price_sources,
             "training_selected":leader,"training_scores":scores,
             "validation_accepted":accepted,
             "edge_calibration":edge_diagnostics,

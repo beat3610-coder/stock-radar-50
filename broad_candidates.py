@@ -1,6 +1,6 @@
 """Research-only broad candidate generation independent of legacy buy filters.
 
-Every fifth observation evaluates a hypothetical executable next-open purchase,
+Every third observation evaluates a hypothetical executable next-open purchase,
 including weak/negative trend states. These are labelled using historical
 stop-first exits to train a classifier; generated outcomes are NEVER consulted
 when generating the signal, risk plan, or features.
@@ -11,32 +11,37 @@ import numpy as np
 from trade_execution import entry_quality
 from audit_300 import simulate_exit
 
-BROAD_STEP=5
+BROAD_STEP=3
 HOLD=10
 WARMUP=240
 
 def broad_candidates_from_computed(x,ticker,market,end_date="2026-11-01",cost_pct=0.35):
     rows=[]
     last_exit=-1
+    high20=x.High.shift(1).rolling(20,min_periods=20).max()
+    vol60=x.Volume.rolling(60,min_periods=60).mean()
     for i in range(WARMUP,len(x)-HOLD,BROAD_STEP):
         date=str(pd.Timestamp(x.index[i]).date())
         if date>=end_date:break
         if i<=last_exit:continue
         r=x.iloc[i]
         close=float(r.Close); nxt=float(x.Open.iloc[i+1])
-        names=("ATR","MA20","MA60","MA200","RSI","ADX","VOL20","Volume")
+        names=("ATR","MA20","MA60","MA200","RSI","ADX","VOL20","MACDH","Volume")
         try:
             if not all(np.isfinite(float(r[k])) for k in names):continue
             atr=float(r.ATR);v20=float(r.VOL20);ma60=float(r.MA60)
             past_close=float(x.Close.iloc[i-5])
             if min(close,nxt,atr,v20,ma60,past_close)<=0:continue
-            if not 0.004<=atr/close<=0.085:continue
+            max_atr_pct=0.15 if market=="US" else 0.085
+            if not 0.004<=atr/close<=max_atr_pct:continue
             if float(r.Volume)<=0:continue
             # Unlike technical BUY rules, permit falling MA200, RSI weakness,
             # flat MACD, and downtrends so the learner observes losses too.
-            stop=close-max(0.022*close,1.65*atr)
+            atr_stop_multiple=1.35 if market=="US" else 1.65
+            target_multiple=2.1 if market=="US" else 1.8
+            stop=close-max(0.022*close,atr_stop_multiple*atr)
             stop=max(stop,close*0.93)
-            target=close+1.8*(close-stop)
+            target=close+target_multiple*(close-stop)
             check=entry_quality(nxt,stop,target,reference=close,cost_pct=cost_pct)
             if not check["accepted"]:continue
             outcome=simulate_exit(x,i,nxt,stop,target,max_days=HOLD,cost_pct=cost_pct)
@@ -54,6 +59,11 @@ def broad_candidates_from_computed(x,ticker,market,end_date="2026-11-01",cost_pc
                 "signal_adx":float(r.ADX),
                 "signal_volume_ratio":float(r.Volume)/v20,
                 "signal_5d_return_pct":100*(close/past_close-1),
+                "signal_trend_200_pct":100*(close/float(r.MA200)-1),
+                "signal_macdh_pct":100*float(r.MACDH)/close,
+                "signal_drawdown_20_pct":100*(close/float(high20.iloc[i])-1),
+                "signal_rsi_5d_change":float(r.RSI-x.RSI.iloc[i-5]),
+                "signal_vol20_60_ratio":v20/float(vol60.iloc[i]) if np.isfinite(vol60.iloc[i]) and vol60.iloc[i]>0 else 1.0,
                 "entry_gap_pct":100*(nxt/close-1),
                 "score":float(r.RSI),**outcome})
             last_exit=outcome["exit_index"]

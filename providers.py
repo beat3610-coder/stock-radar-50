@@ -1,40 +1,94 @@
 import datetime as dt
+import hashlib
+import os
+from pathlib import Path
+import time
 import pandas as pd
 from engine import normalize
 
-def get_prices(code, market, *, start_date=None):
+PRICE_CACHE = Path(os.environ.get("STOCK_RADAR_PRICE_CACHE", ".cache/stock-radar/prices"))
+RETRY_DELAYS = (0.5, 1.0)
+
+def _cache_path(code, market, start):
+    key=hashlib.sha256(f"{market}:{code}:{start}".encode()).hexdigest()[:24]
+    return PRICE_CACHE/f"{key}.csv"
+
+def _read_cached(path, min_bars, max_age_days):
+    if not path.exists():return None
+    try:
+        frame=normalize(pd.read_csv(path,index_col=0,parse_dates=True))
+        last=pd.Timestamp(frame.index[-1]).date()
+        age=(dt.date.today()-last).days
+        if len(frame)<min_bars or age<0 or age>max_age_days:return None
+        return frame
+    except Exception:
+        return None
+
+def _write_cached(path, frame):
+    path.parent.mkdir(parents=True,exist_ok=True)
+    tmp=path.with_suffix(".tmp")
+    frame.to_csv(tmp,index_label="Date")
+    tmp.replace(path)
+
+def get_prices(code, market, *, start_date=None, min_bars=None):
     """Live default stays compact; research may ask for longer raw OHLCV history.
 
     The provider may return less history than requested; caller must inspect
     the actual first/last dates and observations rather than assume coverage.
     """
-    import FinanceDataReader as fdr
     start=(dt.date.today()-dt.timedelta(days=850)).isoformat() if start_date is None else str(pd.Timestamp(start_date).date())
+    required_bars=(250 if start_date is not None else 50) if min_bars is None else int(min_bars)
+    cache_path=_cache_path(code,market,start)
+    cached=_read_cached(cache_path,required_bars,14)
+    if cached is not None:
+        return cached,f"validated local OHLCV cache ({len(cached)} bars; through {cached.index[-1].date()})"
     failures=[]
-    candidates=[f"NAVER:{code}",code] if market in ("KR","KQ") else [f"STOOQ:{code}",code]
-    for symbol in candidates:
-        try:
-            return normalize(fdr.DataReader(symbol,start)),f"FinanceDataReader {symbol}"
-        except Exception as e:
-            failures.append(f"{symbol}: {str(e)[:110]}")
+    try:
+        import FinanceDataReader as fdr
+        candidates=[f"NAVER:{code}",code] if market in ("KR","KQ") else [f"STOOQ:{code}",code]
+        for symbol in candidates:
+            for attempt in range(1,len(RETRY_DELAYS)+2):
+                try:
+                    frame=normalize(fdr.DataReader(symbol,start))
+                    if len(frame)<required_bars:raise ValueError(f"history too short: {len(frame)}<{required_bars}")
+                    _write_cached(cache_path,frame)
+                    return frame,f"FinanceDataReader {symbol} ({len(frame)} bars)"
+                except Exception as e:
+                    failures.append(f"{symbol} try {attempt}: {str(e)[:95]}")
+                    if attempt<=len(RETRY_DELAYS):time.sleep(RETRY_DELAYS[attempt-1])
+    except Exception as e:
+        failures.append(f"FinanceDataReader unavailable: {str(e)[:95]}")
     try:
         import yfinance as yf
         suffix=".KQ" if market=="KQ" else ".KS"
         ticker=code if market=="US" else code+suffix
-        # Keep raw close series (not dividend-adjusted total-return proxy), consistent with
-        # the displayed exchange price; critical for distribution-paying ETFs.
-        data=yf.download(ticker,period="2y" if start_date is None else None,
-                         start=start if start_date is not None else None,
-                         interval="1d",auto_adjust=False,progress=False,
-                         threads=False,timeout=12)
-        return normalize(data),f"Yahoo {ticker}"
+        for attempt in range(1,len(RETRY_DELAYS)+2):
+            try:
+                data=yf.download(ticker,period="2y" if start_date is None else None,
+                                 start=start if start_date is not None else None,
+                                 interval="1d",auto_adjust=False,progress=False,
+                                 threads=False,timeout=20)
+                frame=normalize(data)
+                if len(frame)<required_bars:raise ValueError(f"history too short: {len(frame)}<{required_bars}")
+                _write_cached(cache_path,frame)
+                return frame,f"Yahoo {ticker} ({len(frame)} bars)"
+            except Exception as e:
+                failures.append(f"Yahoo {ticker} try {attempt}: {str(e)[:95]}")
+                if attempt<=len(RETRY_DELAYS):time.sleep(RETRY_DELAYS[attempt-1])
     except Exception as e:
-        failures.append(f"Yahoo: {str(e)[:110]}")
+        failures.append(f"Yahoo unavailable: {str(e)[:95]}")
+    # A stale complete cache can still support fixed historical windows, but its
+    # as-of date is returned explicitly so callers can reject incomplete windows.
+    try:
+        frame=normalize(pd.read_csv(cache_path,index_col=0,parse_dates=True))
+        if len(frame)>=required_bars:
+            return frame,f"stale historical cache ({len(frame)} bars; through {frame.index[-1].date()})"
+    except Exception:pass
     raise RuntimeError(" | ".join(failures))
 
-def get_historical_prices(code,market,*,start_date="2006-01-01"):
+def get_historical_prices(code,market,*,start_date="2006-01-01",min_bars=250):
     """Explicit research-only historical fetch, never a silent 850-day cap."""
-    return get_prices(code,market,start_date=start_date)
+    return get_prices(code,market,start_date=start_date,min_bars=min_bars)
 
 
 def verify_recent_close(code, market, primary_date, primary_price, primary_source,

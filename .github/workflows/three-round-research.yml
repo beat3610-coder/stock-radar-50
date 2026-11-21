@@ -15,6 +15,13 @@ jobs:
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
+      - name: Restore validated public OHLCV cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/stock-radar/prices
+          key: stock-radar-pr9-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            stock-radar-pr9-cache-${{ runner.os }}-${{ github.ref_name }}-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -49,3 +56,31 @@ jobs:
             three-round-results.json
             data/strategy-lab-latest.json
           if-no-files-found: warn
+      - name: Enforce complete 300-history report
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("data/strategy-lab-latest.json")
+          if not p.exists():
+              raise SystemExit("FAILED: research report missing")
+          report=json.loads(p.read_text(encoding="utf-8"))
+          incomplete=[]
+          for market in ("KR","KQ","US"):
+              row=report.get("markets",{}).get(market,{})
+              requested=row.get("requested",0)
+              loaded=row.get("loaded",0)
+              sources=len(row.get("price_sources",{}))
+              if requested!=100 or loaded!=100 or sources!=100:
+                  incomplete.append(f"{market} requested={requested}, loaded={loaded}/100, sources={sources}/100")
+          if report.get("data_integrity_status")!="PASS" or incomplete:
+              raise SystemExit("HISTORICAL_DATA_INTEGRITY_FAIL: "+"; ".join(incomplete))
+          print("HISTORICAL_DATA_INTEGRITY_PASS KR=100/100 KQ=100/100 US=100/100")
+          PY
+      - name: Save validated public OHLCV cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/stock-radar/prices
+          key: stock-radar-pr9-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}

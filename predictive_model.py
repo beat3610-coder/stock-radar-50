@@ -16,13 +16,19 @@ MIN_EXPECTED_NET_PCT=0.20
 
 # Fixed scales are set from domain ranges, not from future data.
 FEATURES=("signal_rsi","signal_adx","signal_atr_pct","signal_ma20_ma60_pct",
-          "signal_volume_ratio","signal_5d_return_pct","entry_gap_pct")
-CENTER=np.array([55.0,25.0,2.5,2.0,1.3,2.0,0.0],dtype=float)
-SCALE=np.array([20.0,20.0,3.0,4.0,1.5,8.0,2.5],dtype=float)
+          "signal_volume_ratio","signal_5d_return_pct","entry_gap_pct",
+          "signal_trend_200_pct","signal_macdh_pct","signal_drawdown_20_pct",
+          "signal_rsi_5d_change","signal_vol20_60_ratio")
+CENTER=np.array([55.0,25.0,2.5,2.0,1.3,2.0,0.0,2.0,0.0,-3.0,0.0,1.0],dtype=float)
+SCALE=np.array([20.0,20.0,3.0,4.0,1.5,8.0,2.5,20.0,1.5,8.0,20.0,0.75],dtype=float)
 
 def vector(trade):
     try:
-        values=np.asarray([float(trade[key]) for key in FEATURES],dtype=float)
+        # The original seven inputs remain required. New technical features
+        # are optional for compatibility with older archived research rows;
+        # absent optional values are neutral (their training-domain center).
+        values=np.asarray([float(trade[key]) if key in trade else CENTER[i]
+                           for i,key in enumerate(FEATURES)],dtype=float)
         if not np.isfinite(values).all():return None
         return np.clip((values-CENTER)/SCALE,-3,3)
     except (KeyError,TypeError,ValueError,OverflowError):
