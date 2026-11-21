@@ -277,51 +277,47 @@ def sort_nasdaq_by_market_cap(rows):
 
 def get_universe(include_us=True):
     kr_error=None
-    try: kr,kr_source=kospi_top100()
-    except Exception as e:
-        kr_error=str(e)
+    try:
+        from naver_api_universe import naver_api_top100
+        kr,kr_source=naver_api_top100("KR")
+    except Exception as api_exc:
         try:
-            from naver_api_universe import naver_api_top100
-            kr,kr_source=naver_api_top100("KR")
-            kr_source+=" / FDR 오류: "+kr_error[:85]
-            kr_error=None
-        except Exception as fallback_exc:
+            kr,kr_source=kospi_top100()
+            kr_source+=" / Naver API 오류: "+str(api_exc)[:85]
+        except Exception as e:
+            kr_error=str(e)
             try:
                 from naver_universe import naver_top100
                 kr,kr_source=naver_top100("KR")
-                kr_source+=" / API 오류: "+str(fallback_exc)[:85]
+                kr_source+=" / API 오류: "+str(api_exc)[:85]
                 kr_error=None
             except Exception as legacy_exc:
-                kr=[];kr_source="시총 상위 100종목 조회 실패 (FDR/Naver API/HTML)"
-                kr_error=kr_error+" | Naver API: "+str(fallback_exc)+" | HTML: "+str(legacy_exc)
+                kr=[];kr_source="시총 상위 100종목 조회 실패 (Naver API/FDR/HTML)"
+                kr_error=kr_error+" | Naver API: "+str(api_exc)+" | HTML: "+str(legacy_exc)
     kq_error=None
-    try: kq,kq_source=kosdaq_top100()
-    except Exception as e:
-        kq_error=str(e)
+    try:
+        from naver_api_universe import naver_api_top100
+        kq,kq_source=naver_api_top100("KQ")
+    except Exception as api_exc:
         try:
-            from naver_api_universe import naver_api_top100
-            kq,kq_source=naver_api_top100("KQ")
-            kq_source+=" / FDR 오류: "+kq_error[:85]
-            kq_error=None
-        except Exception as fallback_exc:
+            kq,kq_source=kosdaq_top100()
+            kq_source+=" / Naver API 오류: "+str(api_exc)[:85]
+        except Exception as e:
+            kq_error=str(e)
             try:
                 from naver_universe import naver_top100
                 kq,kq_source=naver_top100("KQ")
-                kq_source+=" / API 오류: "+str(fallback_exc)[:85]
+                kq_source+=" / API 오류: "+str(api_exc)[:85]
                 kq_error=None
             except Exception as legacy_exc:
-                kq=[];kq_source="코스닥 상위 100종목 조회 실패 (FDR/Naver API/HTML)"
-                kq_error=kq_error+" | Naver API: "+str(fallback_exc)+" | HTML: "+str(legacy_exc)
+                kq=[];kq_source="코스닥 상위 100종목 조회 실패 (Naver API/FDR/HTML)"
+                kq_error=kq_error+" | Naver API: "+str(api_exc)+" | HTML: "+str(legacy_exc)
     us=[];us_source="미국 일반주식 제외 (SOXL만 별도 추적)";us_cap_sorted=False
     if include_us:
         us,us_source=nasdaq_top100()
-        try:
-            us,cap_source=sort_nasdaq_by_market_cap(us)
-            us_source=us_source+" | "+cap_source
-            us_cap_sorted=True
-        except Exception as e:
-            us_source=us_source+" | 시총순 확인 불가: "+str(e)[:135]
-            us_cap_sorted=False
+        # Keep the validated Nasdaq-100 constituent order. FDR's full NASDAQ
+        # listing performs a thousands-symbol scrape and can stall this audit;
+        # it is unnecessary when the requested sample is the 100 constituents.
     kr_codes={code for code,_,_ in kr}
     us_codes={code for code,_,_ in us}
     # In the event a mandatory instrument qualifies for the index, do not duplicate.
