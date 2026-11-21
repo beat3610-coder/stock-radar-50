@@ -174,7 +174,10 @@ def train_choice(choices):
     return chosen,scores
 
 def run(per_market=30):
-    u=get_universe(include_us=False)
+    # The 300-stock study needs 100 ordinary shares from each market. SOXL is
+    # audited separately in the 63-instrument report and must not stand in for
+    # the US equity universe here.
+    u=get_universe(include_us=True)
     res={"created_utc":datetime.now(timezone.utc).isoformat(),
         "type":"research_lab_v8_online_streaming",
         "method":"train-only selection, fixed validation screening, untouched-in-this-run diagnostic holdout",
