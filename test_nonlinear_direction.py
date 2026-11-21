@@ -5,6 +5,7 @@ from test_regime_direction import event
 from nonlinear_direction import market_features,vectors,run_nonlinear,_causal_recalibration
 from rolling_refit_direction import run_refit
 from robustness_direction import run_two_year_robustness
+from ticker_probability import causal_ticker_shrink
 
 class NonlinearTests(unittest.TestCase):
     def samples(self):
@@ -87,6 +88,26 @@ class NonlinearTests(unittest.TestCase):
         self.assertIn(result["status"],("RESEARCH_ONLY","INCOMPLETE"))
         self.assertFalse(result["independent_forward_test"])
         self.assertEqual(set(result["calendar_windows"]),{"2025","2026"})
+        self.assertFalse(result["live_approved"])
+        self.assertIsInstance(result["ticker_research_gate_passed"],bool)
+        for yr in result["calendar_windows"].values():
+            if yr["status"]=="RESEARCH_ONLY":
+                self.assertEqual(yr["rolling"]["samples"],yr["ticker_shrunk"]["samples"])
+    def test_ticker_probability_maturity_and_normalization(self):
+        import numpy as np
+        rows=self.samples()[:300]
+        data=vectors(rows,market_features(rows))
+        base=np.tile(np.array([0.3,0.4,0.3]),(len(data[100:]),1))
+        opts=dict(min_ticker_count=1,prior_strength=10.0,blend=0.5)
+        a=causal_ticker_shrink(data[100:],data[:100],base,**opts)
+        self.assertTrue(np.allclose(a.sum(axis=1),1))
+        self.assertTrue(np.all(a>=0))
+        changed=[(r,v,(y+1)%3) for r,v,y in data[100:]]
+        b=causal_ticker_shrink(changed,data[:100],base,**opts)
+        self.assertTrue(np.allclose(a[0],b[0]))
+        nohistory=causal_ticker_shrink(data[:5],[],base[:5],**opts)
+        self.assertTrue(np.allclose(nohistory,base[:5]))
+
     def test_three_class_probabilities_have_finite_metrics(self):
         rows=self.samples()
         result=run_nonlinear(rows,train_end="2024-09-01",
