@@ -31,7 +31,7 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Syntax and causal integrity regression
         run: |
-          python -m compileall -q regime_direction.py nonlinear_direction.py rolling_refit_direction.py robustness_direction.py research_integrity.py direction_audit.py app.py
+          python -m compileall -q regime_direction.py nonlinear_direction.py rolling_refit_direction.py robustness_direction.py ticker_probability.py research_integrity.py direction_audit.py app.py
           python test_research_integrity.py
           python test_regime_direction.py
           python test_nonlinear_direction.py
