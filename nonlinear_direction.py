@@ -66,7 +66,7 @@ def _stats(y,p):
             "direction_f1_pct":{name:round(100*f1_score(y==i,pred==i,zero_division=0),2)
                                 for i,name in enumerate(LABELS)}}
 
-def _fit(train,kind):
+def _fit(train,kind,half_life_days=None,as_of_date=None):
     import numpy as np
     from sklearn.ensemble import HistGradientBoostingClassifier, ExtraTreesClassifier
     from sklearn.pipeline import make_pipeline
@@ -85,7 +85,17 @@ def _fit(train,kind):
             random_state=20261116)
     else:
         raise ValueError("invalid model")
-    model.fit(x,y)
+    if half_life_days is not None:
+        from datetime import date
+        if not as_of_date or half_life_days<=0:
+            raise ValueError("Weighted training requires a positive half-life and cutoff")
+        cutoff=date.fromisoformat(as_of_date)
+        ages=np.asarray([max(0,(cutoff-date.fromisoformat(r["signal_date"])).days)
+                         for r,_,_ in train],dtype=float)
+        sample_weight=np.maximum(0.05,np.exp2(-ages/half_life_days))
+        model.fit(x,y,sample_weight=sample_weight)
+    else:
+        model.fit(x,y)
     return model
 
 def _predict(model,rows):

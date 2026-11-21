@@ -18,8 +18,8 @@ WINDOWS={
  "2026":(("2026-01-01","2026-04-01","2026-07-01","2026-09-01"),
          ("2026-04-01","2026-07-01","2026-09-01","2026-11-01"))
 }
-def _one_fit(train,test):
-    model=_fit(train,FROZEN_CONFIG["model"])
+def _one_fit(train,test,half_life_days=None,as_of_date=None):
+    model=_fit(train,FROZEN_CONFIG["model"],half_life_days=half_life_days,as_of_date=as_of_date)
     prior=np.bincount([r[2] for r in train],minlength=3).astype(float)+1
     prior/=prior.sum()
     return _causal_recalibration(test,train,_predict(model,test),prior,
@@ -56,6 +56,7 @@ def run_two_year_robustness(rows):
             reports[year]={"status":"INSUFFICIENT"}
             continue
         rolling_probs=[]
+        weighted_probs=[]
         periods=[]
         for start,end,period in segments:
             if not period:
@@ -63,17 +64,24 @@ def run_two_year_robustness(rows):
                 continue
             matured=[r for r in data if r[0]["label_available_date"]<start]
             p=_one_fit(matured,period)
+            weighted=_one_fit(matured,period,half_life_days=365,as_of_date=start)
             rolling_probs.extend(list(p))
+            weighted_probs.extend(list(weighted))
             periods.append({"start":start,"end":end,"train_mature":len(matured),
                 "samples":len(period),"accuracy_pct":_stats(
                     np.asarray([r[2] for r in period],dtype=int),p)["accuracy_pct"]})
         fixed=_diagnostic(y,fixed_probs)
         rolling=_diagnostic(y,rolling_probs)
+        weighted=_diagnostic(y,weighted_probs)
         reports[year]={
             "status":"RESEARCH_ONLY",
             "paired_samples":len(y),
             "frozen_config":FROZEN_CONFIG,
-            "fixed":fixed,"rolling":rolling,"periods":periods,
+            "fixed":fixed,"rolling":rolling,
+            "recency_weighted_365d":weighted,"periods":periods,
+            "weighted_accuracy_change_pp":round(weighted["accuracy_pct"]-rolling["accuracy_pct"],2),
+            "weighted_brier_change":round(weighted["brier"]-rolling["brier"],6),
+            "weighted_macro_f1_change_pp":round(weighted["macro_f1_pct"]-rolling["macro_f1_pct"],2),
             "accuracy_change_pp":round(rolling["accuracy_pct"]-fixed["accuracy_pct"],2),
             "macro_f1_change_pp":round(rolling["macro_f1_pct"]-fixed["macro_f1_pct"],2),
             "brier_change":round(rolling["brier"]-fixed["brier"],6),
@@ -83,6 +91,7 @@ def run_two_year_robustness(rows):
             "independent_forward_test":False,
             "frozen_configuration":FROZEN_CONFIG,
             "calendar_windows":reports,
+            "recency_weighted_better_brier_both_years":len(eligible)==2 and all(v["weighted_brier_change"]<0 for v in eligible),
             "two_years_probability_improved":len(eligible)==2 and all(
                 v["rolling_better_brier"] for v in eligible),
             "limitations":["Earlier periods were already inspected in ongoing research",
