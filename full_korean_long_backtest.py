@@ -80,7 +80,15 @@ def run(market):
                     "error":str(exc)[:300],"label_count":len(subset)}
         # Prespecified protocol, no model choice based on either test year.
         report["two_year_robustness"]=run_two_year_robustness(rows)
-        print("ROBUSTNESS_MARKET",market,json.dumps({"status":report["two_year_robustness"]["status"],"windows":{k:{"accuracy_change_pp":v.get("accuracy_change_pp"),"macro_f1_change_pp":v.get("macro_f1_change_pp"),"brier_change":v.get("brier_change"),"samples":v.get("paired_samples")} for k,v in report["two_year_robustness"]["calendar_windows"].items()}},ensure_ascii=False),flush=True)
+        print("ROBUSTNESS_MARKET",market,json.dumps({"status":report["two_year_robustness"]["status"],"windows":{k:{"accuracy_change_pp":v.get("accuracy_change_pp"),"macro_f1_change_pp":v.get("macro_f1_change_pp"),"brier_change":v.get("brier_change"),
+"ticker_accuracy_change_pp":v.get("ticker_accuracy_change_pp"),
+"ticker_brier_change":v.get("ticker_brier_change"),
+"ticker_macro_f1_change_pp":v.get("ticker_macro_f1_change_pp"),"combo_accuracy_pct":v.get("combo_accuracy_pct"),
+"combo_vs_ticker_accuracy_pp":v.get("combo_vs_ticker_accuracy_pp"),
+"combo_vs_ticker_brier":v.get("combo_vs_ticker_brier"),
+"combo_vs_ticker_macro_f1_pp":v.get("combo_vs_ticker_macro_f1_pp"),
+"combo_direction_f1_delta":v.get("combo_direction_f1_delta"),
+"samples":v.get("paired_samples")} for k,v in report["two_year_robustness"]["calendar_windows"].items()}},ensure_ascii=False),flush=True)
         a=report["comparisons"].get("recent_850d",{})
         b=report["comparisons"].get("five_years",{})
         if a.get("status")==b.get("status")=="RESEARCH_ONLY":
