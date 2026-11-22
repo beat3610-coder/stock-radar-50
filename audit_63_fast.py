@@ -602,9 +602,13 @@ def _legacy_policy_rows(legacy_rows,scored_rows,kind,threshold=None):
     selected=[]
     for row in legacy_rows:
         if kind=="legacy_only":selected.append(row);continue
-        if kind=="legacy_regime_gate":
-            if row.get("market_regime")!="RISK_OFF":
-                score=score_by_key.get(key(row));selected.append({**row,**({"model_predicted_r":score.get("model_predicted_r"),"realized_r":score.get("realized_r")} if score else {})})
+        if kind in ("legacy_regime_gate","legacy_model_filter_and_regime_gate"):
+            if row.get("market_regime")=="RISK_OFF":continue
+            score=score_by_key.get(key(row))
+            if kind=="legacy_model_filter_and_regime_gate":
+                if score is None or row.get("signal_date") not in eligible_days:continue
+                if threshold is None or float(score.get("model_predicted_r",-np.inf))<float(threshold):continue
+            selected.append({**row,**({"model_predicted_r":score.get("model_predicted_r"),"realized_r":score.get("realized_r")} if score else {})})
             continue
         score=score_by_key.get(key(row))
         if score is None or row.get("signal_date") not in eligible_days:continue
@@ -617,11 +621,14 @@ def _policy_candidate_metrics(legacy_by_period,scored_by_period,frames,requested
     specs={"legacy_only":{"kind":"legacy_only"}}
     specs.update({f"legacy_model_filter_{name}":{"kind":"model_filter","threshold":row.get("global")}
                   for name,row in thresholds.items() if name.startswith("r_p")})
+    specs.update({f"legacy_model_filter_{name}_and_risk_off_gate":{"kind":"legacy_model_filter_and_regime_gate","threshold":row.get("global")}
+                  for name,row in thresholds.items() if name.startswith("r_p")})
     specs["legacy_regime_gate"]={"kind":"legacy_regime_gate"}
     result={}
     for name,spec in specs.items():
         if spec["kind"]=="legacy_only":rows=_legacy_policy_rows(legacy_by_period,scored_by_period,"legacy_only")
         elif spec["kind"]=="legacy_regime_gate":rows=_legacy_policy_rows(legacy_by_period,scored_by_period,"legacy_regime_gate")
+        elif spec["kind"]=="legacy_model_filter_and_regime_gate":rows=_legacy_policy_rows(legacy_by_period,scored_by_period,spec["kind"],spec.get("threshold"))
         elif spec.get("threshold") is not None:
             rows=_legacy_policy_rows(legacy_by_period,scored_by_period,"model_filter",spec["threshold"])
         else:rows=[]
@@ -982,9 +989,12 @@ def run():
             elif selected_legacy_policy=="legacy_regime_gate":
                 legacy_policy_trades=_legacy_policy_rows(legacy_pool,_period(scored,period),"legacy_regime_gate")
             else:
+                combined_gate=selected_legacy_policy.endswith("_and_risk_off_gate")
                 quantile_name=selected_legacy_policy.replace("legacy_model_filter_","")
+                if combined_gate:quantile_name=quantile_name.removesuffix("_and_risk_off_gate")
                 cutoff=policy_thresholds.get(quantile_name,{}).get("global")
-                legacy_policy_trades=_legacy_policy_rows(legacy_pool,_period(policy_scored,period),"model_filter",cutoff) if cutoff is not None else []
+                kind="legacy_model_filter_and_regime_gate" if combined_gate else "model_filter"
+                legacy_policy_trades=_legacy_policy_rows(legacy_pool,_period(policy_scored,period),kind,cutoff) if cutoff is not None else []
             model_pool=_period(model_trades,period)
             all_scored=_period(scored,period)
             accepted_before_gate=_datewise_selected(all_scored,model_policy,thresholds) if model_policy else []

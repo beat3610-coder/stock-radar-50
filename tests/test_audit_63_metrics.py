@@ -5,7 +5,7 @@ import pandas as pd
 from audit_63_fast import (_calibration,_equal_weight_replay,_overlap_report,
                            _auc,_development_legacy_coefficient,_policy_results,_policy_thresholds,
                            _select_config,_select_policy,_select_r_policy,_rank_metrics,_decorate_features,
-                           _target_variant_choices)
+                           _target_variant_choices,_legacy_policy_rows)
 
 def trade(ticker,entry,exit_date,net,prob=.4,ev=-1.0):
     return {"ticker":ticker,"signal_date":entry,"entry_date":entry,"exit_date":exit_date,
@@ -20,6 +20,16 @@ class Audit63MetricsTests(unittest.TestCase):
         choices=_target_variant_choices({"pooled":{"selected_dev_metrics":{"datewise_spearman_mean":.1}},
                                          "date_cs":{"selected_dev_metrics":None}})
         self.assertEqual(choices,[(.1,"pooled")])
+
+    def test_legacy_model_and_regime_gates_are_both_applied(self):
+        base="2025-01-02"
+        legacy=[trade("A",base,"2025-01-10",1),trade("B",base,"2025-01-10",2)]
+        legacy[0]["market_regime"]="RISK_ON";legacy[1]["market_regime"]="RISK_OFF"
+        scores=[{**trade(t["ticker"],base,"2025-01-10",1),"model_predicted_r":.8}
+                for t in legacy]
+        scores.append({**trade("C",base,"2025-01-10",1),"model_predicted_r":.2})
+        chosen=_legacy_policy_rows(legacy,scores,"legacy_model_filter_and_regime_gate",.5)
+        self.assertEqual([r["ticker"] for r in chosen],["A"])
 
     def test_model_payoff_features_do_not_use_next_open(self):
         dates=pd.bdate_range("2025-01-01",periods=230)
