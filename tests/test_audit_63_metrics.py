@@ -2,7 +2,8 @@ import unittest
 import pandas as pd
 
 from audit_63_fast import (_calibration,_equal_weight_replay,_overlap_report,
-                           _auc,_policy_results,_policy_thresholds,_select_config,_select_policy)
+                           _auc,_development_legacy_coefficient,_policy_results,_policy_thresholds,
+                           _select_config,_select_policy)
 
 def trade(ticker,entry,exit_date,net,prob=.4,ev=-1.0):
     return {"ticker":ticker,"signal_date":entry,"entry_date":entry,"exit_date":exit_date,
@@ -52,6 +53,27 @@ class Audit63MetricsTests(unittest.TestCase):
         result=_policy_results(diag,thresholds,"diagnostic")
         rates=[result[k]["acceptance_rate_pct"] for k in ("ev_p70","ev_p80","ev_p90")]
         self.assertGreater(rates[0],rates[1]);self.assertGreater(rates[1],rates[2])
+
+    def test_legacy_coefficient_uses_chronological_rolling_window(self):
+        def candidate(i,entry,family,win):
+            return {"ticker":f"T{i}","signal_date":entry,"entry_date":entry,
+                    "exit_date":str(pd.Timestamp(entry)+pd.Timedelta(days=1))[:10],
+                    "net_pct":1.0 if win else -1.0,"candidate_legacy":float(family),
+                    "signal_rsi":50,"signal_adx":22,"signal_atr_pct":2,
+                    "signal_ma20_ma60_pct":1,"signal_volume_ratio":1,
+                    "signal_5d_return_pct":0,"entry_gap_pct":0,
+                    "entry_net_rr":1.5,"entry_net_upside_pct":4,
+                    "entry_net_downside_pct":4,"signal_stop_atr":1.8,
+                    "signal_trend_200_pct":1,"signal_macdh_pct":0,
+                    "signal_drawdown_20_pct":-2,"signal_rsi_5d_change":0,
+                    "signal_vol20_60_ratio":1}
+        broad_dates=pd.date_range("2024-08-01",periods=240,freq="D")
+        legacy_dates=pd.date_range("2025-05-01",periods=60,freq="D")
+        broad=[candidate(i,str(d.date()),0,i%2==0) for i,d in enumerate(broad_dates)]
+        legacy=[candidate(1000+i,str(d.date()),1,True) for i,d in enumerate(legacy_dates)]
+        report=_development_legacy_coefficient(legacy+broad,"rolling240_full_shrink50")
+        self.assertEqual(report["training_candidates"],240)
+        self.assertGreater(report["standardized_log_odds_coefficient"],0)
 
     def test_paired_overlap_decomposes_signals(self):
         legacy=[trade("A","2025-01-02","2025-01-04",-1),trade("B","2025-01-03","2025-01-05",1)]

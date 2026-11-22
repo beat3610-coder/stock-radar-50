@@ -129,6 +129,7 @@ def _development_legacy_coefficient(candidates,config_name):
     if not config_name:return None
     train=[t for t in candidates if t.get("signal_date","")>=SAMPLE_START
            and t.get("entry_date","")<TRAIN_END and t.get("exit_date","")<TRAIN_END]
+    train.sort(key=lambda t:(t.get("exit_date",""),t.get("ticker",""),t.get("entry_date","")))
     snapshot=prepare_snapshot(train,config_name)
     if snapshot is None or "candidate_legacy" not in snapshot["features"]:return None
     beta=float(snapshot["beta"][1+snapshot["features"].index("candidate_legacy")])
