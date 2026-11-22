@@ -586,6 +586,14 @@ def _datewise_selected(rows,policy,thresholds):
     if cutoff is None:return []
     return [r for r in eligible if float(r.get("model_predicted_r",-np.inf))>=float(cutoff)]
 
+def _target_variant_choices(results):
+    choices=[]
+    for name,data in results.items():
+        metrics=data.get("selected_dev_metrics") or {}
+        primary=metrics.get("datewise_spearman_mean")
+        if primary is not None:choices.append((primary,name))
+    return choices
+
 def _legacy_policy_rows(legacy_rows,scored_rows,kind,threshold=None):
     key=lambda r:(r.get("ticker"),r.get("signal_date"),r.get("entry_date"),r.get("strategy"))
     score_by_key={key(r):r for r in scored_rows}
@@ -854,9 +862,7 @@ def run():
             target_results[target_variant]={"selected_config":chosen,"model_comparison":dev_comp,
                 "score_status":statuses,"selected_scores":scored_configs.get(chosen,[]),
                 "selected_dev_metrics":dev_comp.get(chosen,{}).get("r_rank_metrics")}
-        target_choices=[(v.get("selected_dev_metrics",{}).get("datewise_spearman_mean"),name)
-                        for name,v in target_results.items()
-                        if v.get("selected_dev_metrics",{}).get("datewise_spearman_mean") is not None]
+        target_choices=_target_variant_choices(target_results)
         selected_target=max(target_choices,key=lambda x:(x[0],x[1]))[1] if target_choices else "date_cs"
         selected_config=target_results[selected_target]["selected_config"]
         scored=target_results[selected_target]["selected_scores"]

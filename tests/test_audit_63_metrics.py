@@ -4,7 +4,8 @@ import pandas as pd
 
 from audit_63_fast import (_calibration,_equal_weight_replay,_overlap_report,
                            _auc,_development_legacy_coefficient,_policy_results,_policy_thresholds,
-                           _select_config,_select_policy,_select_r_policy,_rank_metrics,_decorate_features)
+                           _select_config,_select_policy,_select_r_policy,_rank_metrics,_decorate_features,
+                           _target_variant_choices)
 
 def trade(ticker,entry,exit_date,net,prob=.4,ev=-1.0):
     return {"ticker":ticker,"signal_date":entry,"entry_date":entry,"exit_date":exit_date,
@@ -14,6 +15,12 @@ def trade(ticker,entry,exit_date,net,prob=.4,ev=-1.0):
             "score":50.0,"strategy":"x","candidate_family":"broad"}
 
 class Audit63MetricsTests(unittest.TestCase):
+    def test_target_variant_selection_handles_empty_cohort(self):
+        self.assertEqual(_target_variant_choices({"pooled":{"selected_dev_metrics":None}}),[])
+        choices=_target_variant_choices({"pooled":{"selected_dev_metrics":{"datewise_spearman_mean":.1}},
+                                         "date_cs":{"selected_dev_metrics":None}})
+        self.assertEqual(choices,[(.1,"pooled")])
+
     def test_model_payoff_features_do_not_use_next_open(self):
         dates=pd.bdate_range("2025-01-01",periods=230)
         frame=pd.DataFrame({"Close":np.full(230,100.),"Volume":np.full(230,1000.)},index=dates)
