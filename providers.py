@@ -141,15 +141,21 @@ def get_market_series_bundle(*,start_date="2016-01-01",end_date=None):
     for key,spec in MARKET_SERIES.items():
         path=root/f"{key.lower()}_{start_date}_{end}.csv"
         attempts=[]
-        frame=None
+        frame=None;source=None;loaded_cache=False
         if path.exists():
             try:
                 cached=_normalize_market_close(pd.read_csv(path,index_col=0,parse_dates=True))
                 if not cached.empty and cached.index.min()<=pd.Timestamp(start_date) and cached.index.max()>=pd.Timestamp(end)-pd.Timedelta(days=12):
-                    frame=cached
-                    diagnostics[key]={"status":"cache","source":"validated local market-series cache",
-                        "requested_symbol":spec,"first_date":str(cached.index.min().date()),
-                        "last_date":str(cached.index.max().date()),"observations":len(cached),"failures":[]}
+                    metadata_path=path.with_suffix(".source.json")
+                    metadata=json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.exists() else {}
+                    cached_source=metadata.get("source")
+                    if cached_source:
+                        frame=cached;source=cached_source;loaded_cache=True
+                    else:
+                        # Earlier caches did not persist provider provenance;
+                        # refresh once so the audit never labels a cached value
+                        # with a stale source from the prior loop iteration.
+                        attempts.append("cache source metadata missing; refreshing from declared providers")
             except Exception as exc:
                 attempts.append(f"cache: {type(exc).__name__}: {str(exc)[:120]}")
         if frame is None:
@@ -186,9 +192,11 @@ def get_market_series_bundle(*,start_date="2016-01-01",end_date=None):
                 attempts.append(f"yfinance unavailable: {type(exc).__name__}: {str(exc)[:120]}")
         if frame is not None:
             frame=frame.sort_index()
-            frame.to_csv(path,index_label="Date")
+            if not loaded_cache:
+                frame.to_csv(path,index_label="Date")
+                path.with_suffix(".source.json").write_text(json.dumps({"source":source},ensure_ascii=False),encoding="utf-8")
             frames[key]=frame
-            diagnostics[key]={"status":"ok","source":source,"requested_symbol":spec,
+            diagnostics[key]={"status":"cache" if loaded_cache else "ok","source":source,"requested_symbol":spec,
                 "first_date":str(frame.index.min().date()),"last_date":str(frame.index.max().date()),
                 "observations":len(frame),"failures":attempts}
         else:
