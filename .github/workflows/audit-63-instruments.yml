@@ -13,6 +13,7 @@ on:
       - 'predictive_model.py'
       - 'r_rank_model.py'
       - 'market_context.py'
+      - 'expanded_direction_audit.py'
       - 'data/cec6d80-baseline.json'
   pull_request:
     paths:
@@ -25,6 +26,7 @@ on:
       - 'strategy_lab.py'
       - 'r_rank_model.py'
       - 'market_context.py'
+      - 'expanded_direction_audit.py'
       - 'data/cec6d80-baseline.json'
   workflow_dispatch:
 jobs:

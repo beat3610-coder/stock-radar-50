@@ -1040,6 +1040,17 @@ def run():
     out["runtime_seconds"]=(datetime.now(timezone.utc)-started).total_seconds()
     Path("data").mkdir(exist_ok=True);Path("data/audit-63-latest.json").write_text(json.dumps(out,ensure_ascii=False,indent=2,default=str),encoding="utf-8")
     if not integrity:raise SystemExit("FAILED: incomplete 63-instrument OHLCV coverage; see data/audit-63-latest.json")
+    print("AUDIT_EXPANDED_UNIVERSE_DIRECTION_START",flush=True)
+    from expanded_direction_audit import run_expanded_direction_audit
+    expanded=run_expanded_direction_audit()
+    out["universe_expansion"]=expanded["universe_expansion"]
+    out["label_variants"]=expanded["label_variants"]
+    out["direction3"]=expanded["direction3"]
+    out["feature_coverage"]["expanded_direction_model"]=expanded["feature_coverage"]
+    out["expanded_direction_selection_rule"]=expanded["selection_rule"]
+    out["runtime_seconds"]=(datetime.now(timezone.utc)-started).total_seconds()
+    Path("data/audit-63-latest.json").write_text(json.dumps(out,ensure_ascii=False,indent=2,default=str),encoding="utf-8")
+    print(f"AUDIT_EXPANDED_UNIVERSE_COMPLETE requested={expanded['universe_expansion']['requested']} loaded={expanded['universe_expansion']['loaded']} failures={len(expanded['universe_expansion']['failures'])}",flush=True)
     return out
 
 if __name__=="__main__":run()
