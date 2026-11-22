@@ -209,10 +209,17 @@ def _policy_results(scored,thresholds,period):
     for name,cutoff in thresholds.items():
         passed=[t for t in pool if _accept(t,name,thresholds)]
         selected=_resolve_nonoverlapping(passed)
+        by_family={}
+        for family in ("legacy","broad"):
+            family_pool=[t for t in pool if t.get("candidate_family")==family]
+            family_passed=[t for t in passed if t.get("candidate_family")==family]
+            by_family[family]={"scored_candidates":len(family_pool),"gate_passed_candidates":len(family_passed),
+                "acceptance_rate_pct":round(100*len(family_passed)/len(family_pool),2) if family_pool else None,
+                "selected_trades":_trade_metrics(_resolve_nonoverlapping(family_passed))}
         out[name]={"threshold_expected_net_pct":cutoff,"scored_candidates":len(pool),
                    "gate_passed_candidates":len(passed),
                    "acceptance_rate_pct":round(100*len(passed)/len(pool),2) if pool else None,
-                   "selected_trades":_trade_metrics(selected)}
+                   "selected_trades":_trade_metrics(selected),"by_family":by_family}
     return out
 
 def _select_policy(scored,thresholds,raw_candidates=None):
@@ -384,6 +391,12 @@ def run():
         scored=scored_by_config[selected_config] if selected_config else []
         thresholds=_policy_thresholds(scored)
         selected_policy,policy_development,policy_status=_select_policy(scored,thresholds,combined)
+        config_policy_diagnostics={}
+        for config_name,config_scored in scored_by_config.items():
+            config_thresholds=_policy_thresholds(config_scored)
+            config_policy_diagnostics[config_name]={"development_thresholds_only":config_thresholds,
+                "periods":{period:_policy_results(config_scored,config_thresholds,period)
+                           for period in ("development","validation","diagnostic")}}
         dev_population=_trade_metrics(_resolve_nonoverlapping(_period(combined,"development")))
         raw_dev=_trade_metrics(_period(combined,"development"))
         no_edge=policy_status=="NO_DEVELOPMENT_EDGE"
@@ -399,7 +412,8 @@ def run():
           "legacy_selected_development_strategy":legacy_selected,"legacy_development_by_variant":legacy_dev,
           "selected_model_config":selected_config,"model_config_status":config_status,
           "model_config_selection_metric":"development prequential AUROC; Brier is calibration diagnostic only",
-          "model_config_scores_by_period":config_development,"model_config_score_status":score_status,
+          "model_config_scores_by_period":config_development,"model_config_policy_diagnostics":config_policy_diagnostics,
+          "model_config_score_status":score_status,
           "selected_config_candidate_legacy_coefficient_at_development_end":_development_legacy_coefficient(combined,selected_config),
           "selected_model_policy":selected_policy,"model_policy_status":policy_status,
           "model_policy_thresholds_expected_net_pct":thresholds,

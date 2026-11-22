@@ -10,7 +10,7 @@ def trade(ticker,entry,exit_date,net,prob=.4,ev=-1.0):
             "exit_price":100.0,"entry":100.0,"stop":95.0,"take":108.0,
             "net_pct":net,"model_probability":prob,"model_expected_net_pct":ev,
             "model_predicted_win_pct":100*prob,
-            "score":50.0,"strategy":"x"}
+            "score":50.0,"strategy":"x","candidate_family":"broad"}
 
 class Audit63MetricsTests(unittest.TestCase):
     def test_reliability_and_ece_are_reported(self):
@@ -51,8 +51,12 @@ class Audit63MetricsTests(unittest.TestCase):
         self.assertEqual(set(thresholds),{"ev_p70","ev_p80","ev_p90"})
         diag=[{**r,"signal_date":"2026-05-01","entry_date":"2026-05-01","exit_date":"2026-05-02"} for r in rows]
         result=_policy_results(diag,thresholds,"diagnostic")
+        self.assertEqual(result["ev_p70"]["by_family"]["broad"]["gate_passed_candidates"],
+                         result["ev_p70"]["gate_passed_candidates"])
         rates=[result[k]["acceptance_rate_pct"] for k in ("ev_p70","ev_p80","ev_p90")]
         self.assertGreater(rates[0],rates[1]);self.assertGreater(rates[1],rates[2])
+        with_oos_extreme=rows+[{**diag[0],"model_expected_net_pct":1000}]
+        self.assertEqual(_policy_thresholds(with_oos_extreme),thresholds)
 
     def test_legacy_coefficient_uses_chronological_rolling_window(self):
         def candidate(i,entry,family,win):
