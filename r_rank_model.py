@@ -119,11 +119,16 @@ def realized_r(trade):
     except (KeyError,TypeError,ValueError,ZeroDivisionError):pass
     return None
 
-def design_matrix(trades,feature_set="plus_flow"):
+def design_matrix(trades,feature_set="plus_flow",excluded_features=()):
     """Fixed-scale features, 6 variant one-hots, and variant×net-RR terms."""
-    numeric=FEATURE_GROUPS[feature_set]
-    x=np.zeros((len(trades),len(numeric)+len(STRATEGIES)*(1+len(INTERACTION_FEATURES))),dtype=np.float32)
-    nnum=len(numeric)
+    excluded=set(excluded_features)
+    numeric=tuple(k for k in FEATURE_GROUPS[feature_set] if k not in excluded)
+    flag_names={s:f"strategy_flag:{s}" for s in STRATEGIES if f"strategy_flag:{s}" not in excluded}
+    interaction_names={s:f"strategy_x_entry_net_rr:{s}" for s in STRATEGIES
+                       if f"strategy_x_entry_net_rr:{s}" not in excluded}
+    x=np.zeros((len(trades),len(numeric)+len(flag_names)+len(interaction_names)),dtype=np.float32)
+    nnum=len(numeric);flag_col={s:nnum+i for i,s in enumerate(flag_names)}
+    int_col={s:nnum+len(flag_names)+i for i,s in enumerate(interaction_names)}
     for i,t in enumerate(trades):
         for j,key in enumerate(numeric):
             try:value=float(t[key])
@@ -133,10 +138,13 @@ def design_matrix(trades,feature_set="plus_flow"):
         strategy=t.get("strategy") or t.get("candidate_variant")
         if strategy not in STRATEGIES and t.get("candidate_family")=="broad":strategy="broad_market_ml"
         if strategy not in STRATEGIES:strategy="broad_market_ml"
-        k=STRATEGIES.index(strategy)
-        x[i,nnum+k]=1.0
-        rr=x[i,numeric.index("entry_net_rr")]
-        x[i,nnum+len(STRATEGIES)+k]=rr
+        if strategy in flag_col:x[i,flag_col[strategy]]=1.0
+        if strategy in int_col:
+            if "entry_net_rr" in numeric:rr=x[i,numeric.index("entry_net_rr")]
+            else:
+                try:rr=np.clip((float(t["entry_net_rr"])-CENTERS["entry_net_rr"])/SCALES["entry_net_rr"],-4,4)
+                except (KeyError,TypeError,ValueError):rr=0.0
+            x[i,int_col[strategy]]=rr
     return x
 
 def _estimator(config):
@@ -149,8 +157,19 @@ def _estimator(config):
         **{k:v for k,v in cfg.items() if k!="kind"})
     raise ValueError(f"unknown model kind: {kind}")
 
-def _fit_snapshot(train_rows,train_x,config,min_train_samples=MIN_TRAIN_SAMPLES):
-    y=np.asarray([realized_r(t) for t in train_rows],dtype=float)
+def _fit_snapshot(train_rows,train_x,config,min_train_samples=MIN_TRAIN_SAMPLES,target_variant="pooled"):
+    raw_y=np.asarray([realized_r(t) for t in train_rows],dtype=float)
+    if target_variant=="date_cs":
+        # The snapshot's same-date mean is calculated only from candidates
+        # already closed strictly before this snapshot's anchor.
+        groups={}
+        for i,row in enumerate(train_rows):
+            if np.isfinite(raw_y[i]):groups.setdefault(row["signal_date"],[]).append(i)
+        y=raw_y.copy()
+        for indexes in groups.values():
+            y[indexes]-=float(np.mean(raw_y[indexes]))
+    elif target_variant=="pooled":y=raw_y
+    else:raise ValueError(f"unknown target variant: {target_variant}")
     valid=np.isfinite(y)
     if valid.sum()<min_train_samples:return None
     # Keep a deterministic chronological training window to bound CPU/memory.
@@ -171,12 +190,13 @@ def _fit_snapshot(train_rows,train_x,config,min_train_samples=MIN_TRAIN_SAMPLES)
         calibrator.fit(calibration_r.reshape(-1,1),labels[split:])
     return {"model":model,"calibrator":calibrator,"train_n":len(y),"train_r":y}
 
-def walk_forward_scores(candidates,config,min_train_samples=MIN_TRAIN_SAMPLES,feature_set="plus_flow"):
+def walk_forward_scores(candidates,config,min_train_samples=MIN_TRAIN_SAMPLES,feature_set="plus_flow",
+                        target_variant="pooled",excluded_features=()):
     """Quarterly prequential snapshots; all labels have exit_date < anchor."""
     if not candidates:return [],{"candidate_n":0,"scored_n":0,"insufficient_history_n":0,"snapshot_n":0,"max_train_n":0}
     ordered=sorted(candidates,key=lambda t:(t["signal_date"],t["ticker"],t["entry_date"],t.get("strategy","")))
     exits=sorted(range(len(ordered)),key=lambda i:(ordered[i]["exit_date"],ordered[i]["ticker"],ordered[i]["entry_date"]))
-    xall=design_matrix(ordered,feature_set);ys=np.asarray([realized_r(t) if realized_r(t) is not None else np.nan for t in ordered])
+    xall=design_matrix(ordered,feature_set,excluded_features);ys=np.asarray([realized_r(t) if realized_r(t) is not None else np.nan for t in ordered])
     scored=[];cursor=0;past_idx=[];last_quarter=None;snapshot=None;insufficient=0;max_train=0;snapshots=0
     for idx,row in enumerate(ordered):
         day=pd.Timestamp(row["signal_date"])
@@ -185,7 +205,7 @@ def walk_forward_scores(candidates,config,min_train_samples=MIN_TRAIN_SAMPLES,fe
             anchor=quarter.start_time.strftime("%Y-%m-%d")
             while cursor<len(exits) and ordered[exits[cursor]]["exit_date"]<anchor:
                 past_idx.append(exits[cursor]);cursor+=1
-            snapshot=_fit_snapshot([ordered[j] for j in past_idx],xall[past_idx],config,min_train_samples) if len(past_idx)>=min_train_samples else None
+            snapshot=_fit_snapshot([ordered[j] for j in past_idx],xall[past_idx],config,min_train_samples,target_variant) if len(past_idx)>=min_train_samples else None
             last_quarter=quarter;snapshots+=1
             if snapshot:max_train=max(max_train,snapshot["train_n"])
         if snapshot is None:
@@ -195,6 +215,7 @@ def walk_forward_scores(candidates,config,min_train_samples=MIN_TRAIN_SAMPLES,fe
         cal=snapshot["calibrator"]
         prob=float(cal.predict_proba(np.asarray([[pred_r]]))[0,1]) if cal is not None else float(np.mean(snapshot["train_r"]>0))
         scored.append({**row,"realized_r":float(ys[idx]),"model_predicted_r":pred_r,
+            "model_target_variant":target_variant,
             "model_probability":prob,"model_predicted_win_pct":100*prob,
             "model_expected_net_pct":pred_r*float(row["entry_net_downside_pct"]),
             "model_training_n":snapshot["train_n"],"model_config":config})
@@ -202,7 +223,8 @@ def walk_forward_scores(candidates,config,min_train_samples=MIN_TRAIN_SAMPLES,fe
         "insufficient_history_n":insufficient,"snapshot_n":snapshots,"max_train_n":max_train,
         "min_training_samples":min_train_samples,"max_training_samples":MAX_TRAIN_SAMPLES,
         "snapshot_cadence":"quarterly; exits strictly before quarter start",
-        "feature_set":feature_set,"feature_count":xall.shape[1]}
+        "feature_set":feature_set,"feature_count":xall.shape[1],
+        "target_variant":target_variant,"excluded_features":sorted(set(excluded_features))}
 
 def make_variant_thresholds(dev_scored,quantiles=(.70,.80,.90)):
     """Development-only strategy/regime predicted-R cuts with fixed-prior shrinkage."""

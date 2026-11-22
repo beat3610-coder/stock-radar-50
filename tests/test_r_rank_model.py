@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 from r_rank_model import (MODEL_CONFIGS, STRATEGIES, accepts, design_matrix,
-                          FEATURE_GROUPS, FEATURE_LIMIT, NUMERIC_FEATURES,
+                          FEATURE_GROUPS, FEATURE_LIMIT, NUMERIC_FEATURES, _fit_snapshot,
                           make_variant_thresholds, realized_r, walk_forward_scores)
 
 
@@ -18,6 +18,8 @@ class RRankModelTests(unittest.TestCase):
         r=self.row(0);self.assertEqual(realized_r(r),-.5)
         x=design_matrix([r]);self.assertEqual(x.shape,(1,len(NUMERIC_FEATURES)+12));self.assertTrue(np.isfinite(x).all())
         self.assertLessEqual(x.shape[1],FEATURE_LIMIT)
+        dropped=design_matrix([r],excluded_features=("signal_rsi","strategy_flag:trend_breakout"))
+        self.assertEqual(dropped.shape,(1,len(NUMERIC_FEATURES)+10))
 
     def test_predeclared_ablation_feature_group_widths(self):
         row=self.row(0)
@@ -30,6 +32,17 @@ class RRankModelTests(unittest.TestCase):
     def test_only_fixed_predeclared_model_configs(self):
         self.assertEqual({v["kind"] for v in MODEL_CONFIGS.values()},
                          {"ridge","rf","gbr","hgb"})
+
+    def test_date_cross_section_target_centers_only_closed_snapshot_rows(self):
+        rows=[]
+        for day,values in (("2025-01-01",(1.0,3.0)),("2025-01-02",(2.0,6.0))):
+            for i,value in enumerate(values):
+                rows.append({**self.row(i),"signal_date":day,"net_pct":value,
+                    "entry_net_downside_pct":1.0,"exit_date":"2025-01-05"})
+        snapshot=_fit_snapshot(rows,np.zeros((4,1),dtype=float),"ridge_a1",min_train_samples=4,
+                               target_variant="date_cs")
+        self.assertIsNotNone(snapshot)
+        np.testing.assert_allclose(snapshot["train_r"],[-1.0,1.0,-2.0,2.0])
 
     def test_variant_thresholds_and_acceptance(self):
         rows=[{**self.row(i,pred=i/20),"market_regime":"RISK_OFF" if i%2 else "RISK_ON"} for i in range(60)]

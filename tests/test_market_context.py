@@ -35,6 +35,15 @@ class MarketContextTests(unittest.TestCase):
         self.assertEqual(context["features"]["A"][later]["xs_return20_rank_sample_n"],2)
         self.assertEqual(context["features"]["B"][later]["xs_return20_rank_sample_n"],2)
 
+    def test_model_feature_names_for_high52_correlation_and_gap_are_populated(self):
+        dates=pd.bdate_range("2023-01-01",periods=100)
+        frame=self.frame(dates)
+        context=build_market_context({"A":frame},{},"KOSPI")
+        row=context["features"]["A"][str(dates[-1].date())]
+        for key in ("high52_distance_pct","price_volume_corr20","signal_gap_pct"):
+            self.assertIn(key,row)
+            self.assertTrue(np.isfinite(row[key]))
+
     def test_fixed_risk_rule_distinguishes_off_and_unknown(self):
         dates=pd.bdate_range("2020-01-01",periods=270)
         down=np.linspace(200,100,len(dates))

@@ -213,8 +213,17 @@ def build_market_context(frames,macro_frames,cohort,flow_frames=None):
             # Benchmark 120-day return is computed with the same as-of rule.
             index_return120=macro.get("_benchmark_return_120d_pct",np.nan)
             row["stock_excess_return_120d_pct"]=float(pf.at[day,"ret120"]-index_return120) if day in pf.index and np.isfinite(index_return120) and pd.notna(pf.at[day,"ret120"]) else np.nan
-            for key in ("high52_dist","pv_corr20","intraday_strength20","gap_pct","turnover_ratio20","signed_volume_flow5"):
-                row[key]=float(pf.at[day,key]) if day in pf.index and pd.notna(pf.at[day,key]) else np.nan
+            # Keep producer names identical to the fixed model schema. These
+            # aliases were previously left under abbreviated names, silently
+            # turning three inputs into center-valued constants downstream.
+            feature_names={"high52_dist":"high52_distance_pct",
+                           "pv_corr20":"price_volume_corr20",
+                           "gap_pct":"signal_gap_pct",
+                           "intraday_strength20":"intraday_strength20",
+                           "turnover_ratio20":"turnover_ratio20",
+                           "signed_volume_flow5":"signed_volume_flow5"}
+            for source_name,model_name in feature_names.items():
+                row[model_name]=float(pf.at[day,source_name]) if day in pf.index and pd.notna(pf.at[day,source_name]) else np.nan
             row.update(flow_values);row["market_regime"]=macro["market_regime"]
             features[ticker][stamp]=row
     rank_report={name:{"mean_available_n":round(float(np.mean(values)),2) if values else 0,

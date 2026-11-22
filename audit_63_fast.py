@@ -21,7 +21,7 @@ from predictive_model import CONFIGS, DEFAULT_CONFIG, prepare_snapshot, predict_
 from audit_300 import metrics
 from market_context import build_market_context, REGIME_RULE, INDEX_FOR_COHORT
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from r_rank_model import (FEATURE_GROUPS, NUMERIC_FEATURES, CENTERS, SCALES,
+from r_rank_model import (FEATURE_GROUPS, NUMERIC_FEATURES, CENTERS, SCALES, STRATEGIES,
                           MIN_TRAIN_SAMPLES_BY_COHORT, MODEL_CONFIGS, accepts as r_accepts,
                           make_variant_thresholds, walk_forward_scores)
 
@@ -298,7 +298,9 @@ def _equal_weight_replay(trades,frames,start,end,cap=MAX_PORTFOLIO_POSITIONS,cos
             "max_drawdown_pct":round(float(max(0,dd.max())),3),"days":len(curve)}
 
 def _metrics_with_portfolio(trades,requested,frames,period):
-    start,end=(TRAIN_END,VALID_END) if period=="validation" else (VALID_END,HOLDOUT_END)
+    if period=="development":start,end=SAMPLE_START,TRAIN_END
+    elif period=="validation":start,end=TRAIN_END,VALID_END
+    else:start,end=VALID_END,HOLDOUT_END
     trade=_trade_metrics(trades);port=_equal_weight_replay(trades,frames,start,end)
     trade.update(_coverage(trades,requested))
     trade["max_drawdown_portfolio_5_equal_pct"]=port.get("max_drawdown_pct")
@@ -489,7 +491,21 @@ def _rank_metrics(rows):
     r_ic=round(float(ic),6) if ic is not None and np.isfinite(ic) else None
     # Naive iid approximation; overlapping trades can violate independence.
     r_ic_se=round(float(1/np.sqrt(len(valid)-1)),6) if len(valid)>1 else None
+    by_day={}
+    for row in valid:by_day.setdefault(row.get("signal_date"),[]).append(row)
+    eligible_days=[];excluded_days=0
+    for day,group in by_day.items():
+        if len(group)<3:
+            excluded_days+=1;continue
+        value=spearmanr([float(x["model_predicted_r"]) for x in group],
+                        [float(x["realized_r"]) for x in group]).statistic
+        if value is not None and np.isfinite(value):eligible_days.append(float(value))
+    date_mean=float(np.mean(eligible_days)) if eligible_days else None
+    date_se=float(np.std(eligible_days,ddof=1)/np.sqrt(len(eligible_days))) if len(eligible_days)>1 else None
     return {"n":len(valid),"r_ic_spearman":r_ic,
+        "datewise_spearman_mean":round(date_mean,6) if date_mean is not None else None,
+        "datewise_spearman_se":round(date_se,6) if date_se is not None else None,
+        "datewise_scored_days_n":len(eligible_days),"datewise_excluded_days_under_3_candidates":excluded_days,
         "r_ic_standard_error_approx":r_ic_se,
         "r_ic_95_ci_approx":[round(r_ic-1.96*r_ic_se,6),round(r_ic+1.96*r_ic_se,6)] if r_ic is not None and r_ic_se is not None else None,
         "r_ic_uncertainty_method":"naive iid approximation; dependence ignored",
@@ -499,6 +515,114 @@ def _rank_metrics(rows):
         "top20_win_rate_pct":round(100*float(np.mean([float(valid[i]["net_pct"])>0 for i in ix])),3),
         "predicted_r_p10_p50_p90":[round(float(x),6) for x in np.percentile(p,[10,50,90])],
         "realized_r_mean":round(float(y.mean()),6)}
+
+def _feature_coverage(rows):
+    """Development-only availability/variation audit; returns constant columns to drop."""
+    report={};excluded=[]
+    columns={key:[] for key in NUMERIC_FEATURES}
+    for strategy in STRATEGIES:
+        columns[f"strategy_flag:{strategy}"]=[]
+        columns[f"strategy_x_entry_net_rr:{strategy}"]=[]
+    for row in rows:
+        strategy=row.get("strategy") or row.get("candidate_variant")
+        if strategy not in STRATEGIES and row.get("candidate_family")=="broad":strategy="broad_market_ml"
+        for candidate in STRATEGIES:
+            flag=1.0 if strategy==candidate else 0.0
+            columns[f"strategy_flag:{candidate}"].append(flag)
+            try:rr=float(row["entry_net_rr"])
+            except (KeyError,TypeError,ValueError):rr=CENTERS["entry_net_rr"]
+            if not np.isfinite(rr):rr=CENTERS["entry_net_rr"]
+            columns[f"strategy_x_entry_net_rr:{candidate}"].append(
+                flag*np.clip((rr-CENTERS["entry_net_rr"])/SCALES["entry_net_rr"],-4,4))
+    for key in NUMERIC_FEATURES:
+        raw=[]
+        for row in rows:
+            try:value=float(row[key])
+            except (KeyError,TypeError,ValueError):value=np.nan
+            raw.append(value if np.isfinite(value) else np.nan)
+        columns[key]=raw
+    for key,raw in columns.items():
+        finite=np.asarray([x for x in raw if np.isfinite(x)],dtype=float)
+        filled=np.asarray([x if np.isfinite(x) else CENTERS[key] for x in raw],dtype=float)
+        std=float(np.std(filled)) if len(filled) else 0.0
+        unique=int(np.unique(filled).size) if len(filled) else 0
+        is_constant=unique<=1 or std<=1e-12
+        report[key]={"rows_n":len(rows),"non_missing_n":int(len(finite)),
+            "non_missing_pct":round(100*len(finite)/len(rows),2) if rows else 0.0,
+            "unique_values_n":unique,"standard_deviation":round(std,10),
+            "auto_excluded_constant":bool(is_constant),
+            "missing_imputation":"fixed domain center"}
+        if is_constant:excluded.append(key)
+    return report,excluded
+
+def _datewise_thresholds(dev_scored):
+    eligible,excluded_days=_datewise_policy_rows(dev_scored)
+    values=np.asarray([float(x["model_predicted_r"]) for x in eligible],dtype=float)
+    out={"excluded_development_days_under_3_candidates":excluded_days,"eligible_development_rows_n":len(eligible)}
+    for q in (.70,.80,.90):
+        name=f"r_p{int(q*100)}"
+        out[name]={"global":float(np.quantile(values,q)) if len(values) else None,
+                   "quantile":q,"eligible_rows_n":len(values)}
+    return out
+
+def _datewise_policy_rows(rows):
+    counts={}
+    for row in rows:counts[row.get("signal_date")]=counts.get(row.get("signal_date"),0)+1
+    eligible=[r for r in rows if counts.get(r.get("signal_date"),0)>=3]
+    return eligible,sum(n<3 for n in counts.values())
+
+def _datewise_accepts(row,policy,thresholds,period_rows):
+    spec=thresholds.get(policy,{})
+    cutoff=spec.get("global")
+    if cutoff is None:return False
+    eligible,_=_datewise_policy_rows(period_rows)
+    allowed={(r.get("ticker"),r.get("signal_date"),r.get("entry_date"),r.get("strategy")) for r in eligible}
+    key=(row.get("ticker"),row.get("signal_date"),row.get("entry_date"),row.get("strategy"))
+    return key in allowed and float(row.get("model_predicted_r",-np.inf))>=float(cutoff)
+
+def _datewise_selected(rows,policy,thresholds):
+    eligible,_=_datewise_policy_rows(rows)
+    cutoff=thresholds.get(policy,{}).get("global")
+    if cutoff is None:return []
+    return [r for r in eligible if float(r.get("model_predicted_r",-np.inf))>=float(cutoff)]
+
+def _legacy_policy_rows(legacy_rows,scored_rows,kind,threshold=None):
+    key=lambda r:(r.get("ticker"),r.get("signal_date"),r.get("entry_date"),r.get("strategy"))
+    score_by_key={key(r):r for r in scored_rows}
+    eligible_scored,_=_datewise_policy_rows(scored_rows)
+    eligible_days={r.get("signal_date") for r in eligible_scored}
+    selected=[]
+    for row in legacy_rows:
+        if kind=="legacy_only":selected.append(row);continue
+        if kind=="legacy_regime_gate":
+            if row.get("market_regime")!="RISK_OFF":
+                score=score_by_key.get(key(row));selected.append({**row,**({"model_predicted_r":score.get("model_predicted_r"),"realized_r":score.get("realized_r")} if score else {})})
+            continue
+        score=score_by_key.get(key(row))
+        if score is None or row.get("signal_date") not in eligible_days:continue
+        if float(score.get("model_predicted_r",-np.inf))>=float(threshold):
+            selected.append({**row,"model_predicted_r":score["model_predicted_r"],
+                             "realized_r":score.get("realized_r")})
+    return _resolve_nonoverlapping(selected)
+
+def _policy_candidate_metrics(legacy_by_period,scored_by_period,frames,requested,period,thresholds):
+    specs={"legacy_only":{"kind":"legacy_only"}}
+    specs.update({f"legacy_model_filter_{name}":{"kind":"model_filter","threshold":row.get("global")}
+                  for name,row in thresholds.items() if name.startswith("r_p")})
+    specs["legacy_regime_gate"]={"kind":"legacy_regime_gate"}
+    result={}
+    for name,spec in specs.items():
+        if spec["kind"]=="legacy_only":rows=_legacy_policy_rows(legacy_by_period,scored_by_period,"legacy_only")
+        elif spec["kind"]=="legacy_regime_gate":rows=_legacy_policy_rows(legacy_by_period,scored_by_period,"legacy_regime_gate")
+        elif spec.get("threshold") is not None:
+            rows=_legacy_policy_rows(legacy_by_period,scored_by_period,"model_filter",spec["threshold"])
+        else:rows=[]
+        metric=_metrics_with_portfolio(rows,requested,frames,period)
+        metric["scored_legacy_candidates_n"]=len(rows) if spec["kind"]!="legacy_only" else None
+        scored_rows=[r for r in rows if "model_predicted_r" in r]
+        result[name]={"threshold_predicted_y_cs":spec.get("threshold"),"trades":metric,
+                      "datewise_rank_metrics":_rank_metrics(scored_rows) if scored_rows else None}
+    return result
 
 def _decorate_features(trade,frame,computed,breadth,market_gap):
     idx=frame.index.get_indexer([pd.Timestamp(trade["signal_date"])],method="pad")[0]
@@ -614,6 +738,7 @@ def run():
             "macro_source_preference":"FinanceDataReader first; Yahoo Finance retries as fallback; source failures and partial coverage are recorded.",
             "fixed_scale":True,"evaluation_period_scaling":False},
         "regime_distribution":{},"regime_performance":{},"ablation":{},
+        "feature_coverage":{},"target_variants":{},"policy_comparison":{},
         "feature_schema":{"version":"macro-relative-flow-v1","groups":{k:list(v) for k,v in FEATURE_GROUPS.items()},
             "full_numeric_feature_count":len(NUMERIC_FEATURES),"strategy_flags":6,"strategy_interactions":6,
             "feature_count_including_strategy_terms":len(NUMERIC_FEATURES)+12,"feature_limit":90,
@@ -702,32 +827,115 @@ def run():
         dev_variant={s:_trade_metrics(_period(ts,"development")) for s,ts in legacy_by_variant.items()}
         valid_variants=[s for s,m in dev_variant.items() if m["trades"]>=MIN_POLICY_TRADES and m.get("mean_net_pct") is not None]
         legacy_choice=max(valid_variants,key=lambda s:(dev_variant[s]["mean_net_pct"],s),default=None)
-        scored_configs={}; statuses={}; dev_comp={}
-        for config in MODEL_CONFIGS:
-            min_train=MIN_TRAIN_SAMPLES_BY_COHORT[cohort]
-            scored_configs[config],statuses[config]=walk_forward_scores(eligible_rows,config,min_train)
-            dev=_period(scored_configs[config],"development")
-            dev_comp[config]={"r_rank_metrics":_rank_metrics(dev),"auroc":_auc(dev),"candidate_n":len(dev),
-                "minimum_train_samples":min_train,"max_training_samples":4000,
-                "numeric_features":len(NUMERIC_FEATURES),"feature_count_including_strategy_terms":len(NUMERIC_FEATURES)+12}
-        selectable=[(v["r_rank_metrics"].get("r_ic_spearman"),v["r_rank_metrics"].get("tercile_top_minus_bottom_realized_r"),k)
-                    for k,v in dev_comp.items() if v["r_rank_metrics"].get("r_ic_spearman") is not None and v["candidate_n"]>=MIN_POLICY_TRADES]
-        selected=max(selectable,key=lambda p:(p[0],p[1] if p[1] is not None else -1,p[2]))[2] if selectable else None
-        scored=scored_configs.get(selected,[])
-        thresholds=make_variant_thresholds(_period(scored,"development")) if selected else {}
-        selected_dev_r_ic=dev_comp.get(selected,{}).get("r_rank_metrics",{}).get("r_ic_spearman") if selected else None
-        policy,policy_dev,policy_status=(_select_r_policy(scored,thresholds,selected_dev_r_ic) if selected
-            else (None,{},"INSUFFICIENT_DEVELOPMENT_RANKING_SAMPLE"))
-        model_candidates_before_gate=[t for t in scored if t["ticker"] in eligible and policy and r_accepts(t,policy,thresholds)]
+        development_rows=_period(eligible_rows,"development")
+        feature_coverage,excluded_features=_feature_coverage(development_rows)
+        for col in excluded_features:print(f"FEATURE_AUTO_EXCLUDED cohort={cohort} feature={col} reason=zero_development_std",flush=True)
+        excluded_numeric_count=len(set(excluded_features)&set(NUMERIC_FEATURES))
+        excluded_strategy_count=len(excluded_features)-excluded_numeric_count
+        active_strategy_terms=12-excluded_strategy_count
+        target_results={};target_status={}
+        min_train=MIN_TRAIN_SAMPLES_BY_COHORT[cohort]
+        for target_variant in ("pooled","date_cs"):
+            scored_configs={};statuses={};dev_comp={}
+            for config in MODEL_CONFIGS:
+                scored_configs[config],statuses[config]=walk_forward_scores(
+                    eligible_rows,config,min_train,target_variant=target_variant,
+                    excluded_features=excluded_features)
+                dev=_period(scored_configs[config],"development")
+                rank=_rank_metrics(dev)
+                dev_comp[config]={"r_rank_metrics":rank,"datewise_primary_metric":rank.get("datewise_spearman_mean"),
+                    "auroc":_auc(dev),"candidate_n":len(dev),"minimum_train_samples":min_train,
+                    "max_training_samples":4000,"numeric_features":len(NUMERIC_FEATURES)-excluded_numeric_count,
+                    "auto_excluded_features":excluded_features,
+                    "feature_count_including_strategy_terms":len(NUMERIC_FEATURES)-excluded_numeric_count+active_strategy_terms}
+            selectable=[(v["datewise_primary_metric"],v["r_rank_metrics"].get("tercile_top_minus_bottom_realized_r"),k)
+                for k,v in dev_comp.items() if v["datewise_primary_metric"] is not None and v["candidate_n"]>=MIN_POLICY_TRADES]
+            chosen=max(selectable,key=lambda p:(p[0],p[1] if p[1] is not None else -1,p[2]))[2] if selectable else None
+            target_results[target_variant]={"selected_config":chosen,"model_comparison":dev_comp,
+                "score_status":statuses,"selected_scores":scored_configs.get(chosen,[]),
+                "selected_dev_metrics":dev_comp.get(chosen,{}).get("r_rank_metrics")}
+        target_choices=[(v.get("selected_dev_metrics",{}).get("datewise_spearman_mean"),name)
+                        for name,v in target_results.items()
+                        if v.get("selected_dev_metrics",{}).get("datewise_spearman_mean") is not None]
+        selected_target=max(target_choices,key=lambda x:(x[0],x[1]))[1] if target_choices else "date_cs"
+        selected_config=target_results[selected_target]["selected_config"]
+        scored=target_results[selected_target]["selected_scores"]
+        policy_scored=target_results["date_cs"]["selected_scores"]
+        policy_thresholds=_datewise_thresholds(_period(policy_scored,"development")) if target_results["date_cs"]["selected_config"] else {}
+        dev_scored=_period(scored,"development")
+        thresholds=_datewise_thresholds(dev_scored) if selected_config else {}
+        selected_dev_metrics=target_results[selected_target].get("selected_dev_metrics") or {}
+        selected_dev_date_ic=selected_dev_metrics.get("datewise_spearman_mean")
+        model_policy_table={};model_policy=None
+        date_cs_status="NO_DEVELOPMENT_EDGE" if selected_dev_date_ic is None or selected_dev_date_ic<=0 else "DEVELOPMENT_EDGE_CANDIDATE"
+        for name,spec in thresholds.items():
+            if not name.startswith("r_p"):continue
+            passed=_datewise_selected(dev_scored,name,thresholds)
+            trades=_resolve_nonoverlapping(passed)
+            model_policy_table[name]={"threshold_predicted_r":spec.get("global"),
+                "accepted_candidate_n":len(passed),"acceptance_rate_pct":round(100*len(passed)/len(dev_scored),2) if dev_scored else 0,
+                "trades":_trade_metrics(trades),"rank_metrics":_rank_metrics(passed)}
+        eligible_model_policies=[(v["trades"].get("mean_net_pct"),name) for name,v in model_policy_table.items()
+            if selected_dev_date_ic is not None and selected_dev_date_ic>0
+            and v["trades"].get("trades",0)>=MIN_POLICY_TRADES
+            and v["trades"].get("mean_net_pct") is not None and v["trades"]["mean_net_pct"]>MIN_DEVELOPMENT_EDGE]
+        if eligible_model_policies:model_policy=max(eligible_model_policies,key=lambda x:(x[0],x[1]))[1]
+        model_policy_status="DEVELOPMENT_EDGE_SELECTED" if model_policy else (
+            "NO_DEVELOPMENT_EDGE" if date_cs_status=="NO_DEVELOPMENT_EDGE" else "INSUFFICIENT_DEVELOPMENT_SAMPLE")
+        model_candidates_before_gate=[]
+        for period_name in ("development","validation","diagnostic"):
+            period_rows=_period(scored,period_name)
+            if model_policy:
+                model_candidates_before_gate.extend(_datewise_selected(period_rows,model_policy,thresholds))
         model_trades_before_gate=_resolve_nonoverlapping(model_candidates_before_gate)
         model_candidates_after_gate=[t for t in model_candidates_before_gate if not _broad_risk_off_blocked(t)]
         model_trades=_resolve_nonoverlapping(model_candidates_after_gate)
+        dev_legacy=_resolve_nonoverlapping(_period([r for r in legacy_all if r.get("strategy")==legacy_choice],"development")) if legacy_choice else []
+        policy_comparison={"periods":{},"development_gate":{},"selected_policy":None}
+        for period_name in ("development","validation","diagnostic"):
+            legacy_period=_period([r for r in legacy_all if r.get("strategy")==legacy_choice],period_name) if legacy_choice else []
+            scored_period=_period(policy_scored,period_name)
+            policy_comparison["periods"][period_name]=_policy_candidate_metrics(
+                legacy_period,scored_period,frames,len(items),period_name,policy_thresholds)
+        base_dev=policy_comparison["periods"]["development"]["legacy_only"]["trades"].get("mean_net_pct")
+        for name,entry in policy_comparison["periods"]["development"].items():
+            if name=="legacy_only":entry["development_gate_passed"]=True;continue
+            mean_net=entry["trades"].get("mean_net_pct")
+            rank_ic=(entry.get("datewise_rank_metrics") or {}).get("datewise_spearman_mean")
+            improves=mean_net is not None and base_dev is not None and mean_net>base_dev
+            sufficient=entry["trades"].get("trades",0)>=MIN_POLICY_TRADES
+            entry["development_gate_passed"]=bool(sufficient and (improves or (rank_ic is not None and rank_ic>0)))
+            entry["development_gate_reason"]="development net improves legacy" if improves else (
+                "development datewise IC > 0" if rank_ic is not None and rank_ic>0 else "no development edge")
+        eligible_legacy_policies=[(e["trades"].get("mean_net_pct"),name) for name,e in policy_comparison["periods"]["development"].items()
+            if e.get("development_gate_passed") and e["trades"].get("mean_net_pct") is not None]
+        selected_legacy_policy=max(eligible_legacy_policies,key=lambda x:(x[0],x[1]))[1] if eligible_legacy_policies else "legacy_only"
+        policy_comparison["selected_policy"]=selected_legacy_policy
+        policy_comparison["development_gate"]={name:e.get("development_gate_passed") for name,e in policy_comparison["periods"]["development"].items()}
+        out.setdefault("policy_comparison",{})[cohort]=policy_comparison
+        out.setdefault("feature_coverage",{})[cohort]={"development_rows_n":len(development_rows),
+            "by_feature":feature_coverage,"auto_excluded_constant_features":excluded_features,
+            "exclusion_basis":"development candidates only; evaluation-period variation never affects feature inclusion"}
+        target_report={}
+        for target_name,target_data in target_results.items():
+            target_rows=target_data["selected_scores"]
+            target_report[target_name]={"selected_config":target_data["selected_config"],
+                "model_comparison":target_data["model_comparison"],
+                "selected_dev_metrics":target_data["selected_dev_metrics"],
+                "selected_period_metrics":{p:{"r_rank_metrics":_rank_metrics(_period(target_rows,p)),
+                    "auroc":_auc(_period(target_rows,p)),"brier":_brier(_period(target_rows,p),"model_probability"),
+                    "ece":_calibration(_period(target_rows,p)).get("ece"),
+                    "predicted_r_spread":_model_diagnostics(_period(target_rows,p))["r_rank_metrics"].get("predicted_r_p10_p50_p90")}
+                    for p in ("development","validation","diagnostic")}}
+        out.setdefault("target_variants",{})[cohort]=target_report
         ablation_result={}
-        if selected:
+        if selected_config:
             for feature_set in FEATURE_GROUPS:
-                ab_scored,_=walk_forward_scores(eligible_rows,selected,MIN_TRAIN_SAMPLES_BY_COHORT[cohort],feature_set=feature_set)
-                ablation_result[feature_set]={"model_config":selected,
-                    "feature_count":len(FEATURE_GROUPS[feature_set])+12,"periods":{}}
+                ab_scored,_=walk_forward_scores(eligible_rows,selected_config,min_train,feature_set=feature_set,
+                    target_variant=selected_target,excluded_features=excluded_features)
+                active_numeric=sum(k not in excluded_features for k in FEATURE_GROUPS[feature_set])
+                ablation_result[feature_set]={"model_config":selected_config,"target_variant":selected_target,
+                    "feature_count":active_numeric+active_strategy_terms,"periods":{}}
                 for period in ("development","validation","diagnostic"):
                     period_rows=_period(ab_scored,period)
                     ablation_result[feature_set]["periods"][period]={
@@ -740,14 +948,20 @@ def run():
             "model_eligible_symbols_n":len(eligible),"model_coverage_of_requested_pct":round(100*len(eligible)/len(items),2) if items else None,
             "candidate_pool":{"legacy":len(legacy_all),"broad":len(broad_all),"eligible_combined":len(eligible_rows)},
             "legacy_selected_development_strategy":legacy_choice,"legacy_development_by_variant":dev_variant,
-            "model_comparison":dev_comp,"selected_model":selected,"selected_hyperparameters":MODEL_CONFIGS.get(selected),
+            "model_comparison":target_results[selected_target]["model_comparison"],
+            "target_variants":target_report,
+            "selected_target_variant":selected_target,"selected_model":selected_config,
+            "selected_hyperparameters":MODEL_CONFIGS.get(selected_config),
             "minimum_training_samples":MIN_TRAIN_SAMPLES_BY_COHORT[cohort],
-            "model_selection_metric":"development prequential Spearman R-IC, tie-break by top-bottom tercile realized R spread",
-            "policy_selection_rank_ic_gate":{"criterion":"selected development R-IC > 0","development_r_ic":selected_dev_r_ic,
-                "passed":bool(selected_dev_r_ic is not None and selected_dev_r_ic>0)},
-            "selected_model_policy":policy,"selected_model_policy_thresholds":thresholds,
-            "selected_model_status":policy_status,"development_predicted_r_thresholds":thresholds,
-            "development_policy_comparison":policy_dev,
+            "model_selection_metric":"development mean of date-wise Spearman only; dates with 1-2 candidates excluded; pooled R-IC is secondary",
+            "feature_coverage":feature_coverage,"auto_excluded_constant_features":excluded_features,
+            "policy_selection_rank_ic_gate":{"criterion":"selected development date-wise Spearman > 0",
+                "development_datewise_spearman":selected_dev_date_ic,
+                "passed":bool(selected_dev_date_ic is not None and selected_dev_date_ic>0)},
+            "selected_model_policy":model_policy,"selected_model_policy_thresholds":thresholds,
+            "selected_model_status":model_policy_status,"development_predicted_r_thresholds":thresholds,
+            "development_policy_comparison":model_policy_table,
+            "selected_legacy_policy":selected_legacy_policy,"legacy_policy_comparison":policy_comparison,
             "market_context":{"regime_day_count":len(context["regime_by_date"]),
                 "cross_sectional_rank_counts":context["cross_sectional_rank_counts"],
                 "investor_flow_coverage":out["sample_start_by_cohort"][cohort]["flow_source_coverage"]},
@@ -756,18 +970,28 @@ def run():
             # Use the decorated candidate rows here so the signal-time regime
             # tag survives into the legacy-vs-model regime performance split.
             legacy_pool=_period([r for r in legacy_all if r.get("strategy")==legacy_choice],period) if legacy_choice else []
-            legacy_chosen=_resolve_nonoverlapping(legacy_pool)
+            legacy_chosen=_legacy_policy_rows(legacy_pool,_period(scored,period),"legacy_only")
+            selected_spec=policy_comparison["periods"][period].get(selected_legacy_policy,{})
+            if selected_legacy_policy=="legacy_only":legacy_policy_trades=legacy_chosen
+            elif selected_legacy_policy=="legacy_regime_gate":
+                legacy_policy_trades=_legacy_policy_rows(legacy_pool,_period(scored,period),"legacy_regime_gate")
+            else:
+                quantile_name=selected_legacy_policy.replace("legacy_model_filter_","")
+                cutoff=policy_thresholds.get(quantile_name,{}).get("global")
+                legacy_policy_trades=_legacy_policy_rows(legacy_pool,_period(policy_scored,period),"model_filter",cutoff) if cutoff is not None else []
             model_pool=_period(model_trades,period)
             all_scored=_period(scored,period)
-            accepted_before_gate=[r for r in all_scored if policy and r_accepts(r,policy,thresholds)]
+            accepted_before_gate=_datewise_selected(all_scored,model_policy,thresholds) if model_policy else []
             accepted_candidates=[r for r in accepted_before_gate if not _broad_risk_off_blocked(r)]
-            legacy_m=_metrics_with_portfolio(legacy_chosen,len(items),frames,period) if period!="development" else _trade_metrics(legacy_chosen)
-            model_m=_metrics_with_portfolio(model_pool,len(items),frames,period) if period!="development" else _trade_metrics(model_pool)
+            legacy_m=_metrics_with_portfolio(legacy_chosen,len(items),frames,period)
+            legacy_policy_m=_metrics_with_portfolio(legacy_policy_trades,len(items),frames,period)
+            model_m=_metrics_with_portfolio(model_pool,len(items),frames,period)
             model_m.update(_coverage(model_pool,len(items)))
             model_m["acceptance_rate_pct"]=round(100*len(accepted_candidates)/len(all_scored),2) if all_scored else 0.0
             diag=_model_diagnostics(all_scored)
             cec6=None
-            cohort_result["periods"][period]={"legacy":legacy_m,"new_model":model_m,
+            cohort_result["periods"][period]={"legacy":legacy_m,"selected_legacy_policy":legacy_policy_m,
+                "selected_legacy_policy_name":selected_legacy_policy,"new_model":model_m,
                 "cec6d80_model":archived_baseline.get("cohorts",{}).get(cohort,{}).get("periods",{}).get(period,{}).get("model"),
                 "cec6d80_legacy":archived_baseline.get("cohorts",{}).get(cohort,{}).get("periods",{}).get(period,{}).get("legacy"),
                 "accepted_candidates_n":len(accepted_candidates),"scored_candidate_n":len(all_scored),
@@ -797,13 +1021,14 @@ def run():
             inst["development_candidate_n"]=symbol_dev.get(ticker,0)
             inst["model"]={period:_trade_metrics([t for t in model_trades if t["ticker"]==ticker and _period([t],period)]) for period in ("validation","diagnostic")}
             cohort_result["instruments"].append(inst)
-        out["model_comparison"][cohort]=dev_comp
+        out["model_comparison"][cohort]=target_results[selected_target]["model_comparison"]
         out["r_rank_metrics"][cohort]={p:cohort_result["periods"][p]["r_rank_metrics"] for p in cohort_result["periods"]}
         out["acceptance_rate"][cohort]={p:cohort_result["periods"][p]["new_model"]["acceptance_rate_pct"] for p in cohort_result["periods"]}
         out["cohorts"][cohort]=cohort_result
         integrity &= cohort_result["data_complete"]
         print("AUDIT_RESULT "+json.dumps({"cohort":cohort,"loaded":len(instruments),"legacy":legacy_choice,
-            "model":selected,"status":policy_status,"validation":cohort_result["periods"]["validation"],
+            "model":selected_config,"target":selected_target,"status":model_policy_status,
+            "legacy_policy":selected_legacy_policy,"validation":cohort_result["periods"]["validation"],
             "diagnostic":cohort_result["periods"]["diagnostic"]},ensure_ascii=False),flush=True)
     out["data_integrity_status"]="PASS" if integrity else "FAIL"
     out["runtime_seconds"]=(datetime.now(timezone.utc)-started).total_seconds()
