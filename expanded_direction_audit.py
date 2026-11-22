@@ -98,6 +98,7 @@ def _make_rows(frame,ticker,market,cohort):
                 if hit_target:touch="TARGET_FIRST";break
             row={"cohort":cohort,"ticker":ticker,"market":market,"signal_date":day,
                  "entry_date":pd.Timestamp(x.index[i+1]).date().isoformat(),
+                 "exit_date":pd.Timestamp(x.index[exit_index]).date().isoformat(),
                  "label_available_date":pd.Timestamp(x.index[exit_index]).date().isoformat(),
                  "horizon":h,"net_pct":net,"target_touch_theta_0.5":touch,**vals}
             for theta in THETAS:row[f"label_{theta}"]=direction_label(net,theta)
@@ -176,7 +177,7 @@ def _metrics(rows,probs,theta=.5):
     out["top15_mean_net_pct"]=float(np.mean([rows[i]["net_pct"] for i in top]))
     return out
 
-def _trade_perf(selected,all_rows,probs):
+def _trade_perf(selected,all_rows,probs,theta=.5):
     net=np.asarray([float(r["net_pct"]) for r in selected],dtype=float)
     pos=float(net[net>0].sum()) if len(net) else 0.; neg=float(-net[net<0].sum()) if len(net) else 0.
     equity=1.;peak=1.;mdd=0.
@@ -184,7 +185,7 @@ def _trade_perf(selected,all_rows,probs):
         equity*=1+value/100;peak=max(peak,equity);mdd=max(mdd,(peak-equity)/peak)
     active=[];daily=defaultdict(float);used=set();portfolio_trades=[]
     for r in sorted(selected,key=lambda x:(x["entry_date"],x["ticker"])):
-        active=[x for x in active if x["exit_date"]>=r["entry_date"]]
+        active=[x for x in active if x.get("exit_date",x["label_available_date"])>=r["entry_date"]]
         if len(active)>=5:continue
         active.append(r);portfolio_trades.append(r);used.add(r["ticker"]);daily[r["label_available_date"]]+=float(r["net_pct"])/5/100
     eq=1.;peak=1.;slot_mdd=0.
@@ -200,10 +201,10 @@ def _trade_perf(selected,all_rows,probs):
       "symbol_coverage_pct":100*len({r["ticker"] for r in selected})/len({r["ticker"] for r in all_rows}) if all_rows else 0,
       "coverage_pct":100*len(selected)/len(all_rows) if all_rows else 0,
       "rejected_down_n":len(down_pred),"rejected_down_loss_avoided_pct":-sum(float(all_rows[i]["net_pct"]) for i in down_pred if float(all_rows[i]["net_pct"])<0),
-      "rejected_down_correct_pct":100*float(np.mean([all_rows[i]["label_0.5"]=="DOWN" for i in down_pred])) if down_pred else None,
+      "rejected_down_correct_pct":100*float(np.mean([all_rows[i][f"label_{theta}"]=="DOWN" for i in down_pred])) if down_pred else None,
       "rejected_sideways_n":len(side_pred),"rejected_sideways_loss_avoided_pct":-sum(float(all_rows[i]["net_pct"]) for i in side_pred if float(all_rows[i]["net_pct"])<0)}
 
-def _backtest_model(rows,train_rows,kind,horizon,period,theta=.5):
+def _backtest_model(rows,train_rows,kind,horizon,period):
     lo,hi={"development":(SAMPLE_START,TRAIN_END),"validation":(TRAIN_END,VALID_END),"diagnostic":(VALID_END,HOLDOUT_END)}[period]
     eval_rows=[r for r in rows if r["horizon"]==horizon and lo<=r["entry_date"]<hi and r["label_available_date"]<hi]
     if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None}
@@ -216,7 +217,9 @@ def _backtest_model(rows,train_rows,kind,horizon,period,theta=.5):
         snapshot_year=year-(year%2)
         anchor=f"{snapshot_year}-01-01"; idx=[i for i,r in enumerate(eval_rows) if int(r["signal_date"][:4])//2==snapshot_year//2]
         past=[r for r in all_train if r["label_available_date"]<anchor and r["signal_date"]<anchor]
-        label_key=f"label_{theta}"
+        # The primary classifier is fixed at net ±0.5%. Sensitivity labels
+        # reuse this one set of causal probabilities below; no repeated fit.
+        label_key="label_0.5"
         if len(past)<MIN_TRAIN or len({r[label_key] for r in past})<3:continue
         active=_active_features(past)
         if not active:continue
@@ -234,11 +237,10 @@ def _backtest_model(rows,train_rows,kind,horizon,period,theta=.5):
     valid=np.asarray([r["signal_date"][:4] in valid_years for r in eval_rows])
     eval_rows=[r for r,v in zip(eval_rows,valid) if v];probs=probs[valid];target_probs=target_probs[valid]
     if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None}
-    labels=np.asarray([classes.index(r[f"label_{theta}"]) for r in eval_rows])
+    labels=np.asarray([classes.index(r["label_0.5"]) for r in eval_rows])
     valid=np.asarray([r["label_available_date"]< (TRAIN_END if period=="development" else VALID_END if period=="validation" else HOLDOUT_END) for r in eval_rows])
     eval_rows=[r for r,v in zip(eval_rows,valid) if v];probs=probs[valid]; labels=labels[valid]
     if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None}
-    m=_metrics(eval_rows,probs,theta)
     target_actual=np.asarray([int(r.get("target_touch_theta_0.5")=="TARGET_FIRST") for r in eval_rows],dtype=float)
     target_bins=[];target_ece=0.
     for b in range(10):
@@ -247,18 +249,25 @@ def _backtest_model(rows,train_rows,kind,horizon,period,theta=.5):
             conf=float(target_probs[mask].mean());obs=float(target_actual[mask].mean())
             target_ece+=mask.sum()/len(eval_rows)*abs(conf-obs)
             target_bins.append({"bin":f"{b/10:.1f}-{(b+1)/10:.1f}","n":int(mask.sum()),"mean_probability":conf,"observed_target_first_pct":100*obs})
-    m["target_hit_probability"]={"target":"gross +0.5% touch before gross -0.5% stop; same-bar tie stop-first",
+    target_hit_report={"target":"gross +0.5% touch before gross -0.5% stop; same-bar tie stop-first",
       "n":len(eval_rows),"observed_target_first_pct":100*float(target_actual.mean()),
       "mean_predicted_probability_pct":100*float(target_probs.mean()),
       "brier":float(np.mean((target_probs-target_actual)**2)),"ece":target_ece,"reliability_bins":target_bins}
     up=probs[:,2]; down=probs[:,0]; side=probs[:,1]
-    policy_candidates={}
-    for cut in (.45,.50,.55):
-        buy=(up>=cut)&(down<.30)&(side<.50)
-        selected=[r for r,b in zip(eval_rows,buy) if b]
-        policy_candidates[f"p_up_ge_{cut:.2f}"]=_trade_perf(selected,eval_rows,probs)
-    traded=policy_candidates["p_up_ge_0.50"]
-    return {"n":len(eval_rows),"metrics":m,"buy_policy":traded,"buy_policy_candidates":policy_candidates}
+    theta_results={}
+    for theta in THETAS:
+        m=_metrics(eval_rows,probs,theta)
+        m["target_hit_probability"]=target_hit_report
+        policy_candidates={}
+        for cut in (.45,.50,.55):
+            buy=(up>=cut)&(down<.30)&(side<.50)
+            selected=[r for r,b in zip(eval_rows,buy) if b]
+            policy_candidates[f"p_up_ge_{cut:.2f}"]=_trade_perf(selected,eval_rows,probs,theta)
+        theta_results[str(theta)]={"metrics":m,"buy_policy_candidates":policy_candidates,
+                                   "buy_policy":policy_candidates["p_up_ge_0.50"]}
+    primary=theta_results["0.5"]
+    return {"n":len(eval_rows),"metrics":primary["metrics"],"theta_results":theta_results,
+            "buy_policy":primary["buy_policy"],"buy_policy_candidates":primary["buy_policy_candidates"]}
 
 def run_expanded_direction_audit():
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -313,31 +322,54 @@ def run_expanded_direction_audit():
         eval_rows=[r for r in pool if r["ticker"] in audit.get(cohort,set())]
         eval_rows.extend(special_eval.get(cohort,[]))
         pool63=[r for r in eval_rows]
-        choices=[]
+        choices=[];development_cache={}
         for horizon in HORIZONS:
           for model in ("multinomial_logistic","random_forest"):
             dev=_backtest_model(eval_rows,pool63,model,horizon,"development")
+            development_cache[(model,horizon)]=dev
             met=dev.get("metrics") or {}; ic=met.get("datewise_spearman_mean"); top=met.get("top15_mean_net_pct")
             score=(float(ic)+.01*float(top)) if ic is not None and top is not None and met.get("top15_n",0)>=100 else -1e9
             choices.append((score,model,horizon))
         chosen=max(choices,default=(None,None,None))
-        cohort_report={"selected_model_development_only":chosen[1],"selected_horizon_development_only":chosen[2],"universe_comparison":{},"periods":{}}
+        cohort_report={"selected_model_development_only":chosen[1],"selected_horizon_development_only":chosen[2],
+          "selected_model_horizon_development_score":chosen[0],"universe_comparison":{},"periods":{}}
         for fit_name,training in (("63_audit_symbols",pool63),("available_full_universe",pool)):
-          comparisons={}
-          selected_cuts={}
+          comparisons={};selected_cuts={};selected_oos={}
+          raw_by_horizon={}
+          for horizon in HORIZONS:
+            raw_by_horizon[horizon]={}
+            for period in ("development","validation","diagnostic"):
+              if fit_name=="63_audit_symbols" and period=="development" and chosen[1] is not None:
+                raw=development_cache.get((chosen[1],horizon))
+              else:
+                raw=_backtest_model(eval_rows,training,chosen[1],horizon,period) if chosen[1] else {"n":0}
+              raw_by_horizon[horizon][period]=raw or {"n":0}
           for theta in THETAS:
             for horizon in HORIZONS:
-              period_rows={p:_backtest_model(eval_rows,training,chosen[1],horizon,p,theta) for p in ("development","validation","diagnostic")} if chosen[1] else {}
-              if period_rows:
-                dev_policies=period_rows["development"].get("buy_policy_candidates",{})
-                dev_ic=(period_rows["development"].get("metrics") or {}).get("datewise_spearman_mean")
-                eligible=[(v.get("mean_net_pct"),key) for key,v in dev_policies.items()
-                          if v.get("n",0)>=100 and v.get("mean_net_pct") is not None
-                          and v.get("mean_net_pct")>0 and dev_ic is not None and dev_ic>0]
-                selected_cuts[f"theta_{theta}_horizon_{horizon}"]=max(eligible,default=(None,None))[1]
-              comparisons[f"theta_{theta}_horizon_{horizon}"]=period_rows
+              period_rows={}
+              for period,raw in raw_by_horizon[horizon].items():
+                measured=(raw.get("theta_results") or {}).get(str(theta))
+                period_rows[period]=({"n":raw.get("n",0),**measured} if measured else
+                    {"n":0,"metrics":None,"buy_policy":None,"buy_policy_candidates":{}})
+              dev=period_rows["development"];dev_metrics=dev.get("metrics") or {}
+              dev_policies=dev.get("buy_policy_candidates",{})
+              dev_ic=dev_metrics.get("datewise_spearman_mean")
+              eligible=[(v.get("mean_net_pct"),key) for key,v in dev_policies.items()
+                        if v.get("n",0)>=100 and v.get("mean_net_pct") is not None
+                        and v.get("mean_net_pct")>0 and dev_ic is not None and dev_ic>0]
+              selected_cut=max(eligible,default=(None,None))[1]
+              key=f"theta_{theta}_horizon_{horizon}"
+              selected_cuts[key]=selected_cut
+              if selected_cut:
+                selected_oos[key]={"selection":"development only","threshold":selected_cut,
+                  "development_datewise_ic":dev_ic,"periods":{p:(v.get("buy_policy_candidates",{}).get(selected_cut)) for p,v in period_rows.items()}}
+              else:
+                selected_oos[key]={"selection":"NO_DEVELOPMENT_EDGE","threshold":None,
+                  "periods":{p:{"n":0,"win_rate_pct":None,"mean_net_pct":None,"coverage_pct":0.0} for p in period_rows}}
+              comparisons[key]=period_rows
           cohort_report["universe_comparison"][fit_name]=comparisons
           cohort_report.setdefault("selected_buy_cut_by_development",{})[fit_name]=selected_cuts
+          cohort_report.setdefault("selected_policy_results_by_development",{})[fit_name]=selected_oos
         cohort_report["policy_status"]=("SELECTED_ON_DEVELOPMENT_ONLY" if any(v for d in cohort_report.get("selected_buy_cut_by_development",{}).values() for v in d.values())
           else "NO_DEVELOPMENT_EDGE")
         cover={}

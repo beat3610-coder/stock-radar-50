@@ -32,8 +32,8 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
         self.assertEqual(set(result["class_metrics"]),{"DOWN","SIDEWAYS","UP"})
 
     def test_selected_trades_include_drawdowns_and_avoidance(self):
-        rows=[{"ticker":"A","entry_date":"2025-01-01","exit_date":"2025-01-05","label_available_date":"2025-01-05","net_pct":-2,"label_0.5":"DOWN"},
-              {"ticker":"B","entry_date":"2025-01-02","exit_date":"2025-01-06","label_available_date":"2025-01-06","net_pct":1,"label_0.5":"UP"}]
+        rows=[{"ticker":"A","entry_date":"2025-01-01","label_available_date":"2025-01-05","net_pct":-2,"label_0.5":"DOWN"},
+              {"ticker":"B","entry_date":"2025-01-02","label_available_date":"2025-01-06","net_pct":1,"label_0.5":"UP"}]
         result=_trade_perf(rows[1:],rows,np.asarray([[.8,.1,.1],[.1,.1,.8]]))
         self.assertEqual(result["n"],1)
         self.assertEqual(result["rejected_down_n"],1)
@@ -49,6 +49,7 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
         first=rows[0]
         self.assertEqual(first["entry_date"],str(dates[201].date()))
         self.assertEqual(first["label_available_date"],str(dates[205].date()))
+        self.assertEqual(first["exit_date"],first["label_available_date"])
         self.assertEqual({r["horizon"] for r in rows},{5,10,20})
 
 
