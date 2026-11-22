@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 from r_rank_model import (MODEL_CONFIGS, STRATEGIES, accepts, design_matrix,
-                          make_variant_thresholds, realized_r)
+                          make_variant_thresholds, realized_r, walk_forward_scores)
 
 
 class RRankModelTests(unittest.TestCase):
@@ -27,6 +27,23 @@ class RRankModelTests(unittest.TestCase):
         self.assertEqual(set(thresholds),{"r_p70","r_p80","r_p90"})
         self.assertTrue(accepts(rows[-1],"r_p70",thresholds))
         self.assertFalse(accepts(rows[0],"r_p90",thresholds))
+
+    def test_cohort_can_declare_a_lower_minimum_for_single_instrument_history(self):
+        from datetime import date, timedelta
+        rows=[]
+        start=date(2023,1,1)
+        for i in range(100):
+            day=start+timedelta(days=i)
+            rows.append({"ticker":"SOXL","strategy":"broad_market_ml",
+                "signal_date":str(day),"entry_date":str(day),
+                "exit_date":str(day+timedelta(days=1)),"net_pct":1.0 if i%2 else -1.0,
+                "entry_net_downside_pct":2.0,"entry_net_rr":1.5})
+        rows.append({"ticker":"SOXL","strategy":"broad_market_ml",
+            "signal_date":"2024-01-03","entry_date":"2024-01-04","exit_date":"2024-01-10",
+            "net_pct":1.0,"entry_net_downside_pct":2.0,"entry_net_rr":1.5})
+        scored,status=walk_forward_scores(rows,"ridge_a1",min_train_samples=100)
+        self.assertEqual(status["min_training_samples"],100)
+        self.assertEqual(len(scored),1)
 
 
 if __name__=="__main__":unittest.main()

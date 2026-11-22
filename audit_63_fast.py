@@ -466,7 +466,7 @@ def _run_pre_r_rank():
 
 SAMPLE_START="2016-01-01"
 
-from r_rank_model import (MODEL_CONFIGS, STRATEGIES, accepts as r_accepts,
+from r_rank_model import (MODEL_CONFIGS, MIN_TRAIN_SAMPLES_BY_COHORT, STRATEGIES, accepts as r_accepts,
     make_variant_thresholds, realized_r, walk_forward_scores)
 from scipy.stats import spearmanr
 
@@ -565,9 +565,11 @@ def run():
         legacy_by_variant={s:[] for s in PARAMS};broad=[];frames={};computed_by={};instruments=[];errors=[]
         for i,(ticker,name,market,sector) in enumerate(items,1):
             try:
-                prices,source=get_historical_prices(ticker,market,start_date=SAMPLE_START,min_bars=MIN_HISTORY_BARS)
+                minimum_bars=1 if ticker=="0262B0" else MIN_HISTORY_BARS
+                prices,source=get_historical_prices(ticker,market,start_date=SAMPLE_START,min_bars=minimum_bars)
                 first=str(pd.Timestamp(prices.index[0]).date());last=str(pd.Timestamp(prices.index[-1]).date())
-                if len(prices)<MIN_HISTORY_BARS:raise ValueError(f"history {len(prices)} bars < {MIN_HISTORY_BARS}")
+                post_period_listing=first>HOLDOUT_END
+                if len(prices)<MIN_HISTORY_BARS and not post_period_listing:raise ValueError(f"history {len(prices)} bars < {MIN_HISTORY_BARS}")
                 if last<MIN_END_DATE:raise ValueError(f"OHLCV ends {last}, before required {MIN_END_DATE}")
                 comp,variants=candidates_from_frame(prices,ticker,market)
                 frames[ticker]=prices;computed_by[ticker]=comp
@@ -605,10 +607,11 @@ def run():
         legacy_selected=_resolve_nonoverlapping(_period(legacy_by_variant.get(legacy_choice,[]),"validation")+_period(legacy_by_variant.get(legacy_choice,[]),"diagnostic")) if legacy_choice else []
         scored_configs={}; statuses={}; dev_comp={}
         for config in MODEL_CONFIGS:
-            scored_configs[config],statuses[config]=walk_forward_scores(eligible_rows,config)
+            min_train=MIN_TRAIN_SAMPLES_BY_COHORT[cohort]
+            scored_configs[config],statuses[config]=walk_forward_scores(eligible_rows,config,min_train)
             dev=_period(scored_configs[config],"development")
             dev_comp[config]={"r_rank_metrics":_rank_metrics(dev),"auroc":_auc(dev),"candidate_n":len(dev),
-                "minimum_train_samples":300,"max_training_samples":4000,"features":30}
+                "minimum_train_samples":min_train,"max_training_samples":4000,"features":30}
         selectable=[(v["r_rank_metrics"].get("r_ic_spearman"),v["r_rank_metrics"].get("tercile_top_minus_bottom_realized_r"),k)
                     for k,v in dev_comp.items() if v["r_rank_metrics"].get("r_ic_spearman") is not None and v["candidate_n"]>=MIN_POLICY_TRADES]
         selected=max(selectable,key=lambda p:(p[0],p[1] if p[1] is not None else -1,p[2]))[2] if selectable else None
@@ -623,6 +626,7 @@ def run():
             "candidate_pool":{"legacy":len(legacy_all),"broad":len(broad_all),"eligible_combined":len(eligible_rows)},
             "legacy_selected_development_strategy":legacy_choice,"legacy_development_by_variant":dev_variant,
             "model_comparison":dev_comp,"selected_model":selected,"selected_hyperparameters":MODEL_CONFIGS.get(selected),
+            "minimum_training_samples":MIN_TRAIN_SAMPLES_BY_COHORT[cohort],
             "model_selection_metric":"development prequential Spearman R-IC, tie-break by top-bottom tercile realized R spread",
             "selected_model_status":policy_status,"development_predicted_r_thresholds":thresholds,
             "development_policy_comparison":policy_dev,"periods":{},"instruments":[]}

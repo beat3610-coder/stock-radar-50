@@ -39,6 +39,7 @@ INTERACTION_FEATURES=("entry_net_rr",)
 FEATURE_COUNT=len(NUMERIC_FEATURES)+len(STRATEGIES)*(1+len(INTERACTION_FEATURES))
 FEATURE_LIMIT=30
 MIN_TRAIN_SAMPLES=300
+MIN_TRAIN_SAMPLES_BY_COHORT={"KOSPI":300,"KOSDAQ":300,"TIGER_ETF":100,"SOXL":100}
 MAX_TRAIN_SAMPLES=4000
 MIN_VARIANT_SAMPLES=300
 VARIANT_SHRINKAGE_PRIOR=100.0
@@ -96,10 +97,10 @@ def _estimator(config):
         **{k:v for k,v in cfg.items() if k!="kind"})
     raise ValueError(f"unknown model kind: {kind}")
 
-def _fit_snapshot(train_rows,train_x,config):
+def _fit_snapshot(train_rows,train_x,config,min_train_samples=MIN_TRAIN_SAMPLES):
     y=np.asarray([realized_r(t) for t in train_rows],dtype=float)
     valid=np.isfinite(y)
-    if valid.sum()<MIN_TRAIN_SAMPLES:return None
+    if valid.sum()<min_train_samples:return None
     # Keep a deterministic chronological training window to bound CPU/memory.
     positions=np.flatnonzero(valid)[-MAX_TRAIN_SAMPLES:]
     y=y[positions];x=train_x[positions]
@@ -114,7 +115,7 @@ def _fit_snapshot(train_rows,train_x,config):
         calibrator.fit(x,labels)
     return {"model":model,"calibrator":calibrator,"train_n":len(y),"train_r":y}
 
-def walk_forward_scores(candidates,config):
+def walk_forward_scores(candidates,config,min_train_samples=MIN_TRAIN_SAMPLES):
     """Quarterly prequential snapshots; all labels have exit_date < anchor."""
     if not candidates:return [],{"candidate_n":0,"scored_n":0,"insufficient_history_n":0,"snapshot_n":0,"max_train_n":0}
     ordered=sorted(candidates,key=lambda t:(t["signal_date"],t["ticker"],t["entry_date"],t.get("strategy","")))
@@ -128,7 +129,7 @@ def walk_forward_scores(candidates,config):
             anchor=quarter.start_time.strftime("%Y-%m-%d")
             while cursor<len(exits) and ordered[exits[cursor]]["exit_date"]<anchor:
                 past_idx.append(exits[cursor]);cursor+=1
-            snapshot=_fit_snapshot([ordered[j] for j in past_idx],xall[past_idx],config) if len(past_idx)>=MIN_TRAIN_SAMPLES else None
+            snapshot=_fit_snapshot([ordered[j] for j in past_idx],xall[past_idx],config,min_train_samples) if len(past_idx)>=min_train_samples else None
             last_quarter=quarter;snapshots+=1
             if snapshot:max_train=max(max_train,snapshot["train_n"])
         if snapshot is None:
@@ -143,7 +144,7 @@ def walk_forward_scores(candidates,config):
             "model_training_n":snapshot["train_n"],"model_config":config})
     return scored,{"candidate_n":len(ordered),"scored_n":len(scored),
         "insufficient_history_n":insufficient,"snapshot_n":snapshots,"max_train_n":max_train,
-        "min_training_samples":MIN_TRAIN_SAMPLES,"max_training_samples":MAX_TRAIN_SAMPLES,
+        "min_training_samples":min_train_samples,"max_training_samples":MAX_TRAIN_SAMPLES,
         "snapshot_cadence":"quarterly; exits strictly before quarter start"}
 
 def make_variant_thresholds(dev_scored,quantiles=(.70,.80,.90)):
