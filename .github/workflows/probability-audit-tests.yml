@@ -29,6 +29,10 @@ on:
       - tests/test_trend_guard_model.py
       - tests/test_market_breadth_gate.py
       - tests/test_naver_api_universe.py
+      - tests/test_audit_63_metrics.py
+      - test_predictive_model.py
+      - test_broad_candidates.py
+      - test_strategy_lab.py
       - .github/workflows/probability-audit-tests.yml
       - .github/workflows/audit-63-instruments.yml
 jobs:
@@ -49,6 +53,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_trend_guard_model.py -v
       - run: python -m unittest discover -s tests -p test_market_breadth_gate.py -v
       - run: python -m unittest discover -s tests -p test_naver_api_universe.py -v
+      - run: python -m unittest tests.test_audit_63_metrics test_predictive_model.py test_broad_candidates.py test_strategy_lab.py -v
       - run: python -m py_compile providers.py broad_candidates.py predictive_model.py audit_63_fast.py strategy_lab.py three_round_trade_model.py profit_selector51.py regime_selector60.py feature_selector60.py net_edge_model.py trend_guard_model.py market_breadth_gate.py universe.py naver_api_universe.py
 
   historical_300:

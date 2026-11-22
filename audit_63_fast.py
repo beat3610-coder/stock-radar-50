@@ -1,266 +1,360 @@
-"""Out-of-sample audit for 30 KOSPI + 30 KOSDAQ + 2 TIGER ETFs + SOXL.
+"""Leakage-controlled 63-instrument legacy-vs-model audit.
 
-The legacy signal is kept as the baseline. A broader, feature-based candidate
-model is fit prequentially using only trades closed before each signal date.
-Policy selection uses the development interval only. Validation and diagnostic
-figures are reported even when negative; this program never approves live use.
+The holdout dates are fixed. All candidate families share one feature schema,
+are scored prequentially, and model configuration/policy selection uses only
+development observations. This file is research-only and never approves live use.
 """
 import json
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
-from universe import get_universe
-from universe import MANDATORY_KR, MANDATORY_US
+from universe import get_universe, MANDATORY_KR, MANDATORY_US
 from naver_api_universe import naver_api_top100
 from providers import get_historical_prices
-from strategy_lab import (candidates_from_frame, TRAIN_END, VALID_END,
-                          HOLDOUT_END, PARAMS)
+from strategy_lab import candidates_from_frame, TRAIN_END, VALID_END, HOLDOUT_END, PARAMS
 from broad_candidates import broad_candidates_from_computed
-from predictive_model import (POLICIES, prepare_snapshot,
-                              predict_from_snapshot)
+from predictive_model import CONFIGS, DEFAULT_CONFIG, POLICIES, prepare_snapshot, predict_from_snapshot
 from audit_300 import metrics
 
-# The prior 63-symbol run used providers.get_prices' rolling 850-day range.
-# A fixed floor retains a comparable development/test window while the longer
-# history is now used only to initialize indicators and fill the OHLCV cache.
-SAMPLE_START = "2024-07-01"
-MIN_HISTORY_BARS = 250
-MIN_END_DATE = (date.fromisoformat(HOLDOUT_END)+timedelta(days=12)).isoformat()
+SAMPLE_START="2024-07-01"
+MIN_HISTORY_BARS=250
+MIN_END_DATE=(date.fromisoformat(HOLDOUT_END)+timedelta(days=12)).isoformat()
+MAX_PORTFOLIO_POSITIONS=5
+PORTFOLIO_COST_PCT=0.35
+MIN_POLICY_TRADES=10
+MIN_DEVELOPMENT_EDGE=0.0
 
-def _period(trades, period):
-    if period == "development":
+def _period(trades,period):
+    if period=="development":
         return [t for t in trades if SAMPLE_START<=t["signal_date"] and
                 t["entry_date"]<TRAIN_END and t["exit_date"]<TRAIN_END]
-    if period == "validation":
-        return [t for t in trades if TRAIN_END<=t["entry_date"]<VALID_END and
-                t["exit_date"]<VALID_END]
-    return [t for t in trades if VALID_END<=t["entry_date"]<HOLDOUT_END and
-            t["exit_date"]<HOLDOUT_END]
+    if period=="validation":
+        return [t for t in trades if TRAIN_END<=t["entry_date"]<VALID_END and t["exit_date"]<VALID_END]
+    return [t for t in trades if VALID_END<=t["entry_date"]<HOLDOUT_END and t["exit_date"]<HOLDOUT_END]
 
-def _brier(rows, probability_key):
+def _trade_metrics(trades):
+    result=metrics(trades)
+    result["max_drawdown_sequence_pct"]=result.get("max_drawdown_pct")
+    return result
+
+def _brier(rows,key):
     usable=[]
     for row in rows:
         try:
-            p=float(row[probability_key]); y=float(float(row["net_pct"])>0)
-            if np.isfinite(p):usable.append((p,y))
-        except (KeyError,TypeError,ValueError):
-            continue
+            p=float(row[key]);y=float(float(row["net_pct"])>0)
+            if np.isfinite(p) and 0<=p<=1:usable.append((p,y))
+        except (KeyError,TypeError,ValueError):pass
     if not usable:return {"n":0,"brier":None}
     return {"n":len(usable),"brier":round(float(np.mean([(p-y)**2 for p,y in usable])),6)}
 
-def _prequential_scores(candidates):
-    ordered=sorted(candidates,key=lambda t:(t["signal_date"],t["ticker"],t["entry_date"]))
-    closed=sorted(candidates,key=lambda t:(t["exit_date"],t["ticker"],t["entry_date"]))
-    scored=[];history=[];j=0;active=None;snapshot=None
+def _calibration(rows,key="model_probability"):
+    """Fixed 10-point reliability bins and expected calibration error."""
+    samples=[]
+    for row in rows:
+        try:
+            p=float(row[key]);y=float(float(row["net_pct"])>0)
+            if np.isfinite(p) and 0<=p<=1:samples.append((p,y))
+        except (KeyError,TypeError,ValueError):pass
+    bins=[];ece=0.0;n=len(samples)
+    for i in range(10):
+        lo=i/10;hi=(i+1)/10
+        group=[(p,y) for p,y in samples if lo<=p<(hi if i<9 else hi+1e-12)]
+        avgp=float(np.mean([p for p,_ in group])) if group else None
+        win=float(np.mean([y for _,y in group])) if group else None
+        if group:ece+=len(group)/max(1,n)*abs(avgp-win)
+        bins.append({"bin":f"{lo:.1f}-{hi:.1f}","n":len(group),
+                     "mean_predicted_pct":round(100*avgp,2) if avgp is not None else None,
+                     "observed_win_pct":round(100*win,2) if win is not None else None})
+    return {"n":n,"ece":round(ece,6) if n else None,"reliability_bins":bins}
+
+def _prequential_scores(candidates,config_name):
+    config=CONFIGS[config_name]
+    ordered=sorted(candidates,key=lambda t:(t["signal_date"],t["ticker"],t["entry_date"],t.get("strategy","")))
+    closed=sorted(candidates,key=lambda t:(t["exit_date"],t["ticker"],t["entry_date"],t.get("strategy","")))
+    scored=[];history=[];j=0;active=None;snapshot=None;status={"candidate_n":len(candidates),"scored_n":0,"insufficient_history_n":0}
     for trade in ordered:
         signal=trade["signal_date"]
         if signal!=active:
             while j<len(closed) and closed[j]["exit_date"]<signal:
                 history.append(closed[j]);j+=1
-            snapshot=prepare_snapshot(history)
-            active=signal
-        probability=predict_from_snapshot(snapshot,trade)
-        method="regularized_logistic"
-        if probability is not None:
-            pass
-        else:
-            # Sparse cohorts (for example one ETF) still receive an honest
-            # prior-only score from already closed trades; they are explicitly
-            # labelled as fallback and are never treated as a fitted model.
-            wins=[float(t["net_pct"]) for t in history if float(t["net_pct"])>0]
-            losses=[float(t["net_pct"]) for t in history if float(t["net_pct"])<=0]
-            n=len(history);p=(len(wins)+2)/(n+4)
-            mean_win=float(np.mean(wins)) if wins else 0.0
-            mean_loss=float(np.mean(losses)) if losses else 0.0
-            expected=p*mean_win+(1-p)*mean_loss
-            probability={"training_completed":n,"predicted_win_pct":round(100*p,2),
-                         "baseline_win_pct":round(100*p,2),
-                         "expected_net_pct":round(expected,3),
-                         "predicted_uplift_pct":0.0}
-            method="closed_trade_prior_only"
-        scored.append({**trade,**{"model_"+k:v for k,v in probability.items()},
-                       "model_probability":probability["predicted_win_pct"]/100.0,
-                       "model_method":method})
-    return scored
+            snapshot=prepare_snapshot(history,config);active=signal
+        prediction=predict_from_snapshot(snapshot,trade)
+        if prediction is None:
+            status["insufficient_history_n"]+=1
+            continue
+        scored.append({**trade,**{"model_"+k:v for k,v in prediction.items()},
+                       "model_probability":prediction["predicted_win_pct"]/100.0,
+                       "model_config":config_name})
+        status["scored_n"]+=1
+    return scored,status
 
-def _policy_accept(trade, policy_name):
+def _accept(trade,policy_name):
     if policy_name=="all_scored":return True
     policy=POLICIES[policy_name]
     return (trade["model_predicted_win_pct"]>=policy["win_pct"] and
-            trade["model_predicted_uplift_pct"]>=policy["uplift_pct"] and
-            trade["model_expected_net_pct"]>=policy["expected_net_pct"])
+            trade["model_expected_net_pct"]>=policy["min_ev_pct"])
+
+def _resolve_nonoverlapping(trades):
+    """At most one open trade per ticker; choose highest decision-time EV."""
+    ordered=sorted(trades,key=lambda t:(t["entry_date"],t["ticker"],
+                 -float(t.get("model_expected_net_pct",t.get("entry_net_rr",0))),t.get("strategy","")))
+    chosen=[];blocked_until={};seen_entry=set()
+    for trade in ordered:
+        ticker=trade["ticker"];entry=trade["entry_date"]
+        key=(ticker,entry)
+        if key in seen_entry or entry<=blocked_until.get(ticker,""):continue
+        chosen.append(trade);seen_entry.add(key);blocked_until[ticker]=trade["exit_date"]
+    return chosen
+
+def _select_config(scored_by_config):
+    result={}
+    for name,rows in scored_by_config.items():
+        dev=_period(rows,"development");b=_brier(dev,"model_probability")
+        result[name]={"development_scored_n":b["n"],"development_brier":b["brier"]}
+    eligible=[(v["development_brier"],name) for name,v in result.items()
+              if v["development_brier"] is not None and v["development_scored_n"]>=MIN_POLICY_TRADES]
+    if not eligible:return None,result,"INSUFFICIENT_DEVELOPMENT_CALIBRATION_SAMPLE"
+    _,chosen=min(eligible,key=lambda x:(x[0],x[1]))
+    return chosen,result,"DEVELOPMENT_BRIER_SELECTED"
 
 def _select_policy(scored):
-    development=_period(scored,"development")
-    results={}
+    dev=_period(scored,"development");results={}
     for name in ("all_scored",*POLICIES):
-        chosen=[t for t in development if _policy_accept(t,name)]
-        results[name]=metrics(chosen)
-    eligible=[name for name,m in results.items() if m["trades"]>=10 and m["mean_net_pct"] is not None]
-    # A negative development result is still reported; it is not replaced by
-    # an unvalidated zero-trade claim. No validation/diagnostic selection.
-    selected=max(eligible,key=lambda n:results[n]["mean_net_pct"],default=None)
-    if selected is not None:
-        status="DEVELOPMENT_SELECTED"
-    elif results["all_scored"]["trades"]:
-        selected="all_scored"
-        status="INSUFFICIENT_DEVELOPMENT_SAMPLE_FALLBACK_ALL_SCORED"
-    else:
-        status="NO_SCORED_CANDIDATES"
-    return selected,results,status
+        accepted=[t for t in dev if _accept(t,name)]
+        results[name]=_trade_metrics(_resolve_nonoverlapping(accepted))
+    eligible=[(m["mean_net_pct"],name) for name,m in results.items()
+              if m["trades"]>=MIN_POLICY_TRADES and m["mean_net_pct"] is not None
+              and m["mean_net_pct"]>MIN_DEVELOPMENT_EDGE]
+    if eligible:
+        # Highest development mean net return, with sample size and name as deterministic tie-breaks.
+        _,selected=max(eligible,key=lambda x:(x[0],results[x[1]]["trades"],x[1]))
+        return selected,results,"DEVELOPMENT_EDGE_SELECTED"
+    all_scored=results["all_scored"]
+    raw_dev=_trade_metrics(_period(scored,"development"))
+    if ((all_scored["trades"]>=MIN_POLICY_TRADES and all_scored["mean_net_pct"] is not None
+         and all_scored["mean_net_pct"]<=MIN_DEVELOPMENT_EDGE) or
+        (raw_dev["trades"]>=MIN_POLICY_TRADES and raw_dev["mean_net_pct"] is not None
+         and raw_dev["mean_net_pct"]<=MIN_DEVELOPMENT_EDGE)):
+        return None,results,"NO_DEVELOPMENT_EDGE"
+    return None,results,"INSUFFICIENT_DEVELOPMENT_SAMPLE"
 
-def _coverage(rows, requested):
-    symbols={t["ticker"] for t in rows}
-    return {"traded_symbols":len(symbols),"requested_symbols":requested,
-            "coverage_pct":round(100*len(symbols)/requested,2) if requested else None}
+def _coverage(rows,requested):
+    n=len({t["ticker"] for t in rows})
+    return {"traded_symbols":n,"requested_symbols":requested,
+            "coverage_pct":round(100*n/requested,2) if requested else None}
+
+def _equal_weight_replay(trades,frames,start,end,cap=MAX_PORTFOLIO_POSITIONS,cost_pct=PORTFOLIO_COST_PCT):
+    """Daily mark-to-market, no leverage, at most five equal initial slots."""
+    start_ts=pd.Timestamp(start);end_ts=pd.Timestamp(end)
+    close={}
+    for ticker,frame in frames.items():
+        if frame is None or frame.empty:continue
+        close[ticker]=pd.Series(frame["Close"].astype(float).values,index=pd.to_datetime(frame.index).normalize())
+    dates=sorted(set().union(*(set(s.index) for s in close.values()))) if close else []
+    dates=[d for d in dates if start_ts<=d<end_ts]
+    if not dates:return {"valid":False,"trades_executed":0,"max_drawdown_pct":None,"reason":"no portfolio dates"}
+    entries={}
+    for t in trades:
+        if start<=t.get("entry_date","")<end and t.get("ticker") in close:
+            entries.setdefault(pd.Timestamp(t["entry_date"]),[]).append(t)
+    initial=100.0;slot=initial/cap;cash=initial;holdings={};last={};curve=[];executed=0;max_open=0
+    fee=cost_pct/200.0
+    for day in dates:
+        candidates=sorted(entries.get(day,[]),key=lambda t:(-float(t.get("model_expected_net_pct",t.get("score",0))),t["ticker"]))
+        for t in candidates:
+            ticker=t["ticker"]
+            if ticker in holdings or len(holdings)>=cap or cash<slot:continue
+            entry=float(t["entry"])
+            if not np.isfinite(entry) or entry<=0:continue
+            # Each slot is an equal share of initial equity, inclusive of its
+            # entry fee, so exactly five same-day orders can fit without leverage.
+            shares=slot*(1-fee)/entry
+            cash-=slot
+            holdings[ticker]={"shares":shares,"trade":t,"entry":entry}
+            executed+=1;max_open=max(max_open,len(holdings))
+        for ticker,series in close.items():
+            if day in series.index:
+                px=float(series.loc[day])
+                if np.isfinite(px) and px>0:last[ticker]=px
+        for ticker,item in list(holdings.items()):
+            trade=item["trade"]
+            if pd.Timestamp(trade["exit_date"])<=day:
+                exit_px=float(trade["exit_price"])
+                cash+=item["shares"]*exit_px*(1-fee)
+                del holdings[ticker]
+        equity=cash+sum(item["shares"]*last.get(ticker,item["entry"]) for ticker,item in holdings.items())
+        curve.append((str(day.date()),equity))
+    vals=np.asarray([v for _,v in curve]);peak=np.maximum.accumulate(np.r_[initial,vals])[1:]
+    dd=100*(1-vals/peak)
+    return {"valid":True,"method":"equal initial weight, max 5 concurrent, daily close mark-to-market",
+            "max_positions":cap,"trades_executed":executed,"max_concurrent_positions":max_open,
+            "total_return_pct":round(100*(vals[-1]/initial-1),3),
+            "max_drawdown_pct":round(float(max(0,dd.max())),3),"days":len(curve)}
+
+def _metrics_with_portfolio(trades,requested,frames,period):
+    start,end=(TRAIN_END,VALID_END) if period=="validation" else (VALID_END,HOLDOUT_END)
+    trade=_trade_metrics(trades);port=_equal_weight_replay(trades,frames,start,end)
+    trade.update(_coverage(trades,requested))
+    trade["max_drawdown_portfolio_5_equal_pct"]=port.get("max_drawdown_pct")
+    trade["portfolio_trades_executed"]=port.get("trades_executed",0)
+    trade["portfolio_method"]=port.get("method",port.get("reason"))
+    return trade
+
+def _metric_delta(model,legacy):
+    fields={"trades":"trades_delta","win_rate_pct":"win_rate_pp_delta",
+            "mean_net_pct":"mean_net_pp_delta","profit_factor":"profit_factor_delta",
+            "max_drawdown_sequence_pct":"sequence_mdd_pp_delta",
+            "max_drawdown_portfolio_5_equal_pct":"portfolio_mdd_pp_delta",
+            "coverage_pct":"coverage_pp_delta"}
+    result={}
+    for source,target in fields.items():
+        a=model.get(source);b=legacy.get(source)
+        result[target]=(round(a-b,4) if isinstance(a,(int,float)) and isinstance(b,(int,float)) else None)
+    return result
+
+def _overlap_report(legacy,model):
+    key=lambda t:(t["ticker"],t["entry_date"])
+    old={key(t):t for t in legacy};new={key(t):t for t in model}
+    common=sorted(set(old)&set(new));old_only=[t for k,t in old.items() if k not in new]
+    new_only=[t for k,t in new.items() if k not in old]
+    paired=[{"ticker":k[0],"entry_date":k[1],"legacy_net_pct":old[k]["net_pct"],
+             "model_net_pct":new[k]["net_pct"],
+             "model_minus_legacy_net_pp":round(float(new[k]["net_pct"])-float(old[k]["net_pct"]),4),
+             "model_minus_legacy_win_pp":100*int(float(new[k]["net_pct"])>0)-100*int(float(old[k]["net_pct"])>0)} for k in common]
+    return {"legacy_only":{"n":len(old_only),"metrics":_trade_metrics(old_only)},
+            "model_only":{"n":len(new_only),"metrics":_trade_metrics(new_only)},
+            "both":{"n":len(common),"legacy_metrics":_trade_metrics([old[k] for k in common]),
+                    "model_metrics":_trade_metrics([new[k] for k in common]),
+                    "paired_mean_net_delta_pp":round(float(np.mean([x["model_minus_legacy_net_pp"] for x in paired])),4) if paired else None,
+                    "paired_win_delta_pp":round(float(np.mean([x["model_minus_legacy_win_pp"] for x in paired])),2) if paired else None,
+                    "pairs":paired}}
 
 def _audit_universe():
-    """Use the market-qualified ranked feed directly; sectors are irrelevant here."""
     try:
-        kr_rows,kr_source=naver_api_top100("KR")
-        kq_rows,kq_source=naver_api_top100("KQ")
-        kr=[(code,name,"KR",sector) for code,name,sector in kr_rows]
-        kq=[(code,name,"KQ",sector) for code,name,sector in kq_rows]
-        kr.extend((code,name,"KR",sector) for code,name,sector in MANDATORY_KR)
-        us=[(code,name,"US",sector) for code,name,sector in MANDATORY_US]
-        return {"KR":kr,"KQ":kq,"US":us,
-                "KR_source":kr_source,"KQ_source":kq_source,
-                "US_source":"SOXL 필수 단일 ETF"}
+        kr_rows,kr_source=naver_api_top100("KR");kq_rows,kq_source=naver_api_top100("KQ")
+        kr=[(c,n,"KR",s) for c,n,s in kr_rows];kq=[(c,n,"KQ",s) for c,n,s in kq_rows]
+        kr.extend((c,n,"KR",s) for c,n,s in MANDATORY_KR)
+        us=[(c,n,"US",s) for c,n,s in MANDATORY_US]
+        return {"KR":kr,"KQ":kq,"US":us,"KR_source":kr_source,"KQ_source":kq_source,"US_source":"SOXL 필수 단일 ETF"}
     except Exception as exc:
         print(f"AUDIT_UNIVERSE_NAVER_FALLBACK {type(exc).__name__}: {str(exc)[:180]}",flush=True)
         return get_universe(include_us=False)
 
+def _tag_candidates(legacy_by_variant,broad):
+    all_legacy=[]
+    for strategy,items in legacy_by_variant.items():
+        for trade in items:
+            all_legacy.append({**trade,"candidate_family":"legacy","candidate_legacy":1.0,
+                               "candidate_variant":strategy})
+    tagged_broad=[{**trade,"candidate_family":"broad","candidate_legacy":0.0,
+                   "candidate_variant":"broad_market_ml"} for trade in broad]
+    return all_legacy+tagged_broad,all_legacy,tagged_broad
+
 def run():
     universe=_audit_universe()
-    cohorts={
-        "KOSPI":universe["KR"][:30],
-        "KOSDAQ":universe["KQ"][:30],
-        "TIGER_ETF":universe["KR"][-2:],
-        "SOXL":universe["US"][-1:],
-    }
-    out={"created_utc":datetime.now(timezone.utc).isoformat(),
-         "status":"RESEARCH_ONLY_NOT_LIVE_APPROVED",
-         "sample_start":SAMPLE_START,
-         "windows":{"development_end":TRAIN_END,"validation_end":VALID_END,
-                    "diagnostic_end":HOLDOUT_END},
-         "cost_round_trip_pct":0.35,
-         "universe_sources":{k:universe.get(k+"_source") for k in ("KR","KQ","US")},
-         "selection":"development-period highest mean net return among policies with >=10 trades; validation and diagnostic excluded",
-         "cohorts":{}}
+    cohorts={"KOSPI":universe["KR"][:30],"KOSDAQ":universe["KQ"][:30],
+             "TIGER_ETF":universe["KR"][-2:],"SOXL":universe["US"][-1:]}
+    out={"created_utc":datetime.now(timezone.utc).isoformat(),"status":"RESEARCH_ONLY_NOT_LIVE_APPROVED",
+         "sample_start":SAMPLE_START,"windows":{"development_end":TRAIN_END,"validation_end":VALID_END,"diagnostic_end":HOLDOUT_END},
+         "cost_round_trip_pct":0.35,"portfolio":{"max_concurrent_positions":MAX_PORTFOLIO_POSITIONS,
+         "weighting":"equal initial notional slots","mdd":"daily mark-to-market"},
+         "universe_sources":{k:universe.get(k+"_source") for k in ("KR","KQ","US")},"cohorts":{}}
     all_data_complete=True
     for cohort,items in cohorts.items():
-        rows=[];legacy_pool={k:[] for k in PARAMS};broad_pool=[];errors=[]
+        rows=[];legacy_by_variant={k:[] for k in PARAMS};broad_pool=[];frames={};errors=[]
         for i,(ticker,name,market,sector) in enumerate(items,1):
             try:
-                # A0262B0 began trading after the fixed diagnostic cutoff.
-                # Keep its real short history for an explicit out-of-window
-                # status; do not synthesize pre-listing returns.
                 minimum_bars=1 if ticker=="0262B0" else MIN_HISTORY_BARS
                 prices,source=get_historical_prices(ticker,market,min_bars=minimum_bars)
-                first=str(prices.index[0].date());last=str(prices.index[-1].date())
-                post_period_listing=first>HOLDOUT_END
-                if len(prices)<MIN_HISTORY_BARS and not post_period_listing:
-                    raise ValueError(f"history {len(prices)} bars < {MIN_HISTORY_BARS}")
-                if last<MIN_END_DATE:
-                    raise ValueError(f"OHLCV ends {last}, before required {MIN_END_DATE}")
+                first=str(prices.index[0].date());last=str(prices.index[-1].date());post_period_listing=first>HOLDOUT_END
+                if len(prices)<MIN_HISTORY_BARS and not post_period_listing:raise ValueError(f"history {len(prices)} bars < {MIN_HISTORY_BARS}")
+                if last<MIN_END_DATE:raise ValueError(f"OHLCV ends {last}, before required {MIN_END_DATE}")
                 computed,variants=candidates_from_frame(prices,ticker,market)
-                for strategy,trades in variants.items():
-                    legacy_pool[strategy].extend(t for t in trades if t["signal_date"]>=SAMPLE_START)
-                broad=broad_candidates_from_computed(computed,ticker,market,
-                                                     end_date=HOLDOUT_END,cost_pct=0.35)
-                broad=[t for t in broad if t["signal_date"]>=SAMPLE_START]
-                broad_pool.extend(broad)
-                rows.append({"ticker":ticker,"name":name,"market":market,
-                             "source":source,"bars":len(prices),"first_date":first,
-                             "last_date":last,
-                             "history_status":("LISTED_AFTER_DIAGNOSTIC_WINDOW_NO_OOS_HISTORY"
-                                if post_period_listing else "HISTORICAL_WINDOW_AVAILABLE"),
-                             "legacy_variants":variants,
-                             "broad_candidates":broad})
-            except Exception as exc:
-                errors.append({"ticker":ticker,"name":name,"error":str(exc)[:240]})
+                for strategy,trades in variants.items():legacy_by_variant[strategy].extend(t for t in trades if t["signal_date"]>=SAMPLE_START)
+                broad=[t for t in broad_candidates_from_computed(computed,ticker,market,end_date=HOLDOUT_END,cost_pct=0.35) if t["signal_date"]>=SAMPLE_START]
+                broad_pool.extend(broad);frames[ticker]=prices
+                rows.append({"ticker":ticker,"name":name,"source":source,"bars":len(prices),"first_date":first,"last_date":last,
+                    "history_status":"LISTED_AFTER_DIAGNOSTIC_WINDOW_NO_OOS_HISTORY" if post_period_listing else "HISTORICAL_WINDOW_AVAILABLE",
+                    "legacy_variants":variants,"broad_candidates":broad})
+            except Exception as exc:errors.append({"ticker":ticker,"name":name,"error":str(exc)[:240]})
             print(f"AUDIT_PROGRESS {cohort} {i}/{len(items)} loaded={len(rows)}",flush=True)
 
-        # Select the best legacy exit/entry variant on development only.
-        legacy_dev={key:metrics(_period(trades,"development"))
-                    for key,trades in legacy_pool.items()}
-        eligible=[k for k,m in legacy_dev.items() if m["trades"]>=10 and m["mean_net_pct"] is not None]
-        legacy_selected=max(eligible,key=lambda k:legacy_dev[k]["mean_net_pct"],default=None)
-        legacy_trades=legacy_pool.get(legacy_selected,[]) if legacy_selected else []
-
-        # The probability model sees the full broad candidate pool; its prior
-        # and logistic features are updated only after earlier trades exit.
-        train=_period(broad_pool,"development")
-        prior=(sum(float(t["net_pct"])>0 for t in train)+2)/(len(train)+4) if train else None
-        scored=_prequential_scores(broad_pool)
+        legacy_dev={name:_trade_metrics(_period(trades,"development")) for name,trades in legacy_by_variant.items()}
+        legacy_eligible=[name for name,m in legacy_dev.items() if m["trades"]>=MIN_POLICY_TRADES and m["mean_net_pct"] is not None]
+        legacy_selected=max(legacy_eligible,key=lambda name:(legacy_dev[name]["mean_net_pct"],name),default=None)
+        legacy_trades=_resolve_nonoverlapping(legacy_by_variant.get(legacy_selected,[])) if legacy_selected else []
+        combined,legacy_candidates,broad_candidates=_tag_candidates(legacy_by_variant,broad_pool)
+        scored_by_config={};score_status={}
+        for config_name in CONFIGS:
+            scored_by_config[config_name],score_status[config_name]=_prequential_scores(combined,config_name)
+        selected_config,config_development,config_status=_select_config(scored_by_config)
+        scored=scored_by_config[selected_config] if selected_config else []
         selected_policy,policy_development,policy_status=_select_policy(scored)
-        model_trades=([t for t in scored if _policy_accept(t,selected_policy)]
-                      if selected_policy else [])
+        dev_population=_trade_metrics(_resolve_nonoverlapping(_period(combined,"development")))
+        best_policy_metrics=(policy_development.get(selected_policy) if selected_policy
+                             else policy_development.get("all_scored",{}))
+        raw_dev=_trade_metrics(_period(combined,"development"))
+        no_edge=(selected_policy is None and (
+            (best_policy_metrics.get("trades",0)>=MIN_POLICY_TRADES and
+             best_policy_metrics.get("mean_net_pct") is not None and best_policy_metrics["mean_net_pct"]<=0) or
+            (raw_dev["trades"]>=MIN_POLICY_TRADES and raw_dev["mean_net_pct"] is not None and raw_dev["mean_net_pct"]<=0)))
+        if no_edge:policy_status="NO_DEVELOPMENT_EDGE"
+        model_trades=_resolve_nonoverlapping([t for t in scored if _accept(t,selected_policy)]) if selected_policy else []
         cohort_result={"requested":len(items),"loaded":len(rows),"errors":errors,
-            "data_coverage_pct":round(100*len(rows)/len(items),2) if items else None,
-            "data_complete":len(rows)==len(items) and not errors,
-            "broad_candidate_trades":{"development":metrics(_period(broad_pool,"development")),
-                                      "validation":metrics(_period(broad_pool,"validation")),
-                                      "diagnostic":metrics(_period(broad_pool,"diagnostic"))},
-            "legacy_selected_development_strategy":legacy_selected,
-            "legacy_development":legacy_dev.get(legacy_selected),
-            "selected_model_policy":selected_policy,
-            "model_policy_status":policy_status,
-            "model_policy_development":policy_development,
-            "model_development_prior_win_probability":round(prior,6) if prior is not None else None,
-            "periods":{},"instruments":[]}
+          "data_coverage_pct":round(100*len(rows)/len(items),2) if items else None,
+          "data_complete":len(rows)==len(items) and not errors,
+          "feature_schema":{"full":"all 17 fixed-scale features","core":"12 fixed-scale features",
+                            "payoff_features":["entry_net_rr","entry_net_upside_pct","entry_net_downside_pct","signal_stop_atr"],
+                            "family_feature":"candidate_legacy"},
+          "candidate_pool":{"legacy_variant_candidates":len(legacy_candidates),"broad_candidates":len(broad_candidates),
+                            "combined_candidates":len(combined)},
+          "legacy_selected_development_strategy":legacy_selected,"legacy_development_by_variant":legacy_dev,
+          "selected_model_config":selected_config,"model_config_status":config_status,
+          "model_config_development_scores":config_development,"model_config_score_status":score_status,
+          "selected_model_policy":selected_policy,"model_policy_status":policy_status,
+          "model_policy_development":policy_development,"development_population":dev_population,
+            "no_development_edge_gate":{"status":"NO_DEVELOPMENT_EDGE" if no_edge else policy_status,
+              "threshold_mean_net_pct":0.0,"development_candidate_n":raw_dev["trades"],
+              "development_candidate_mean_net_pct":raw_dev["mean_net_pct"]},
+          "periods":{},"instruments":[]}
         for period in ("validation","diagnostic"):
-            legacy_set=_period(legacy_trades,period)
-            candidate_set=_period(scored,period)
-            model_set=_period(model_trades,period)
-            brier_base=(_brier(candidate_set,"base_probability") if candidate_set else {"n":0,"brier":None})
-            # One fixed empirical training probability is the calibrated base
-            # comparator; all candidates and periods are scored on the same rows.
-            if prior is not None:
-                candidate_set=[{**t,"base_probability":prior} for t in candidate_set]
-                brier_base=_brier(candidate_set,"base_probability")
-            else:brier_base={"n":0,"brier":None}
-            brier_model=_brier(candidate_set,"model_probability")
-            cohort_result["periods"][period]={
-                "legacy":{**metrics(legacy_set),**_coverage(legacy_set,len(items))},
-                "model":{**metrics(model_set),**_coverage(model_set,len(items))},
-                "brier":{"candidate_sample_n":brier_model["n"],
-                         "base":brier_base["brier"],"model":brier_model["brier"],
-                         "improvement_base_minus_model":(round(brier_base["brier"]-brier_model["brier"],6)
-                            if brier_base["brier"] is not None and brier_model["brier"] is not None else None)}}
+            old=_resolve_nonoverlapping(_period(legacy_trades,period));new=_resolve_nonoverlapping(_period(model_trades,period))
+            oldm=_metrics_with_portfolio(old,len(items),frames,period);newm=_metrics_with_portfolio(new,len(items),frames,period)
+            candidates=_period(scored,period)
+            train=_period(combined,"development")
+            base=(sum(float(t["net_pct"])>0 for t in train)+2)/(len(train)+4) if train else None
+            base_rows=[{**t,"base_probability":base} for t in candidates] if base is not None else []
+            brier_base=_brier(base_rows,"base_probability");brier_model=_brier(candidates,"model_probability")
+            calibration=_calibration(candidates)
+            delta=_metric_delta(newm,oldm)
+            cohort_result["periods"][period]={"legacy":oldm,"model":newm,"delta_model_minus_legacy":delta,
+                "paired_comparison":_overlap_report(old,new),
+                "calibration":{"candidate_sample_n":brier_model["n"],"base_brier":brier_base["brier"],
+                    "model_brier":brier_model["brier"],"brier_improvement_base_minus_model":
+                       round(brier_base["brier"]-brier_model["brier"],6) if brier_base["brier"] is not None and brier_model["brier"] is not None else None,
+                    **calibration}}
         for row in rows:
-            old=[]
-            if legacy_selected:old=row["legacy_variants"].get(legacy_selected,[])
-            selected_keys={(t["ticker"],t["entry_date"],t["strategy"]) for t in model_trades}
-            new=[t for t in row["broad_candidates"]
-                 if (t["ticker"],t["entry_date"],t["strategy"]) in selected_keys]
-            cohort_result["instruments"].append({"ticker":row["ticker"],"name":row["name"],
-                "source":row["source"],"bars":row["bars"],"first_date":row["first_date"],"last_date":row["last_date"],
-                "history_status":row["history_status"],
-                "broad_candidates":{"development":metrics(_period(row["broad_candidates"],"development")),
-                                     "validation":metrics(_period(row["broad_candidates"],"validation")),
-                                     "diagnostic":metrics(_period(row["broad_candidates"],"diagnostic"))},
-                "legacy":{"validation":metrics(_period(old,"validation")),
-                          "diagnostic":metrics(_period(old,"diagnostic"))},
-                "model":{"validation":metrics(_period(new,"validation")),
-                         "diagnostic":metrics(_period(new,"diagnostic"))}})
+            old=row["legacy_variants"].get(legacy_selected,[]) if legacy_selected else []
+            new=[t for t in model_trades if t["ticker"]==row["ticker"]]
+            cohort_result["instruments"].append({"ticker":row["ticker"],"name":row["name"],"source":row["source"],
+              "bars":row["bars"],"first_date":row["first_date"],"last_date":row["last_date"],"history_status":row["history_status"],
+              "broad_candidates":{"development":_trade_metrics(_period(row["broad_candidates"],"development")),
+                  "validation":_trade_metrics(_period(row["broad_candidates"],"validation")),"diagnostic":_trade_metrics(_period(row["broad_candidates"],"diagnostic"))},
+              "legacy":{"validation":_trade_metrics(_period(old,"validation")),"diagnostic":_trade_metrics(_period(old,"diagnostic"))},
+              "model":{"validation":_trade_metrics(_period(new,"validation")),"diagnostic":_trade_metrics(_period(new,"diagnostic"))}})
         out["cohorts"][cohort]=cohort_result
         all_data_complete=all_data_complete and cohort_result["data_complete"]
-        print("AUDIT_RESULT "+json.dumps({"cohort":cohort,
-            "requested":len(items),"loaded":len(rows),
-            "legacy_strategy":legacy_selected,"model_policy":selected_policy,
-            "validation":cohort_result["periods"]["validation"],
-            "diagnostic":cohort_result["periods"]["diagnostic"]},ensure_ascii=False),flush=True)
+        print("AUDIT_RESULT "+json.dumps({"cohort":cohort,"requested":len(items),"loaded":len(rows),
+          "legacy_strategy":legacy_selected,"model_config":selected_config,"model_policy":selected_policy,
+          "model_policy_status":policy_status,"validation":cohort_result["periods"]["validation"],
+          "diagnostic":cohort_result["periods"]["diagnostic"]},ensure_ascii=False),flush=True)
     out["data_integrity_status"]="PASS" if all_data_complete else "FAIL"
-    out["status"]="RESEARCH_ONLY_NOT_LIVE_APPROVED"
     Path("data").mkdir(exist_ok=True)
-    Path("data/audit-63-latest.json").write_text(
-        json.dumps(out,ensure_ascii=False,indent=2,default=str),encoding="utf-8")
-    if not all_data_complete:
-        raise SystemExit("FAILED: incomplete 63-instrument OHLCV coverage; see data/audit-63-latest.json")
+    Path("data/audit-63-latest.json").write_text(json.dumps(out,ensure_ascii=False,indent=2,default=str),encoding="utf-8")
+    if not all_data_complete:raise SystemExit("FAILED: incomplete 63-instrument OHLCV coverage; see data/audit-63-latest.json")
     return out
 
-if __name__=="__main__":
-    run()
+if __name__=="__main__":run()
