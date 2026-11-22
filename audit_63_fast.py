@@ -702,7 +702,6 @@ def run():
         dev_variant={s:_trade_metrics(_period(ts,"development")) for s,ts in legacy_by_variant.items()}
         valid_variants=[s for s,m in dev_variant.items() if m["trades"]>=MIN_POLICY_TRADES and m.get("mean_net_pct") is not None]
         legacy_choice=max(valid_variants,key=lambda s:(dev_variant[s]["mean_net_pct"],s),default=None)
-        legacy_selected=_resolve_nonoverlapping(_period(legacy_by_variant.get(legacy_choice,[]),"validation")+_period(legacy_by_variant.get(legacy_choice,[]),"diagnostic")) if legacy_choice else []
         scored_configs={}; statuses={}; dev_comp={}
         for config in MODEL_CONFIGS:
             min_train=MIN_TRAIN_SAMPLES_BY_COHORT[cohort]
@@ -754,7 +753,9 @@ def run():
                 "investor_flow_coverage":out["sample_start_by_cohort"][cohort]["flow_source_coverage"]},
             "periods":{},"instruments":[]}
         for period in ("development","validation","diagnostic"):
-            legacy_pool=_period(legacy_by_variant.get(legacy_choice,[]),period) if legacy_choice else []
+            # Use the decorated candidate rows here so the signal-time regime
+            # tag survives into the legacy-vs-model regime performance split.
+            legacy_pool=_period([r for r in legacy_all if r.get("strategy")==legacy_choice],period) if legacy_choice else []
             legacy_chosen=_resolve_nonoverlapping(legacy_pool)
             model_pool=_period(model_trades,period)
             all_scored=_period(scored,period)
