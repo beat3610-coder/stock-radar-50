@@ -1,0 +1,918 @@
+{
+  "source_run_id": 44987621293,
+  "source_head_sha": "cec6d80fffd6509d7dd890c83c1cfb52c34ea06f",
+  "cohorts": {
+    "KOSPI": {
+      "periods": {
+        "validation": {
+          "legacy": {
+            "trades": 18,
+            "win_rate_pct": 55.56,
+            "mean_net_pct": 2.311,
+            "profit_factor": 2.144,
+            "max_drawdown_pct": 21.38,
+            "max_drawdown_sequence_pct": 21.38,
+            "traded_symbols": 14,
+            "requested_symbols": 30,
+            "coverage_pct": 46.67,
+            "max_drawdown_portfolio_5_equal_pct": 5.74,
+            "portfolio_trades_executed": 18,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "model": {
+            "trades": 105,
+            "win_rate_pct": 40.95,
+            "mean_net_pct": 0.007,
+            "profit_factor": 1.002,
+            "max_drawdown_pct": 71.21,
+            "max_drawdown_sequence_pct": 71.21,
+            "traded_symbols": 30,
+            "requested_symbols": 30,
+            "coverage_pct": 100.0,
+            "max_drawdown_portfolio_5_equal_pct": 9.858,
+            "portfolio_trades_executed": 47,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "calibration": {
+            "candidate_sample_n": 272,
+            "base_brier": 0.249526,
+            "model_brier": 0.249805,
+            "brier_improvement_base_minus_model": -0.000279,
+            "auroc": {
+              "n": 272,
+              "positive_n": 130,
+              "negative_n": 142,
+              "auroc": 0.527302
+            },
+            "probability_spread": {
+              "n": 272,
+              "p10_pct": 42.476,
+              "p50_pct": 49.15,
+              "p90_pct": 55.605
+            },
+            "n": 272,
+            "ece": 0.021493,
+            "reliability_bins": [
+              {
+                "bin": "0.0-0.1",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.1-0.2",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.2-0.3",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.3-0.4",
+                "n": 11,
+                "mean_predicted_pct": 37.72,
+                "observed_win_pct": 45.45
+              },
+              {
+                "bin": "0.4-0.5",
+                "n": 139,
+                "mean_predicted_pct": 46.14,
+                "observed_win_pct": 46.04
+              },
+              {
+                "bin": "0.5-0.6",
+                "n": 119,
+                "mean_predicted_pct": 53.5,
+                "observed_win_pct": 49.58
+              },
+              {
+                "bin": "0.6-0.7",
+                "n": 3,
+                "mean_predicted_pct": 60.22,
+                "observed_win_pct": 66.67
+              },
+              {
+                "bin": "0.7-0.8",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.8-0.9",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.9-1.0",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              }
+            ]
+          }
+        },
+        "diagnostic": {
+          "legacy": {
+            "trades": 6,
+            "win_rate_pct": 50.0,
+            "mean_net_pct": -1.576,
+            "profit_factor": 0.496,
+            "max_drawdown_pct": 12.05,
+            "max_drawdown_sequence_pct": 12.05,
+            "traded_symbols": 4,
+            "requested_symbols": 30,
+            "coverage_pct": 13.33,
+            "max_drawdown_portfolio_5_equal_pct": 3.18,
+            "portfolio_trades_executed": 6,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "model": {
+            "trades": 159,
+            "win_rate_pct": 37.11,
+            "mean_net_pct": -0.1,
+            "profit_factor": 0.972,
+            "max_drawdown_pct": 86.23,
+            "max_drawdown_sequence_pct": 86.23,
+            "traded_symbols": 30,
+            "requested_symbols": 30,
+            "coverage_pct": 100.0,
+            "max_drawdown_portfolio_5_equal_pct": 15.084,
+            "portfolio_trades_executed": 77,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "calibration": {
+            "candidate_sample_n": 303,
+            "base_brier": 0.246016,
+            "model_brier": 0.252851,
+            "brier_improvement_base_minus_model": -0.006835,
+            "auroc": {
+              "n": 303,
+              "positive_n": 124,
+              "negative_n": 179,
+              "auroc": 0.490404
+            },
+            "probability_spread": {
+              "n": 303,
+              "p10_pct": 38.322,
+              "p50_pct": 46.52,
+              "p90_pct": 56.924
+            },
+            "n": 303,
+            "ece": 0.088356,
+            "reliability_bins": [
+              {
+                "bin": "0.0-0.1",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.1-0.2",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.2-0.3",
+                "n": 2,
+                "mean_predicted_pct": 29.37,
+                "observed_win_pct": 0.0
+              },
+              {
+                "bin": "0.3-0.4",
+                "n": 40,
+                "mean_predicted_pct": 36.83,
+                "observed_win_pct": 47.5
+              },
+              {
+                "bin": "0.4-0.5",
+                "n": 178,
+                "mean_predicted_pct": 45.53,
+                "observed_win_pct": 43.26
+              },
+              {
+                "bin": "0.5-0.6",
+                "n": 72,
+                "mean_predicted_pct": 54.27,
+                "observed_win_pct": 36.11
+              },
+              {
+                "bin": "0.6-0.7",
+                "n": 11,
+                "mean_predicted_pct": 61.86,
+                "observed_win_pct": 18.18
+              },
+              {
+                "bin": "0.7-0.8",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.8-0.9",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.9-1.0",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    "KOSDAQ": {
+      "periods": {
+        "validation": {
+          "legacy": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null,
+            "max_drawdown_sequence_pct": null,
+            "traded_symbols": 0,
+            "requested_symbols": 30,
+            "coverage_pct": 0.0,
+            "max_drawdown_portfolio_5_equal_pct": 0.0,
+            "portfolio_trades_executed": 0,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "model": {
+            "trades": 42,
+            "win_rate_pct": 33.33,
+            "mean_net_pct": -0.639,
+            "profit_factor": 0.863,
+            "max_drawdown_pct": 68.75,
+            "max_drawdown_sequence_pct": 68.75,
+            "traded_symbols": 24,
+            "requested_symbols": 30,
+            "coverage_pct": 80.0,
+            "max_drawdown_portfolio_5_equal_pct": 11.637,
+            "portfolio_trades_executed": 36,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "calibration": {
+            "candidate_sample_n": 197,
+            "base_brier": 0.240593,
+            "model_brier": 0.248225,
+            "brier_improvement_base_minus_model": -0.007632,
+            "auroc": {
+              "n": 197,
+              "positive_n": 79,
+              "negative_n": 118,
+              "auroc": 0.474576
+            },
+            "probability_spread": {
+              "n": 197,
+              "p10_pct": 36.88,
+              "p50_pct": 43.75,
+              "p90_pct": 52.189
+            },
+            "n": 197,
+            "ece": 0.073058,
+            "reliability_bins": [
+              {
+                "bin": "0.0-0.1",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.1-0.2",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.2-0.3",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.3-0.4",
+                "n": 51,
+                "mean_predicted_pct": 37.2,
+                "observed_win_pct": 43.14
+              },
+              {
+                "bin": "0.4-0.5",
+                "n": 112,
+                "mean_predicted_pct": 44.67,
+                "observed_win_pct": 40.18
+              },
+              {
+                "bin": "0.5-0.6",
+                "n": 31,
+                "mean_predicted_pct": 53.08,
+                "observed_win_pct": 35.48
+              },
+              {
+                "bin": "0.6-0.7",
+                "n": 3,
+                "mean_predicted_pct": 62.55,
+                "observed_win_pct": 33.33
+              },
+              {
+                "bin": "0.7-0.8",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.8-0.9",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.9-1.0",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              }
+            ]
+          }
+        },
+        "diagnostic": {
+          "legacy": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null,
+            "max_drawdown_sequence_pct": null,
+            "traded_symbols": 0,
+            "requested_symbols": 30,
+            "coverage_pct": 0.0,
+            "max_drawdown_portfolio_5_equal_pct": 0.0,
+            "portfolio_trades_executed": 0,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "model": {
+            "trades": 11,
+            "win_rate_pct": 18.18,
+            "mean_net_pct": -2.689,
+            "profit_factor": 0.387,
+            "max_drawdown_pct": 27.55,
+            "max_drawdown_sequence_pct": 27.55,
+            "traded_symbols": 8,
+            "requested_symbols": 30,
+            "coverage_pct": 26.67,
+            "max_drawdown_portfolio_5_equal_pct": 7.228,
+            "portfolio_trades_executed": 11,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "calibration": {
+            "candidate_sample_n": 199,
+            "base_brier": 0.22483,
+            "model_brier": 0.21809,
+            "brier_improvement_base_minus_model": 0.00674,
+            "auroc": {
+              "n": 199,
+              "positive_n": 60,
+              "negative_n": 139,
+              "auroc": 0.535851
+            },
+            "probability_spread": {
+              "n": 199,
+              "p10_pct": 28.315,
+              "p50_pct": 39.645,
+              "p90_pct": 47.373
+            },
+            "n": 199,
+            "ece": 0.085872,
+            "reliability_bins": [
+              {
+                "bin": "0.0-0.1",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.1-0.2",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.2-0.3",
+                "n": 27,
+                "mean_predicted_pct": 26.95,
+                "observed_win_pct": 18.52
+              },
+              {
+                "bin": "0.3-0.4",
+                "n": 75,
+                "mean_predicted_pct": 35.56,
+                "observed_win_pct": 33.33
+              },
+              {
+                "bin": "0.4-0.5",
+                "n": 91,
+                "mean_predicted_pct": 44.06,
+                "observed_win_pct": 30.77
+              },
+              {
+                "bin": "0.5-0.6",
+                "n": 6,
+                "mean_predicted_pct": 50.77,
+                "observed_win_pct": 33.33
+              },
+              {
+                "bin": "0.6-0.7",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.7-0.8",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.8-0.9",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.9-1.0",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    "TIGER_ETF": {
+      "periods": {
+        "validation": {
+          "legacy": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null,
+            "max_drawdown_sequence_pct": null,
+            "traded_symbols": 0,
+            "requested_symbols": 2,
+            "coverage_pct": 0.0,
+            "max_drawdown_portfolio_5_equal_pct": 0.0,
+            "portfolio_trades_executed": 0,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "model": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null,
+            "max_drawdown_sequence_pct": null,
+            "traded_symbols": 0,
+            "requested_symbols": 2,
+            "coverage_pct": 0.0,
+            "max_drawdown_portfolio_5_equal_pct": 0.0,
+            "portfolio_trades_executed": 0,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "calibration": {
+            "candidate_sample_n": 0,
+            "base_brier": null,
+            "model_brier": null,
+            "brier_improvement_base_minus_model": null,
+            "auroc": {
+              "n": 0,
+              "positive_n": 0,
+              "negative_n": 0,
+              "auroc": null
+            },
+            "probability_spread": {
+              "n": 0,
+              "p10_pct": null,
+              "p50_pct": null,
+              "p90_pct": null
+            },
+            "n": 0,
+            "ece": null,
+            "reliability_bins": [
+              {
+                "bin": "0.0-0.1",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.1-0.2",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.2-0.3",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.3-0.4",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.4-0.5",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.5-0.6",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.6-0.7",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.7-0.8",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.8-0.9",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.9-1.0",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              }
+            ]
+          }
+        },
+        "diagnostic": {
+          "legacy": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null,
+            "max_drawdown_sequence_pct": null,
+            "traded_symbols": 0,
+            "requested_symbols": 2,
+            "coverage_pct": 0.0,
+            "max_drawdown_portfolio_5_equal_pct": 0.0,
+            "portfolio_trades_executed": 0,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "model": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null,
+            "max_drawdown_sequence_pct": null,
+            "traded_symbols": 0,
+            "requested_symbols": 2,
+            "coverage_pct": 0.0,
+            "max_drawdown_portfolio_5_equal_pct": 0.0,
+            "portfolio_trades_executed": 0,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "calibration": {
+            "candidate_sample_n": 0,
+            "base_brier": null,
+            "model_brier": null,
+            "brier_improvement_base_minus_model": null,
+            "auroc": {
+              "n": 0,
+              "positive_n": 0,
+              "negative_n": 0,
+              "auroc": null
+            },
+            "probability_spread": {
+              "n": 0,
+              "p10_pct": null,
+              "p50_pct": null,
+              "p90_pct": null
+            },
+            "n": 0,
+            "ece": null,
+            "reliability_bins": [
+              {
+                "bin": "0.0-0.1",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.1-0.2",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.2-0.3",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.3-0.4",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.4-0.5",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.5-0.6",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.6-0.7",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.7-0.8",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.8-0.9",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.9-1.0",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    "SOXL": {
+      "periods": {
+        "validation": {
+          "legacy": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null,
+            "max_drawdown_sequence_pct": null,
+            "traded_symbols": 0,
+            "requested_symbols": 1,
+            "coverage_pct": 0.0,
+            "max_drawdown_portfolio_5_equal_pct": 0.0,
+            "portfolio_trades_executed": 0,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "model": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null,
+            "max_drawdown_sequence_pct": null,
+            "traded_symbols": 0,
+            "requested_symbols": 1,
+            "coverage_pct": 0.0,
+            "max_drawdown_portfolio_5_equal_pct": 0.0,
+            "portfolio_trades_executed": 0,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "calibration": {
+            "candidate_sample_n": 0,
+            "base_brier": null,
+            "model_brier": null,
+            "brier_improvement_base_minus_model": null,
+            "auroc": {
+              "n": 0,
+              "positive_n": 0,
+              "negative_n": 0,
+              "auroc": null
+            },
+            "probability_spread": {
+              "n": 0,
+              "p10_pct": null,
+              "p50_pct": null,
+              "p90_pct": null
+            },
+            "n": 0,
+            "ece": null,
+            "reliability_bins": [
+              {
+                "bin": "0.0-0.1",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.1-0.2",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.2-0.3",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.3-0.4",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.4-0.5",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.5-0.6",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.6-0.7",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.7-0.8",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.8-0.9",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.9-1.0",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              }
+            ]
+          }
+        },
+        "diagnostic": {
+          "legacy": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null,
+            "max_drawdown_sequence_pct": null,
+            "traded_symbols": 0,
+            "requested_symbols": 1,
+            "coverage_pct": 0.0,
+            "max_drawdown_portfolio_5_equal_pct": 0.0,
+            "portfolio_trades_executed": 0,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "model": {
+            "trades": 0,
+            "win_rate_pct": null,
+            "mean_net_pct": null,
+            "profit_factor": null,
+            "max_drawdown_pct": null,
+            "max_drawdown_sequence_pct": null,
+            "traded_symbols": 0,
+            "requested_symbols": 1,
+            "coverage_pct": 0.0,
+            "max_drawdown_portfolio_5_equal_pct": 0.0,
+            "portfolio_trades_executed": 0,
+            "portfolio_method": "equal initial weight, max 5 concurrent, daily close mark-to-market"
+          },
+          "calibration": {
+            "candidate_sample_n": 0,
+            "base_brier": null,
+            "model_brier": null,
+            "brier_improvement_base_minus_model": null,
+            "auroc": {
+              "n": 0,
+              "positive_n": 0,
+              "negative_n": 0,
+              "auroc": null
+            },
+            "probability_spread": {
+              "n": 0,
+              "p10_pct": null,
+              "p50_pct": null,
+              "p90_pct": null
+            },
+            "n": 0,
+            "ece": null,
+            "reliability_bins": [
+              {
+                "bin": "0.0-0.1",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.1-0.2",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.2-0.3",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.3-0.4",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.4-0.5",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.5-0.6",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.6-0.7",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.7-0.8",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.8-0.9",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              },
+              {
+                "bin": "0.9-1.0",
+                "n": 0,
+                "mean_predicted_pct": null,
+                "observed_win_pct": null
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -11,6 +11,8 @@ on:
       - 'providers.py'
       - 'broad_candidates.py'
       - 'predictive_model.py'
+      - 'r_rank_model.py'
+      - 'data/cec6d80-baseline.json'
   pull_request:
     paths:
       - '.github/workflows/audit-63-instruments.yml'
@@ -20,6 +22,8 @@ on:
       - 'broad_candidates.py'
       - 'predictive_model.py'
       - 'strategy_lab.py'
+      - 'r_rank_model.py'
+      - 'data/cec6d80-baseline.json'
   workflow_dispatch:
 jobs:
   audit_63:

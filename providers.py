@@ -42,6 +42,19 @@ def get_prices(code, market, *, start_date=None, min_bars=None):
     cached=_read_cached(cache_path,required_bars,14)
     if cached is not None:
         return cached,f"validated local OHLCV cache ({len(cached)} bars; through {cached.index[-1].date()})"
+    # A validated cache fetched from an earlier start date contains every bar
+    # needed by a later audit window. Reuse it instead of forcing a duplicate
+    # provider download under a different cache key.
+    if start_date is not None:
+        for prior_start in ("2006-01-01","2010-01-01","2016-01-01"):
+            if prior_start>=start:continue
+            prior_path=_cache_path(code,market,prior_start)
+            prior=_read_cached(prior_path,required_bars,14)
+            if prior is not None:
+                prior=prior.loc[pd.Timestamp(start):]
+                if len(prior)>=required_bars:
+                    _write_cached(cache_path,prior)
+                    return prior,f"validated reused OHLCV cache from {prior_start} ({len(prior)} bars; through {prior.index[-1].date()})"
     failures=[]
     try:
         import FinanceDataReader as fdr
