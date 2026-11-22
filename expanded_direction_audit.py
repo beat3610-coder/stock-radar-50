@@ -209,7 +209,8 @@ def _backtest_model(rows,train_rows,kind,horizon,period,theta=.5):
     if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None}
     eval_rows.sort(key=lambda r:(r["signal_date"],r["ticker"]))
     all_train=sorted([r for r in train_rows if r["horizon"]==horizon],key=lambda r:(r["label_available_date"],r["ticker"]))
-    classes=("DOWN","SIDEWAYS","UP"); probs=np.full((len(eval_rows),3),1/3,dtype=float); scored=[]
+    classes=("DOWN","SIDEWAYS","UP"); probs=np.full((len(eval_rows),3),1/3,dtype=float)
+    target_probs=np.full(len(eval_rows),.5,dtype=float); scored=[]
     valid_years=set()
     for year in sorted({int(r["signal_date"][:4]) for r in eval_rows}):
         snapshot_year=year-(year%2)
@@ -224,14 +225,32 @@ def _backtest_model(rows,train_rows,kind,horizon,period,theta=.5):
         p=np.zeros((len(idx),3));
         for j,c in enumerate(cls):p[:,int(c)]=raw[:,j]
         probs[idx]=p;valid_years.add(str(year))
+        yhit=np.asarray([int(r.get("target_touch_theta_0.5")=="TARGET_FIRST") for r in past])
+        if np.unique(yhit).size==2:
+            hit_model=_model(kind);hit_model.fit(_features(past,active),yhit)
+            hit_raw=hit_model.predict_proba(_features([eval_rows[i] for i in idx],active))
+            hit_classes=list(hit_model.classes_)
+            if 1 in hit_classes:target_probs[idx]=hit_raw[:,hit_classes.index(1)]
     valid=np.asarray([r["signal_date"][:4] in valid_years for r in eval_rows])
-    eval_rows=[r for r,v in zip(eval_rows,valid) if v];probs=probs[valid]
+    eval_rows=[r for r,v in zip(eval_rows,valid) if v];probs=probs[valid];target_probs=target_probs[valid]
     if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None}
     labels=np.asarray([classes.index(r[f"label_{theta}"]) for r in eval_rows])
     valid=np.asarray([r["label_available_date"]< (TRAIN_END if period=="development" else VALID_END if period=="validation" else HOLDOUT_END) for r in eval_rows])
     eval_rows=[r for r,v in zip(eval_rows,valid) if v];probs=probs[valid]; labels=labels[valid]
     if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None}
     m=_metrics(eval_rows,probs,theta)
+    target_actual=np.asarray([int(r.get("target_touch_theta_0.5")=="TARGET_FIRST") for r in eval_rows],dtype=float)
+    target_bins=[];target_ece=0.
+    for b in range(10):
+        mask=(target_probs>=b/10)&((target_probs<(b+1)/10) if b<9 else (target_probs<=1))
+        if mask.any():
+            conf=float(target_probs[mask].mean());obs=float(target_actual[mask].mean())
+            target_ece+=mask.sum()/len(eval_rows)*abs(conf-obs)
+            target_bins.append({"bin":f"{b/10:.1f}-{(b+1)/10:.1f}","n":int(mask.sum()),"mean_probability":conf,"observed_target_first_pct":100*obs})
+    m["target_hit_probability"]={"target":"gross +0.5% touch before gross -0.5% stop; same-bar tie stop-first",
+      "n":len(eval_rows),"observed_target_first_pct":100*float(target_actual.mean()),
+      "mean_predicted_probability_pct":100*float(target_probs.mean()),
+      "brier":float(np.mean((target_probs-target_actual)**2)),"ece":target_ece,"reliability_bins":target_bins}
     up=probs[:,2]; down=probs[:,0]; side=probs[:,1]
     policy_candidates={}
     for cut in (.45,.50,.55):
