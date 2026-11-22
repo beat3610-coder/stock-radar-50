@@ -12,6 +12,7 @@ on:
       - 'broad_candidates.py'
       - 'predictive_model.py'
       - 'r_rank_model.py'
+      - 'market_context.py'
       - 'data/cec6d80-baseline.json'
   pull_request:
     paths:
@@ -23,6 +24,7 @@ on:
       - 'predictive_model.py'
       - 'strategy_lab.py'
       - 'r_rank_model.py'
+      - 'market_context.py'
       - 'data/cec6d80-baseline.json'
   workflow_dispatch:
 jobs:
@@ -38,6 +40,20 @@ jobs:
           key: stock-radar-pr9-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             stock-radar-pr9-cache-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Restore macro-series cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/stock-radar/indices
+          key: stock-radar-pr9-indices-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            stock-radar-pr9-indices-${{ runner.os }}-${{ github.ref_name }}-
+      - name: Restore investor-flow cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/stock-radar/flows
+          key: stock-radar-pr9-flows-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            stock-radar-pr9-flows-${{ runner.os }}-${{ github.ref_name }}-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -59,3 +75,15 @@ jobs:
         with:
           path: .cache/stock-radar/prices
           key: stock-radar-pr9-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Save macro-series cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/stock-radar/indices
+          key: stock-radar-pr9-indices-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+      - name: Save investor-flow cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/stock-radar/flows
+          key: stock-radar-pr9-flows-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}

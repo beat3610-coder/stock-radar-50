@@ -104,6 +104,131 @@ def get_historical_prices(code,market,*,start_date="2006-01-01",min_bars=250):
     return get_prices(code,market,start_date=start_date,min_bars=min_bars)
 
 
+MARKET_SERIES={
+    # FinanceDataReader symbols are preferred; Yahoo symbols are explicit fallback.
+    "KOSPI":{"fdr":"KS11","yahoo":"^KS11"},
+    "KOSDAQ":{"fdr":"KQ11","yahoo":"^KQ11"},
+    "SP500":{"fdr":"US500","yahoo":"^GSPC"},
+    "SOX":{"fdr":"^SOX","yahoo":"^SOX"},
+    "VIX":{"fdr":"^VIX","yahoo":"^VIX"},
+    "USDKRW":{"fdr":"USD/KRW","yahoo":"KRW=X"},
+}
+
+def _normalize_market_close(data):
+    """Normalize index/FX series without applying stock-candle OHLC checks."""
+    if data is None or data.empty:raise ValueError("market-series response is empty")
+    frame=data.copy()
+    if isinstance(frame.columns,pd.MultiIndex):frame.columns=frame.columns.get_level_values(0)
+    frame.columns=[str(c).strip().title() for c in frame.columns]
+    close_key=next((k for k in ("Close","Adj Close","Value") if k in frame.columns),None)
+    if close_key is None:
+        if frame.shape[1]==1:close_key=frame.columns[0]
+        else:raise ValueError(f"market-series Close column missing: {list(frame.columns)}")
+    close=pd.to_numeric(frame[close_key],errors="coerce").dropna()
+    close=close[close>0]
+    close=close.loc[~close.index.duplicated(keep="last")].sort_index()
+    if len(close)<2:raise ValueError(f"market-series close history too short: {len(close)}")
+    return pd.DataFrame({"Close":close})
+
+def get_market_series_bundle(*,start_date="2016-01-01",end_date=None):
+    """Fetch/cache daily market series; report every source failure explicitly."""
+    end=(dt.date.today()+dt.timedelta(days=1)).isoformat() if end_date is None else str(pd.Timestamp(end_date).date())
+    root=PRICE_CACHE.parent/"indices"
+    root.mkdir(parents=True,exist_ok=True)
+    frames={};diagnostics={}
+    import logging
+    logger=logging.getLogger("stock_radar.market_series")
+    for key,spec in MARKET_SERIES.items():
+        path=root/f"{key.lower()}_{start_date}_{end}.csv"
+        attempts=[]
+        frame=None
+        if path.exists():
+            try:
+                cached=_normalize_market_close(pd.read_csv(path,index_col=0,parse_dates=True))
+                if not cached.empty and cached.index.min()<=pd.Timestamp(start_date) and cached.index.max()>=pd.Timestamp(end)-pd.Timedelta(days=12):
+                    frame=cached
+                    diagnostics[key]={"status":"cache","source":"validated local market-series cache",
+                        "requested_symbol":spec,"first_date":str(cached.index.min().date()),
+                        "last_date":str(cached.index.max().date()),"observations":len(cached),"failures":[]}
+            except Exception as exc:
+                attempts.append(f"cache: {type(exc).__name__}: {str(exc)[:120]}")
+        if frame is None:
+            try:
+                import FinanceDataReader as fdr
+                for attempt in range(1,4):
+                    try:
+                        candidate=_normalize_market_close(fdr.DataReader(spec["fdr"],start_date,end))
+                        frame=candidate
+                        source=f"FinanceDataReader {spec['fdr']}"
+                        break
+                    except Exception as exc:
+                        attempts.append(f"FDR {spec['fdr']} try {attempt}: {type(exc).__name__}: {str(exc)[:120]}")
+                        if attempt<3:time.sleep(RETRY_DELAYS[min(attempt-1,len(RETRY_DELAYS)-1)])
+            except Exception as exc:
+                attempts.append(f"FinanceDataReader unavailable: {type(exc).__name__}: {str(exc)[:120]}")
+        if frame is None:
+            try:
+                import yfinance as yf
+                for attempt in range(1,4):
+                    try:
+                        candidate=yf.download(spec["yahoo"],start=start_date,end=end,interval="1d",
+                            auto_adjust=False,progress=False,threads=False,timeout=20)
+                        if isinstance(candidate.columns,pd.MultiIndex):
+                            candidate.columns=candidate.columns.get_level_values(0)
+                        candidate=_normalize_market_close(candidate)
+                        frame=candidate
+                        source=f"Yahoo {spec['yahoo']}"
+                        break
+                    except Exception as exc:
+                        attempts.append(f"Yahoo {spec['yahoo']} try {attempt}: {type(exc).__name__}: {str(exc)[:120]}")
+                        if attempt<3:time.sleep(RETRY_DELAYS[min(attempt-1,len(RETRY_DELAYS)-1)])
+            except Exception as exc:
+                attempts.append(f"yfinance unavailable: {type(exc).__name__}: {str(exc)[:120]}")
+        if frame is not None:
+            frame=frame.sort_index()
+            frame.to_csv(path,index_label="Date")
+            frames[key]=frame
+            diagnostics[key]={"status":"ok","source":source,"requested_symbol":spec,
+                "first_date":str(frame.index.min().date()),"last_date":str(frame.index.max().date()),
+                "observations":len(frame),"failures":attempts}
+        else:
+            diagnostics[key]={"status":"unavailable","source":None,"requested_symbol":spec,
+                "first_date":None,"last_date":None,"observations":0,"failures":attempts}
+            logger.error("Market series unavailable %s: %s",key," | ".join(attempts))
+    return frames,diagnostics
+
+
+def get_historical_investor_flows(code,*,start_date="2016-01-01",end_date=None):
+    """Cached daily KRX investor net-buy share history; raises with source detail."""
+    end=(dt.date.today()+dt.timedelta(days=1)).isoformat() if end_date is None else str(pd.Timestamp(end_date).date())
+    cache_root=PRICE_CACHE.parent/"flows";cache_root.mkdir(parents=True,exist_ok=True)
+    key=hashlib.sha256(f"{code}:{start_date}:{end}".encode()).hexdigest()[:24]
+    path=cache_root/f"{key}.csv"
+    if path.exists():
+        try:
+            cached=pd.read_csv(path,index_col=0,parse_dates=True)
+            cached.index=pd.to_datetime(cached.index)
+            cached=cached.apply(pd.to_numeric,errors="coerce").dropna(how="all")
+            if not cached.empty:return cached,"validated local KRX investor-flow cache"
+        except Exception:pass
+    try:
+        from pykrx import stock
+        start=pd.Timestamp(start_date).strftime("%Y%m%d");finish=pd.Timestamp(end).strftime("%Y%m%d")
+        data=stock.get_market_trading_volume_by_date(start,finish,str(code).zfill(6),on="순매수")
+        if data is None or data.empty:raise ValueError("KRX returned an empty investor-flow frame")
+        ins=next((col for col in data.columns if "기관합계" in str(col)),None)
+        foreign=next((col for col in data.columns if "외국인합계" in str(col) or str(col)=="외국인"),None)
+        if ins is None or foreign is None:
+            raise ValueError(f"KRX investor-flow columns missing: {list(data.columns)}")
+        frame=data[[ins,foreign]].copy();frame.columns=["institution_net_shares","foreign_net_shares"]
+        frame.index=pd.to_datetime(frame.index);frame=frame.apply(pd.to_numeric,errors="coerce").dropna(how="all").sort_index()
+        if len(frame)<250:raise ValueError(f"KRX daily-flow history too short: {len(frame)} observations")
+        frame.to_csv(path,index_label="Date")
+        return frame,"pykrx KRX daily investor net-buy shares"
+    except Exception as exc:
+        raise RuntimeError(f"historical KRX investor flow unavailable for {code}: {type(exc).__name__}: {str(exc)[:180]}") from exc
+
+
 def verify_recent_close(code, market, primary_date, primary_price, primary_source,
                         tolerance_pct=0.5):
     """Compare latest closing *date and price* against Yahoo as a secondary feed.

@@ -13,11 +13,17 @@ import pandas as pd
 
 from universe import get_universe, MANDATORY_KR, MANDATORY_US
 from naver_api_universe import naver_api_top100
-from providers import get_historical_prices
+from providers import (get_historical_prices,get_market_series_bundle,
+                       get_historical_investor_flows)
 from strategy_lab import candidates_from_frame, TRAIN_END, VALID_END, HOLDOUT_END, PARAMS
 from broad_candidates import broad_candidates_from_computed
 from predictive_model import CONFIGS, DEFAULT_CONFIG, prepare_snapshot, predict_from_snapshot
 from audit_300 import metrics
+from market_context import build_market_context, REGIME_RULE, INDEX_FOR_COHORT
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from r_rank_model import (FEATURE_GROUPS, NUMERIC_FEATURES, CENTERS, SCALES,
+                          MIN_TRAIN_SAMPLES_BY_COHORT, MODEL_CONFIGS, accepts as r_accepts,
+                          make_variant_thresholds, walk_forward_scores)
 
 SAMPLE_START="2024-07-01"
 MIN_HISTORY_BARS=250
@@ -561,6 +567,29 @@ def _r_policy_period(scored,policy,thresholds,period):
         "trades":_trade_metrics(chosen),"rank_metrics":_rank_metrics(pool),
         "selected_rank_metrics":_rank_metrics(chosen)}
 
+def _broad_risk_off_blocked(trade):
+    """RISK_OFF blocks broad-market model entries only; legacy remains intact."""
+    return trade.get("strategy")=="broad_market_ml" and trade.get("market_regime")=="RISK_OFF"
+
+def _period_regime_counts(candidates,context,period):
+    if period=="development":lo,hi=SAMPLE_START,TRAIN_END
+    elif period=="validation":lo,hi=TRAIN_END,VALID_END
+    else:lo,hi=VALID_END,HOLDOUT_END
+    days={d:r for d,r in context["regime_by_date"].items() if lo<=d<hi}
+    rows=[r for r in candidates if lo<=r.get("signal_date","")<hi]
+    return {state:{"market_days":sum(v==state for v in days.values()),
+        "candidate_n":sum(r.get("market_regime")==state for r in rows),
+        "broad_candidate_n":sum(r.get("strategy")=="broad_market_ml" and r.get("market_regime")==state for r in rows),
+        "legacy_candidate_n":sum(r.get("strategy")!="broad_market_ml" and r.get("market_regime")==state for r in rows)}
+        for state in ("RISK_ON","NEUTRAL","RISK_OFF","UNKNOWN")}
+
+def _regime_trade_metrics(trades):
+    out={}
+    for regime in ("RISK_ON","NEUTRAL","RISK_OFF","UNKNOWN"):
+        group=[t for t in trades if t.get("market_regime")==regime]
+        out[regime]=_trade_metrics(group)
+    return out
+
 def _model_diagnostics(rows):
     return {"r_rank_metrics":_rank_metrics(rows),"auroc":_auc(rows),
             "brier":_brier(rows,"model_probability"),"ece":_calibration(rows).get("ece"),
@@ -571,6 +600,7 @@ def run():
     universe=_audit_universe()
     cohorts={"KOSPI":universe["KR"][:30],"KOSDAQ":universe["KQ"][:30],
              "TIGER_ETF":universe["KR"][-2:],"SOXL":universe["US"][-1:]}
+    macro_frames,macro_sources=get_market_series_bundle(start_date=SAMPLE_START,end_date=MIN_END_DATE)
     baseline_path=Path("data/cec6d80-baseline.json")
     archived_baseline=json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
     out={"created_utc":started.isoformat(),"status":"RESEARCH_ONLY_NOT_LIVE_APPROVED",
@@ -579,6 +609,16 @@ def run():
         "rank_target": "realized net return percent / entry net downside percent",
         "feature_timing":"all model features and planned payoff/risk fields use signal-day close; next-open values are outcome/execution only",
         "model_comparison":{},"r_rank_metrics":{},"acceptance_rate":{},
+        "regime_features":{"definitions":REGIME_RULE,"market_series_sources":macro_sources,
+            "us_close_shift":"Korean signal dates use the most recent US index date strictly earlier than the Korean signal date; SOXL may use the same US close. This prevents using a later US close.",
+            "macro_source_preference":"FinanceDataReader first; Yahoo Finance retries as fallback; source failures and partial coverage are recorded.",
+            "fixed_scale":True,"evaluation_period_scaling":False},
+        "regime_distribution":{},"regime_performance":{},"ablation":{},
+        "feature_schema":{"version":"macro-relative-flow-v1","groups":{k:list(v) for k,v in FEATURE_GROUPS.items()},
+            "full_numeric_feature_count":len(NUMERIC_FEATURES),"strategy_flags":6,"strategy_interactions":6,
+            "feature_count_including_strategy_terms":len(NUMERIC_FEATURES)+12,"feature_limit":90,
+            "fixed_centers":CENTERS,"fixed_scales":SCALES,
+            "limit_rationale":"59 fixed-scale numeric values + six strategy one-hots + six strategy×net-RR interactions = 71 fixed columns; schema fixed before OOS and no evaluation-window fitting/selection."},
         "cec6d80_baseline_source":archived_baseline.get("source_run_id"),
         "portfolio":{"max_concurrent_positions":5,"weighting":"equal initial notional slots"},"cohorts":{}}
     integrity=True
@@ -599,16 +639,47 @@ def run():
                 instruments.append({"ticker":ticker,"name":name,"source":source,"first_date":first,"last_date":last,"bars":len(prices),"variants":variants})
             except Exception as exc:errors.append({"ticker":ticker,"name":name,"error":str(exc)[:220]})
             print(f"AUDIT_PROGRESS {cohort} {i}/{len(items)} loaded={len(instruments)}",flush=True)
+        flow_frames={};flow_sources={}
+        if cohort=="SOXL":
+            flow_sources={"SOXL":{"status":"not_applicable","source":None,
+                "reason":"US-listed security; KR investor-flow history does not apply. Turnover ratio and signed-volume-flow features are used."}}
+        else:
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                future_to_ticker={}
+                for ticker,_,_,_ in items:
+                    if ticker not in frames:
+                        flow_sources[ticker]={"status":"unavailable","source":None,"reason":"OHLCV history unavailable"}
+                    elif pd.Timestamp(frames[ticker].index[0]).date()>pd.Timestamp(HOLDOUT_END).date():
+                        flow_sources[ticker]={"status":"unavailable","source":None,"reason":"listing begins after the fixed holdout window"}
+                    else:
+                        future_to_ticker[executor.submit(get_historical_investor_flows,ticker,
+                            start_date=SAMPLE_START,end_date=MIN_END_DATE)]=ticker
+                for future in as_completed(future_to_ticker):
+                    ticker=future_to_ticker[future]
+                    try:
+                        flow_frames[ticker],source=future.result()
+                        flow_sources[ticker]={"status":"ok","source":source,"observations":len(flow_frames[ticker]),
+                            "first_date":str(flow_frames[ticker].index.min().date()),"last_date":str(flow_frames[ticker].index.max().date())}
+                    except Exception as exc:
+                        flow_sources[ticker]={"status":"unavailable","source":None,"reason":str(exc)[:250]}
+        context=build_market_context(frames,macro_frames,cohort,flow_frames)
+        for inst in instruments:inst["investor_flow_source"]=flow_sources.get(inst["ticker"],{})
         breadth,gap=_make_cohort_context(frames)
         legacy_all=[]
         for strategy,ts in legacy_by_variant.items():
             for t in ts:
                 frame=frames.get(t["ticker"]);comp=computed_by.get(t["ticker"])
-                if frame is not None:legacy_all.append(_decorate_features({**t,"candidate_family":"legacy","candidate_variant":strategy,"strategy":strategy},frame,comp,breadth,gap))
+                if frame is not None:
+                    row=_decorate_features({**t,"candidate_family":"legacy","candidate_variant":strategy,"strategy":strategy},frame,comp,breadth,gap)
+                    row.update(context["features"].get(t["ticker"],{}).get(t["signal_date"],{}))
+                    legacy_all.append(row)
         broad_all=[]
         for t in broad:
             frame=frames.get(t["ticker"]);comp=computed_by.get(t["ticker"])
-            if frame is not None:broad_all.append(_decorate_features({**t,"candidate_family":"broad","candidate_variant":"broad_market_ml","strategy":"broad_market_ml"},frame,comp,breadth,gap))
+            if frame is not None:
+                row=_decorate_features({**t,"candidate_family":"broad","candidate_variant":"broad_market_ml","strategy":"broad_market_ml"},frame,comp,breadth,gap)
+                row.update(context["features"].get(t["ticker"],{}).get(t["signal_date"],{}))
+                broad_all.append(row)
         combined=legacy_all+broad_all
         # Exclude symbols whose development history has too few completed candidates,
         # while keeping them in OHLCV integrity accounting and the coverage denominator.
@@ -622,6 +693,12 @@ def run():
             "development_candidate_n":sum(1 for t in combined if _period([t],"development")),
             "development_closed_sample_n":sum(1 for t in combined if _period([t],"development") and t.get("net_pct") is not None),
             "model_eligible_symbols":sorted(eligible),"model_excluded_symbols":{k:v for k,v in symbol_dev.items() if k not in eligible}}
+        out["sample_start_by_cohort"][cohort]["cross_sectional_rank_counts"]=context["cross_sectional_rank_counts"]
+        out["sample_start_by_cohort"][cohort]["flow_source_coverage"]={
+            "available_symbols":sum(v.get("status")=="ok" for v in flow_sources.values()),
+            "attempted_symbols":sum(v.get("status") in ("ok","unavailable") for v in flow_sources.values()),
+            "sources":flow_sources}
+        out["regime_distribution"][cohort]={}
         dev_variant={s:_trade_metrics(_period(ts,"development")) for s,ts in legacy_by_variant.items()}
         valid_variants=[s for s,m in dev_variant.items() if m["trades"]>=MIN_POLICY_TRADES and m.get("mean_net_pct") is not None]
         legacy_choice=max(valid_variants,key=lambda s:(dev_variant[s]["mean_net_pct"],s),default=None)
@@ -632,7 +709,8 @@ def run():
             scored_configs[config],statuses[config]=walk_forward_scores(eligible_rows,config,min_train)
             dev=_period(scored_configs[config],"development")
             dev_comp[config]={"r_rank_metrics":_rank_metrics(dev),"auroc":_auc(dev),"candidate_n":len(dev),
-                "minimum_train_samples":min_train,"max_training_samples":4000,"features":30}
+                "minimum_train_samples":min_train,"max_training_samples":4000,
+                "numeric_features":len(NUMERIC_FEATURES),"feature_count_including_strategy_terms":len(NUMERIC_FEATURES)+12}
         selectable=[(v["r_rank_metrics"].get("r_ic_spearman"),v["r_rank_metrics"].get("tercile_top_minus_bottom_realized_r"),k)
                     for k,v in dev_comp.items() if v["r_rank_metrics"].get("r_ic_spearman") is not None and v["candidate_n"]>=MIN_POLICY_TRADES]
         selected=max(selectable,key=lambda p:(p[0],p[1] if p[1] is not None else -1,p[2]))[2] if selectable else None
@@ -641,7 +719,22 @@ def run():
         selected_dev_r_ic=dev_comp.get(selected,{}).get("r_rank_metrics",{}).get("r_ic_spearman") if selected else None
         policy,policy_dev,policy_status=(_select_r_policy(scored,thresholds,selected_dev_r_ic) if selected
             else (None,{},"INSUFFICIENT_DEVELOPMENT_RANKING_SAMPLE"))
-        model_trades=_resolve_nonoverlapping([t for t in scored if t["ticker"] in eligible and policy and r_accepts(t,policy,thresholds)])
+        model_candidates_before_gate=[t for t in scored if t["ticker"] in eligible and policy and r_accepts(t,policy,thresholds)]
+        model_trades_before_gate=_resolve_nonoverlapping(model_candidates_before_gate)
+        model_candidates_after_gate=[t for t in model_candidates_before_gate if not _broad_risk_off_blocked(t)]
+        model_trades=_resolve_nonoverlapping(model_candidates_after_gate)
+        ablation_result={}
+        if selected:
+            for feature_set in FEATURE_GROUPS:
+                ab_scored,_=walk_forward_scores(eligible_rows,selected,MIN_TRAIN_SAMPLES_BY_COHORT[cohort],feature_set=feature_set)
+                ablation_result[feature_set]={"model_config":selected,
+                    "feature_count":len(FEATURE_GROUPS[feature_set])+12,"periods":{}}
+                for period in ("development","validation","diagnostic"):
+                    period_rows=_period(ab_scored,period)
+                    ablation_result[feature_set]["periods"][period]={
+                        "r_rank_metrics":_rank_metrics(period_rows),"auroc":_auc(period_rows),
+                        "diagnostics":_model_diagnostics(period_rows)}
+        out["ablation"][cohort]=ablation_result
         cohort_result={"requested":len(items),"loaded":len(instruments),"errors":errors,
             "data_coverage_pct":round(100*len(instruments)/len(items),2) if items else None,
             "data_complete":len(instruments)==len(items) and not errors,
@@ -653,15 +746,20 @@ def run():
             "model_selection_metric":"development prequential Spearman R-IC, tie-break by top-bottom tercile realized R spread",
             "policy_selection_rank_ic_gate":{"criterion":"selected development R-IC > 0","development_r_ic":selected_dev_r_ic,
                 "passed":bool(selected_dev_r_ic is not None and selected_dev_r_ic>0)},
-            "selected_model_policy":policy,
+            "selected_model_policy":policy,"selected_model_policy_thresholds":thresholds,
             "selected_model_status":policy_status,"development_predicted_r_thresholds":thresholds,
-            "development_policy_comparison":policy_dev,"periods":{},"instruments":[]}
+            "development_policy_comparison":policy_dev,
+            "market_context":{"regime_day_count":len(context["regime_by_date"]),
+                "cross_sectional_rank_counts":context["cross_sectional_rank_counts"],
+                "investor_flow_coverage":out["sample_start_by_cohort"][cohort]["flow_source_coverage"]},
+            "periods":{},"instruments":[]}
         for period in ("development","validation","diagnostic"):
             legacy_pool=_period(legacy_by_variant.get(legacy_choice,[]),period) if legacy_choice else []
             legacy_chosen=_resolve_nonoverlapping(legacy_pool)
             model_pool=_period(model_trades,period)
             all_scored=_period(scored,period)
-            accepted_candidates=[r for r in all_scored if policy and r_accepts(r,policy,thresholds)]
+            accepted_before_gate=[r for r in all_scored if policy and r_accepts(r,policy,thresholds)]
+            accepted_candidates=[r for r in accepted_before_gate if not _broad_risk_off_blocked(r)]
             legacy_m=_metrics_with_portfolio(legacy_chosen,len(items),frames,period) if period!="development" else _trade_metrics(legacy_chosen)
             model_m=_metrics_with_portfolio(model_pool,len(items),frames,period) if period!="development" else _trade_metrics(model_pool)
             model_m.update(_coverage(model_pool,len(items)))
@@ -673,8 +771,24 @@ def run():
                 "cec6d80_legacy":archived_baseline.get("cohorts",{}).get(cohort,{}).get("periods",{}).get(period,{}).get("legacy"),
                 "accepted_candidates_n":len(accepted_candidates),"scored_candidate_n":len(all_scored),
                 "diagnostics":diag,"r_rank_metrics":_rank_metrics(all_scored),
+                "regime_gate":{"accepted_before_gate_n":len(accepted_before_gate),
+                    "accepted_after_gate_n":len(accepted_candidates),
+                    "blocked_broad_risk_off_n":sum(_broad_risk_off_blocked(r) for r in accepted_before_gate),
+                    "hard_gate":"block broad_market_ml only on RISK_OFF; legacy candidates are unchanged"},
                 "unselected_diagnostic":{"legacy_candidate_n":len(_period(legacy_all,period)),"broad_candidate_n":len(_period(broad_all,period)),
                     "legacy_realized":_trade_metrics(_period(legacy_all,period)),"broad_realized":_trade_metrics(_period(broad_all,period))}}
+            regime_counts=_period_regime_counts(eligible_rows,context,period)
+            out["regime_distribution"][cohort][period]=regime_counts
+            legacy_gate_trades=[t for t in legacy_chosen if not _broad_risk_off_blocked(t)]
+            out["regime_performance"].setdefault(cohort,{})[period]={
+                regime:{"distribution":regime_counts[regime],
+                    "legacy":_trade_metrics([t for t in legacy_chosen if t.get("market_regime")==regime]),
+                    "legacy_with_broad_risk_off_gate":_trade_metrics([t for t in legacy_gate_trades if t.get("market_regime")==regime]),
+                    "model_before_hard_gate":_trade_metrics([t for t in model_trades_before_gate if _period([t],period) and t.get("market_regime")==regime]),
+                    "model_after_hard_gate":_trade_metrics([t for t in model_trades if _period([t],period) and t.get("market_regime")==regime]),
+                    "accepted_candidates_before_gate_n":sum(r.get("market_regime")==regime for r in accepted_before_gate),
+                    "accepted_candidates_after_gate_n":sum(r.get("market_regime")==regime for r in accepted_candidates)}
+                for regime in ("RISK_ON","NEUTRAL","RISK_OFF","UNKNOWN")}
         for inst in instruments:
             ticker=inst["ticker"]
             inst["legacy"]={period:_trade_metrics([t for t in _period(legacy_by_variant.get(legacy_choice,[]) if legacy_choice else [],period) if t["ticker"]==ticker]) for period in ("validation","diagnostic")}

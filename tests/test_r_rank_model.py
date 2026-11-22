@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 
 from r_rank_model import (MODEL_CONFIGS, STRATEGIES, accepts, design_matrix,
+                          FEATURE_GROUPS, FEATURE_LIMIT, NUMERIC_FEATURES,
                           make_variant_thresholds, realized_r, walk_forward_scores)
 
 
@@ -15,16 +16,27 @@ class RRankModelTests(unittest.TestCase):
 
     def test_target_is_realized_r_and_features_have_fixed_width(self):
         r=self.row(0);self.assertEqual(realized_r(r),-.5)
-        x=design_matrix([r]);self.assertEqual(x.shape,(1,30));self.assertTrue(np.isfinite(x).all())
+        x=design_matrix([r]);self.assertEqual(x.shape,(1,len(NUMERIC_FEATURES)+12));self.assertTrue(np.isfinite(x).all())
+        self.assertLessEqual(x.shape[1],FEATURE_LIMIT)
+
+    def test_predeclared_ablation_feature_group_widths(self):
+        row=self.row(0)
+        widths={name:design_matrix([row],name).shape[1] for name in FEATURE_GROUPS}
+        self.assertEqual(widths["base30"],30)
+        self.assertEqual(widths["plus_regime"],49)
+        self.assertEqual(widths["plus_relative"],61)
+        self.assertEqual(widths["plus_flow"],71)
 
     def test_only_fixed_predeclared_model_configs(self):
         self.assertEqual({v["kind"] for v in MODEL_CONFIGS.values()},
                          {"ridge","rf","gbr","hgb"})
 
     def test_variant_thresholds_and_acceptance(self):
-        rows=[self.row(i,pred=i/20) for i in range(60)]
+        rows=[{**self.row(i,pred=i/20),"market_regime":"RISK_OFF" if i%2 else "RISK_ON"} for i in range(60)]
         thresholds=make_variant_thresholds(rows)
         self.assertEqual(set(thresholds),{"r_p70","r_p80","r_p90"})
+        self.assertIn("RISK_OFF",thresholds["r_p70"]["by_regime"])
+        self.assertIn("RISK_ON",thresholds["r_p70"]["by_strategy_regime"][STRATEGIES[0]])
         self.assertTrue(accepts(rows[-1],"r_p70",thresholds))
         self.assertFalse(accepts(rows[0],"r_p90",thresholds))
 

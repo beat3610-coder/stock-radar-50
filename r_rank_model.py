@@ -17,12 +17,31 @@ from sklearn.linear_model import LogisticRegression, Ridge
 STRATEGIES=("trend_breakout","trend_pullback","momentum_reentry",
             "trend_pullback_balanced","momentum_reentry_balanced",
             "broad_market_ml")
-NUMERIC_FEATURES=("signal_rsi","signal_adx","signal_atr_pct",
+BASE_NUMERIC_FEATURES=("signal_rsi","signal_adx","signal_atr_pct",
     "signal_ma20_ma60_pct","signal_volume_ratio","signal_5d_return_pct",
     "signal_trend_200_pct","signal_drawdown_20_pct","entry_net_rr",
     "entry_net_upside_pct","entry_net_downside_pct","signal_stop_atr",
     "market_ma200_gap_pct","market_breadth_pct","signal_return_20d_pct",
     "signal_return_60d_pct","signal_volatility_20d_pct","signal_turnover_log10")
+REGIME_FEATURES=("market_index_ma20_gap_pct","market_index_ma60_gap_pct","market_index_ma200_gap_pct",
+    "market_index_return_5d_pct","market_index_return_20d_pct","market_index_return_60d_pct",
+    "market_index_volatility_20d_pct","market_volatility_ratio","market_drawdown_120_pct",
+    "vix_level","vix_change_5d_pct","vix_expanding_percentile","usdkrw_change_5d_pct",
+    "usdkrw_change_20d_pct","usdkrw_z60","sp500_return_20d_pct","sox_return_20d_pct",
+    "market_risk_on","market_risk_off")
+RELATIVE_STRENGTH_FEATURES=("stock_excess_return_20d_pct","stock_excess_return_60d_pct",
+    "stock_excess_return_120d_pct","xs_return20_rank","xs_return60_rank","xs_return120_rank",
+    "xs_volatility20_rank","xs_turnover20_rank","high52_distance_pct","price_volume_corr20",
+    "intraday_strength20","signal_gap_pct")
+FLOW_FEATURES=("foreign_flow_5d_to_turnover","foreign_flow_20d_to_turnover",
+    "institution_flow_5d_to_turnover","institution_flow_20d_to_turnover",
+    "foreign_buy_streak","institution_buy_streak","flow_direction_agreement","flow_data_available",
+    "turnover_ratio20","signed_volume_flow5")
+NUMERIC_FEATURES=BASE_NUMERIC_FEATURES+REGIME_FEATURES+RELATIVE_STRENGTH_FEATURES+FLOW_FEATURES
+FEATURE_GROUPS={"base30":BASE_NUMERIC_FEATURES,
+    "plus_regime":BASE_NUMERIC_FEATURES+REGIME_FEATURES,
+    "plus_relative":BASE_NUMERIC_FEATURES+REGIME_FEATURES+RELATIVE_STRENGTH_FEATURES,
+    "plus_flow":NUMERIC_FEATURES}
 CENTERS={"signal_rsi":50,"signal_adx":25,"signal_atr_pct":3,
     "signal_ma20_ma60_pct":0,"signal_volume_ratio":1.2,"signal_5d_return_pct":0,
     "signal_trend_200_pct":0,"signal_drawdown_20_pct":-3,"entry_net_rr":1.5,
@@ -35,9 +54,41 @@ SCALES={"signal_rsi":25,"signal_adx":20,"signal_atr_pct":3,
     "entry_net_upside_pct":6,"entry_net_downside_pct":6,"signal_stop_atr":2,
     "market_ma200_gap_pct":25,"market_breadth_pct":25,"signal_return_20d_pct":20,
     "signal_return_60d_pct":35,"signal_volatility_20d_pct":5,"signal_turnover_log10":2.5}
+CENTERS.update({
+    "market_index_ma20_gap_pct":0,"market_index_ma60_gap_pct":0,"market_index_ma200_gap_pct":0,
+    "market_index_return_5d_pct":0,"market_index_return_20d_pct":0,"market_index_return_60d_pct":0,
+    "market_index_volatility_20d_pct":20,"market_volatility_ratio":1,"market_drawdown_120_pct":-5,
+    "vix_level":20,"vix_change_5d_pct":0,"vix_expanding_percentile":.5,"usdkrw_change_5d_pct":0,
+    "usdkrw_change_20d_pct":0,"usdkrw_z60":0,"sp500_return_20d_pct":0,"sox_return_20d_pct":0,
+    "market_risk_on":0,"market_risk_off":0,
+    "stock_excess_return_20d_pct":0,"stock_excess_return_60d_pct":0,"stock_excess_return_120d_pct":0,
+    "xs_return20_rank":.5,"xs_return60_rank":.5,"xs_return120_rank":.5,"xs_volatility20_rank":.5,
+    "xs_turnover20_rank":.5,"high52_distance_pct":-5,"price_volume_corr20":0,
+    "intraday_strength20":.5,"signal_gap_pct":0,
+    "foreign_flow_5d_to_turnover":0,"foreign_flow_20d_to_turnover":0,
+    "institution_flow_5d_to_turnover":0,"institution_flow_20d_to_turnover":0,
+    "foreign_buy_streak":0,"institution_buy_streak":0,"flow_direction_agreement":0,
+    "flow_data_available":0,"turnover_ratio20":1,"signed_volume_flow5":0})
+SCALES.update({
+    "market_index_ma20_gap_pct":12,"market_index_ma60_gap_pct":18,"market_index_ma200_gap_pct":30,
+    "market_index_return_5d_pct":10,"market_index_return_20d_pct":18,"market_index_return_60d_pct":30,
+    "market_index_volatility_20d_pct":35,"market_volatility_ratio":.6,"market_drawdown_120_pct":20,
+    "vix_level":20,"vix_change_5d_pct":35,"vix_expanding_percentile":.5,"usdkrw_change_5d_pct":3,
+    "usdkrw_change_20d_pct":5,"usdkrw_z60":2,"sp500_return_20d_pct":18,"sox_return_20d_pct":25,
+    "market_risk_on":1,"market_risk_off":1,
+    "stock_excess_return_20d_pct":20,"stock_excess_return_60d_pct":35,"stock_excess_return_120d_pct":55,
+    "xs_return20_rank":.5,"xs_return60_rank":.5,"xs_return120_rank":.5,"xs_volatility20_rank":.5,
+    "xs_turnover20_rank":.5,"high52_distance_pct":25,"price_volume_corr20":1,
+    "intraday_strength20":.5,"signal_gap_pct":5,
+    "foreign_flow_5d_to_turnover":.5,"foreign_flow_20d_to_turnover":1,
+    "institution_flow_5d_to_turnover":.5,"institution_flow_20d_to_turnover":1,
+    "foreign_buy_streak":5,"institution_buy_streak":5,"flow_direction_agreement":1,
+    "flow_data_available":1,"turnover_ratio20":2,"signed_volume_flow5":1})
 INTERACTION_FEATURES=("entry_net_rr",)
 FEATURE_COUNT=len(NUMERIC_FEATURES)+len(STRATEGIES)*(1+len(INTERACTION_FEATURES))
-FEATURE_LIMIT=30
+# 59 fixed numeric inputs + six strategy flags + six strategy×net-RR terms.
+# Fixed scales and this predeclared schema are shared across all time windows.
+FEATURE_LIMIT=90
 MIN_TRAIN_SAMPLES=300
 MIN_TRAIN_SAMPLES_BY_COHORT={"KOSPI":300,"KOSDAQ":300,"TIGER_ETF":100,"SOXL":100}
 MAX_TRAIN_SAMPLES=4000
@@ -68,12 +119,13 @@ def realized_r(trade):
     except (KeyError,TypeError,ValueError,ZeroDivisionError):pass
     return None
 
-def design_matrix(trades):
+def design_matrix(trades,feature_set="plus_flow"):
     """Fixed-scale features, 6 variant one-hots, and variant×net-RR terms."""
-    x=np.zeros((len(trades),FEATURE_COUNT),dtype=np.float32)
-    nnum=len(NUMERIC_FEATURES)
+    numeric=FEATURE_GROUPS[feature_set]
+    x=np.zeros((len(trades),len(numeric)+len(STRATEGIES)*(1+len(INTERACTION_FEATURES))),dtype=np.float32)
+    nnum=len(numeric)
     for i,t in enumerate(trades):
-        for j,key in enumerate(NUMERIC_FEATURES):
+        for j,key in enumerate(numeric):
             try:value=float(t[key])
             except (KeyError,TypeError,ValueError):value=CENTERS[key]
             if not np.isfinite(value):value=CENTERS[key]
@@ -83,7 +135,7 @@ def design_matrix(trades):
         if strategy not in STRATEGIES:strategy="broad_market_ml"
         k=STRATEGIES.index(strategy)
         x[i,nnum+k]=1.0
-        rr=x[i,NUMERIC_FEATURES.index("entry_net_rr")]
+        rr=x[i,numeric.index("entry_net_rr")]
         x[i,nnum+len(STRATEGIES)+k]=rr
     return x
 
@@ -119,12 +171,12 @@ def _fit_snapshot(train_rows,train_x,config,min_train_samples=MIN_TRAIN_SAMPLES)
         calibrator.fit(calibration_r.reshape(-1,1),labels[split:])
     return {"model":model,"calibrator":calibrator,"train_n":len(y),"train_r":y}
 
-def walk_forward_scores(candidates,config,min_train_samples=MIN_TRAIN_SAMPLES):
+def walk_forward_scores(candidates,config,min_train_samples=MIN_TRAIN_SAMPLES,feature_set="plus_flow"):
     """Quarterly prequential snapshots; all labels have exit_date < anchor."""
     if not candidates:return [],{"candidate_n":0,"scored_n":0,"insufficient_history_n":0,"snapshot_n":0,"max_train_n":0}
     ordered=sorted(candidates,key=lambda t:(t["signal_date"],t["ticker"],t["entry_date"],t.get("strategy","")))
     exits=sorted(range(len(ordered)),key=lambda i:(ordered[i]["exit_date"],ordered[i]["ticker"],ordered[i]["entry_date"]))
-    xall=design_matrix(ordered);ys=np.asarray([realized_r(t) if realized_r(t) is not None else np.nan for t in ordered])
+    xall=design_matrix(ordered,feature_set);ys=np.asarray([realized_r(t) if realized_r(t) is not None else np.nan for t in ordered])
     scored=[];cursor=0;past_idx=[];last_quarter=None;snapshot=None;insufficient=0;max_train=0;snapshots=0
     for idx,row in enumerate(ordered):
         day=pd.Timestamp(row["signal_date"])
@@ -149,13 +201,15 @@ def walk_forward_scores(candidates,config,min_train_samples=MIN_TRAIN_SAMPLES):
     return scored,{"candidate_n":len(ordered),"scored_n":len(scored),
         "insufficient_history_n":insufficient,"snapshot_n":snapshots,"max_train_n":max_train,
         "min_training_samples":min_train_samples,"max_training_samples":MAX_TRAIN_SAMPLES,
-        "snapshot_cadence":"quarterly; exits strictly before quarter start"}
+        "snapshot_cadence":"quarterly; exits strictly before quarter start",
+        "feature_set":feature_set,"feature_count":xall.shape[1]}
 
 def make_variant_thresholds(dev_scored,quantiles=(.70,.80,.90)):
-    """Variant-specific predicted-R quantiles shrunk toward cohort quantiles."""
+    """Development-only strategy/regime predicted-R cuts with fixed-prior shrinkage."""
     values=np.asarray([float(t["model_predicted_r"]) for t in dev_scored if np.isfinite(float(t.get("model_predicted_r",np.nan)))])
     if not len(values):return {}
-    out={f"r_p{int(q*100)}":{"global":float(np.quantile(values,q)),"by_strategy":{}}
+    out={f"r_p{int(q*100)}":{"global":float(np.quantile(values,q)),"by_strategy":{},
+                            "by_regime":{},"by_strategy_regime":{}}
          for q in quantiles}
     for strategy in STRATEGIES:
         group=np.asarray([float(t["model_predicted_r"]) for t in dev_scored
@@ -166,13 +220,42 @@ def make_variant_thresholds(dev_scored,quantiles=(.70,.80,.90)):
             key=f"r_p{int(q*100)}";local=float(np.quantile(group,q));global_cut=out[key]["global"]
             out[key]["by_strategy"][strategy]={"candidate_n":len(group),"shrinkage_weight":round(weight,4),
                 "raw_quantile":round(local,6),"threshold":round(weight*local+(1-weight)*global_cut,6)}
+    regimes=("RISK_ON","NEUTRAL","RISK_OFF")
+    for regime in regimes:
+        group=np.asarray([float(t["model_predicted_r"]) for t in dev_scored
+                          if t.get("market_regime")==regime and np.isfinite(float(t.get("model_predicted_r",np.nan)))])
+        if not len(group):continue
+        weight=len(group)/(len(group)+VARIANT_SHRINKAGE_PRIOR)
+        for q in quantiles:
+            key=f"r_p{int(q*100)}";local=float(np.quantile(group,q));global_cut=out[key]["global"]
+            out[key]["by_regime"][regime]={"candidate_n":len(group),"shrinkage_weight":round(weight,4),
+                "raw_quantile":round(local,6),"threshold":round(weight*local+(1-weight)*global_cut,6)}
+    for strategy in STRATEGIES:
+        for regime in regimes:
+            group=np.asarray([float(t["model_predicted_r"]) for t in dev_scored
+                if t.get("strategy")==strategy and t.get("market_regime")==regime
+                and np.isfinite(float(t.get("model_predicted_r",np.nan)))])
+            if not len(group):continue
+            weight=len(group)/(len(group)+VARIANT_SHRINKAGE_PRIOR)
+            for q in quantiles:
+                key=f"r_p{int(q*100)}"
+                base=out[key]["by_regime"].get(regime,{}).get("threshold",out[key]["global"])
+                local=float(np.quantile(group,q))
+                out[key]["by_strategy_regime"].setdefault(strategy,{})[regime]={
+                    "candidate_n":len(group),"shrinkage_weight":round(weight,4),
+                    "raw_quantile":round(local,6),"threshold":round(weight*local+(1-weight)*base,6)}
     return out
 
 def accepts(trade,policy,thresholds):
     row=thresholds.get(policy)
     if not row:return False
     strategy=trade.get("strategy")
-    spec=row.get("by_strategy",{}).get(strategy)
-    cut=spec["threshold"] if spec else row["global"]
+    regime=trade.get("market_regime")
+    paired=row.get("by_strategy_regime",{}).get(strategy,{})
+    if regime in paired:cut=paired[regime]["threshold"]
+    elif regime in row.get("by_regime",{}):cut=row["by_regime"][regime]["threshold"]
+    else:
+        spec=row.get("by_strategy",{}).get(strategy)
+        cut=spec["threshold"] if spec else row["global"]
     return float(trade["model_predicted_r"])>=float(cut)
 
