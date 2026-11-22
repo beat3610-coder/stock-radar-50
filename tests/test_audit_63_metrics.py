@@ -4,7 +4,7 @@ import pandas as pd
 
 from audit_63_fast import (_calibration,_equal_weight_replay,_overlap_report,
                            _auc,_development_legacy_coefficient,_policy_results,_policy_thresholds,
-                           _select_config,_select_policy,_decorate_features)
+                           _select_config,_select_policy,_select_r_policy,_rank_metrics,_decorate_features)
 
 def trade(ticker,entry,exit_date,net,prob=.4,ev=-1.0):
     return {"ticker":ticker,"signal_date":entry,"entry_date":entry,"exit_date":exit_date,
@@ -99,6 +99,35 @@ class Audit63MetricsTests(unittest.TestCase):
         self.assertEqual(result["model_only"]["n"],1)
         self.assertEqual(result["both"]["n"],1)
         self.assertEqual(result["both"]["paired_mean_net_delta_pp"],2.0)
+
+    def test_r_policy_rank_gate_blocks_nonpositive_development_ic_but_keeps_table(self):
+        rows=[]
+        for i in range(20):
+            day=pd.Timestamp("2025-01-01")+pd.Timedelta(days=i*2)
+            rows.append({**trade(f"T{i}",str(day.date()),str((day+pd.Timedelta(days=1)).date()),
+                                  1.0 if i%2 else -0.2,ev=float(i)),
+                         "signal_date":str(day.date()),"entry_date":str(day.date()),
+                         "exit_date":str((day+pd.Timedelta(days=1)).date()),
+                         "model_predicted_r":i/20,"realized_r":(1.0 if i%2 else -0.2)/2,
+                         "entry_net_downside_pct":2.0,"strategy":"broad_market_ml"})
+        cuts={"r_p70":{"global":0.05,"by_strategy":{}},
+              "r_p80":{"global":0.10,"by_strategy":{}},
+              "r_p90":{"global":0.15,"by_strategy":{}}}
+        policy,table,status=_select_r_policy(rows,cuts,development_r_ic=-0.0459)
+        self.assertIsNone(policy)
+        self.assertEqual(status,"NO_DEVELOPMENT_EDGE")
+        self.assertEqual(set(table),{"r_p70","r_p80","r_p90"})
+        self.assertTrue(all("acceptance_rate_pct" in table[k] and "selected" in table[k]
+                            for k in table))
+
+    def test_rank_metrics_report_iid_standard_error_and_interval(self):
+        rows=[{"realized_r":float(i),"model_predicted_r":float(i),
+               "net_pct":float(i-5)} for i in range(10)]
+        m=_rank_metrics(rows)
+        self.assertEqual(m["n"],10)
+        self.assertEqual(m["r_ic_standard_error_approx"],round(1/(9**0.5),6))
+        self.assertEqual(len(m["r_ic_95_ci_approx"]),2)
+        self.assertIn("dependence ignored",m["r_ic_uncertainty_method"])
 
     def test_portfolio_caps_at_five_concurrent_equal_slots(self):
         dates=pd.bdate_range("2026-04-01",periods=5)

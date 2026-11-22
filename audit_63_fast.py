@@ -480,7 +480,13 @@ def _rank_metrics(rows):
     order=np.argsort(p,kind="mergesort");k=max(1,len(valid)//3)
     top=float(y[order[-k:]].mean());bottom=float(y[order[:k]].mean())
     n20=max(1,int(np.ceil(len(valid)*.20)));ix=order[-n20:]
-    return {"n":len(valid),"r_ic_spearman":round(float(ic),6) if ic is not None and np.isfinite(ic) else None,
+    r_ic=round(float(ic),6) if ic is not None and np.isfinite(ic) else None
+    # Naive iid approximation; overlapping trades can violate independence.
+    r_ic_se=round(float(1/np.sqrt(len(valid)-1)),6) if len(valid)>1 else None
+    return {"n":len(valid),"r_ic_spearman":r_ic,
+        "r_ic_standard_error_approx":r_ic_se,
+        "r_ic_95_ci_approx":[round(r_ic-1.96*r_ic_se,6),round(r_ic+1.96*r_ic_se,6)] if r_ic is not None and r_ic_se is not None else None,
+        "r_ic_uncertainty_method":"naive iid approximation; dependence ignored",
         "tercile_top_minus_bottom_realized_r":round(top-bottom,6),"top20_n":int(n20),
         "top20_realized_r":round(float(y[ix].mean()),6),
         "top20_mean_net_pct":round(float(np.mean([float(valid[i]["net_pct"]) for i in ix])),6),
@@ -524,18 +530,23 @@ def _make_cohort_context(frames):
     return ({str(pd.Timestamp(k).date()):float(v) for k,v in breadth.dropna().items()},
             {str(pd.Timestamp(k).date()):float(v) for k,v in gap.dropna().items()})
 
-def _select_r_policy(scored,thresholds):
-    dev=_period(scored,"development");table={};
+def _select_r_policy(scored,thresholds,development_r_ic=None):
+    dev=_period(scored,"development");table={}
     for name in thresholds:
-        selected=_resolve_nonoverlapping([r for r in dev if r_accepts(r,name,thresholds)])
-        table[name]={"candidate_n":sum(r_accepts(r,name,thresholds) for r in dev),
-                     "acceptance_rate_pct":round(100*sum(r_accepts(r,name,thresholds) for r in dev)/len(dev),2) if dev else None,
+        passed=[r for r in dev if r_accepts(r,name,thresholds)]
+        selected=_resolve_nonoverlapping(passed)
+        table[name]={"candidate_n":len(passed),
+                     "acceptance_rate_pct":round(100*len(passed)/len(dev),2) if dev else None,
                      "selected":_trade_metrics(selected),"r_rank":_rank_metrics(selected)}
+    # A positive mean return alone cannot promote a ranker with no development
+    # ordering power. Keep the policy diagnostics, but fail closed before choice.
+    if development_r_ic is not None and development_r_ic<=0:
+        return None,table,"NO_DEVELOPMENT_EDGE"
     eligible=[(v["selected"].get("mean_net_pct"),k) for k,v in table.items()
               if v["selected"].get("trades",0)>=MIN_POLICY_TRADES and v["selected"].get("mean_net_pct") is not None
               and v["selected"]["mean_net_pct"]>MIN_DEVELOPMENT_EDGE]
     if eligible:return max(eligible,key=lambda p:(p[0],p[1]))[1],table,"DEVELOPMENT_EDGE_SELECTED"
-    all_dev=_trade_metrics(_period(scored,"development"))
+    all_dev=_trade_metrics(dev)
     if all_dev["trades"]>=MIN_POLICY_TRADES and all_dev.get("mean_net_pct") is not None and all_dev["mean_net_pct"]<=0:
         return None,table,"NO_DEVELOPMENT_EDGE"
     return None,table,"INSUFFICIENT_DEVELOPMENT_SAMPLE"
@@ -627,7 +638,9 @@ def run():
         selected=max(selectable,key=lambda p:(p[0],p[1] if p[1] is not None else -1,p[2]))[2] if selectable else None
         scored=scored_configs.get(selected,[])
         thresholds=make_variant_thresholds(_period(scored,"development")) if selected else {}
-        policy,policy_dev,policy_status=_select_r_policy(scored,thresholds) if selected else (None,{},"INSUFFICIENT_DEVELOPMENT_RANKING_SAMPLE")
+        selected_dev_r_ic=dev_comp.get(selected,{}).get("r_rank_metrics",{}).get("r_ic_spearman") if selected else None
+        policy,policy_dev,policy_status=(_select_r_policy(scored,thresholds,selected_dev_r_ic) if selected
+            else (None,{},"INSUFFICIENT_DEVELOPMENT_RANKING_SAMPLE"))
         model_trades=_resolve_nonoverlapping([t for t in scored if t["ticker"] in eligible and policy and r_accepts(t,policy,thresholds)])
         cohort_result={"requested":len(items),"loaded":len(instruments),"errors":errors,
             "data_coverage_pct":round(100*len(instruments)/len(items),2) if items else None,
@@ -638,6 +651,8 @@ def run():
             "model_comparison":dev_comp,"selected_model":selected,"selected_hyperparameters":MODEL_CONFIGS.get(selected),
             "minimum_training_samples":MIN_TRAIN_SAMPLES_BY_COHORT[cohort],
             "model_selection_metric":"development prequential Spearman R-IC, tie-break by top-bottom tercile realized R spread",
+            "policy_selection_rank_ic_gate":{"criterion":"selected development R-IC > 0","development_r_ic":selected_dev_r_ic,
+                "passed":bool(selected_dev_r_ic is not None and selected_dev_r_ic>0)},
             "selected_model_policy":policy,
             "selected_model_status":policy_status,"development_predicted_r_thresholds":thresholds,
             "development_policy_comparison":policy_dev,"periods":{},"instruments":[]}
