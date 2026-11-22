@@ -40,8 +40,8 @@ SCALE={"signal_rsi":20.0,"signal_adx":20.0,"signal_atr_pct":3.0,
        "entry_net_upside_pct":5.0,"entry_net_downside_pct":5.0,
        "signal_stop_atr":1.5,"candidate_legacy":1.0}
 
-# Each candidate explores a different predeclared training/shrinkage choice.
-# The audit chooses among these using development-only prequential Brier score.
+# Each candidate explores a predeclared training/shrinkage choice. The audit
+# chooses among them using development-only prequential ranking quality.
 CONFIGS={
     "rolling240_full_shrink50":{"window":"rolling","max_train":240,"half_life":None,"shrink":0.50,"features":FEATURES},
     "expanding_full_shrink35":{"window":"expanding","max_train":None,"half_life":None,"shrink":0.35,"features":FEATURES},

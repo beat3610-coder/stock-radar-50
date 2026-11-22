@@ -2,7 +2,7 @@ import unittest
 import pandas as pd
 
 from audit_63_fast import (_calibration,_equal_weight_replay,_overlap_report,
-                           _select_config,_select_policy)
+                           _auc,_policy_results,_policy_thresholds,_select_config,_select_policy)
 
 def trade(ticker,entry,exit_date,net,prob=.4,ev=-1.0):
     return {"ticker":ticker,"signal_date":entry,"entry_date":entry,"exit_date":exit_date,
@@ -21,22 +21,37 @@ class Audit63MetricsTests(unittest.TestCase):
 
     def test_no_development_edge_fails_closed(self):
         rows=[trade(f"T{i}",f"2025-01-{i+1:02d}",f"2025-01-{i+2:02d}",-1) for i in range(12)]
-        policy,_,status=_select_policy(rows)
+        thresholds=_policy_thresholds(rows)
+        policy,_,status=_select_policy(rows,thresholds,rows)
         self.assertIsNone(policy)
         self.assertEqual(status,"NO_DEVELOPMENT_EDGE")
 
-    def test_configuration_selection_uses_only_development_brier(self):
-        good=[{"signal_date":"2025-01-02","entry_date":"2025-01-02","exit_date":"2025-01-03",
-               "model_probability":0.9,"net_pct":1} for _ in range(12)]
-        bad=[{"signal_date":"2025-01-02","entry_date":"2025-01-02","exit_date":"2025-01-03",
-              "model_probability":0.1,"net_pct":1} for _ in range(12)]
+    def test_configuration_selection_uses_development_auroc_only(self):
+        good=[];bad=[]
+        for i in range(12):
+            win=i%2==0
+            base={"signal_date":"2025-01-02","entry_date":"2025-01-02","exit_date":"2025-01-03",
+                  "net_pct":1 if win else -1}
+            good.append({**base,"model_probability":0.9 if win else 0.1})
+            bad.append({**base,"model_probability":0.1 if win else 0.9})
         # Validation is deliberately reversed and must not alter config choice.
-        good += [{"signal_date":"2025-11-02","entry_date":"2025-11-02","exit_date":"2025-11-03",
+        good += [{"signal_date":"2025-12-02","entry_date":"2025-12-02","exit_date":"2025-12-03",
                   "model_probability":0.1,"net_pct":1}]
-        bad += [{"signal_date":"2025-11-02","entry_date":"2025-11-02","exit_date":"2025-11-03",
+        bad += [{"signal_date":"2025-12-02","entry_date":"2025-12-02","exit_date":"2025-12-03",
                  "model_probability":0.9,"net_pct":1}]
         chosen,_,_=_select_config({"good":good,"bad":bad})
         self.assertEqual(chosen,"good")
+
+    def test_auroc_and_ev_quantile_gates_have_selection(self):
+        self.assertEqual(_auc([{"model_probability":.9,"net_pct":1},
+                               {"model_probability":.1,"net_pct":-1}])["auroc"],1.0)
+        rows=[trade(f"T{i}",f"2025-01-{i+1:02d}",f"2025-01-{i+2:02d}",1,ev=float(i)) for i in range(20)]
+        thresholds=_policy_thresholds(rows)
+        self.assertEqual(set(thresholds),{"ev_p70","ev_p80","ev_p90"})
+        diag=[{**r,"signal_date":"2026-05-01","entry_date":"2026-05-01","exit_date":"2026-05-02"} for r in rows]
+        result=_policy_results(diag,thresholds,"diagnostic")
+        rates=[result[k]["acceptance_rate_pct"] for k in ("ev_p70","ev_p80","ev_p90")]
+        self.assertGreater(rates[0],rates[1]);self.assertGreater(rates[1],rates[2])
 
     def test_paired_overlap_decomposes_signals(self):
         legacy=[trade("A","2025-01-02","2025-01-04",-1),trade("B","2025-01-03","2025-01-05",1)]

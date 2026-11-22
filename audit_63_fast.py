@@ -16,7 +16,7 @@ from naver_api_universe import naver_api_top100
 from providers import get_historical_prices
 from strategy_lab import candidates_from_frame, TRAIN_END, VALID_END, HOLDOUT_END, PARAMS
 from broad_candidates import broad_candidates_from_computed
-from predictive_model import CONFIGS, DEFAULT_CONFIG, POLICIES, prepare_snapshot, predict_from_snapshot
+from predictive_model import CONFIGS, DEFAULT_CONFIG, prepare_snapshot, predict_from_snapshot
 from audit_300 import metrics
 
 SAMPLE_START="2024-07-01"
@@ -26,6 +26,7 @@ MAX_PORTFOLIO_POSITIONS=5
 PORTFOLIO_COST_PCT=0.35
 MIN_POLICY_TRADES=10
 MIN_DEVELOPMENT_EDGE=0.0
+EV_QUANTILES=(0.70,0.80,0.90)
 
 def _period(trades,period):
     if period=="development":
@@ -70,6 +71,79 @@ def _calibration(rows,key="model_probability"):
                      "observed_win_pct":round(100*win,2) if win is not None else None})
     return {"n":n,"ece":round(ece,6) if n else None,"reliability_bins":bins}
 
+def _auc(rows,key="model_probability"):
+    pairs=[]
+    for row in rows:
+        try:
+            p=float(row[key]);y=int(float(row["net_pct"])>0)
+            if np.isfinite(p):pairs.append((p,y))
+        except (KeyError,TypeError,ValueError):pass
+    labels=np.asarray([y for _,y in pairs],dtype=int)
+    positives=int(labels.sum());negatives=len(labels)-positives
+    if not positives or not negatives:return {"n":len(pairs),"positive_n":positives,"negative_n":negatives,"auroc":None}
+    scores=np.asarray([p for p,_ in pairs],dtype=float)
+    order=np.argsort(scores,kind="mergesort");ranks=np.empty(len(scores),dtype=float)
+    i=0
+    while i<len(order):
+        j=i+1
+        while j<len(order) and scores[order[j]]==scores[order[i]]:j+=1
+        ranks[order[i:j]]=(i+1+j)/2.0
+        i=j
+    rank_sum=float(ranks[labels==1].sum())
+    auc=(rank_sum-positives*(positives+1)/2)/(positives*negatives)
+    return {"n":len(pairs),"positive_n":positives,"negative_n":negatives,"auroc":round(float(auc),6)}
+
+def _probability_spread(rows,key="model_probability"):
+    vals=[]
+    for row in rows:
+        try:
+            value=float(row[key])
+            if np.isfinite(value):vals.append(value)
+        except (KeyError,TypeError,ValueError):pass
+    if not vals:return {"n":0,"p10_pct":None,"p50_pct":None,"p90_pct":None}
+    q=np.percentile(vals,[10,50,90])
+    return {"n":len(vals),"p10_pct":round(float(q[0])*100,3),
+            "p50_pct":round(float(q[1])*100,3),"p90_pct":round(float(q[2])*100,3)}
+
+def _ev_spread(rows):
+    vals=[]
+    for row in rows:
+        try:
+            value=float(row["model_expected_net_pct"])
+            if np.isfinite(value):vals.append(value)
+        except (KeyError,TypeError,ValueError):pass
+    if not vals:return {"n":0,"mean_pct":None,"p10_pct":None,"p50_pct":None,"p90_pct":None}
+    q=np.percentile(vals,[10,50,90])
+    return {"n":len(vals),"mean_pct":round(float(np.mean(vals)),4),
+            "p10_pct":round(float(q[0]),4),"p50_pct":round(float(q[1]),4),"p90_pct":round(float(q[2]),4)}
+
+def _family_score_diagnostics(scored,period):
+    rows=_period(scored,period);out={}
+    for family in ("legacy","broad"):
+        group=[t for t in rows if t.get("candidate_family")==family]
+        out[family]={"candidate_n":len(group),"realized":_trade_metrics(group),
+                     "probability":_probability_spread(group),"expected_net_pct":_ev_spread(group)}
+    return out
+
+def _development_legacy_coefficient(candidates,config_name):
+    if not config_name:return None
+    train=[t for t in candidates if t.get("signal_date","")>=SAMPLE_START
+           and t.get("entry_date","")<TRAIN_END and t.get("exit_date","")<TRAIN_END]
+    snapshot=prepare_snapshot(train,config_name)
+    if snapshot is None or "candidate_legacy" not in snapshot["features"]:return None
+    beta=float(snapshot["beta"][1+snapshot["features"].index("candidate_legacy")])
+    return {"training_candidates":snapshot["n"],"standardized_log_odds_coefficient":round(beta,6),
+            "odds_ratio_legacy_vs_broad":round(float(np.exp(np.clip(beta,-20,20))),6),
+            "interpretation":"positive means higher predicted win odds for legacy candidates, conditional on the fixed feature set"}
+
+def _unselected_candidate_diagnostics(legacy_candidates,broad_candidates):
+    result={}
+    for family,rows in (("legacy",legacy_candidates),("broad",broad_candidates),
+                        ("combined",legacy_candidates+broad_candidates)):
+        result[family]={period:_trade_metrics(_period(rows,period))
+                        for period in ("development","validation","diagnostic")}
+    return result
+
 def _prequential_scores(candidates,config_name):
     config=CONFIGS[config_name]
     ordered=sorted(candidates,key=lambda t:(t["signal_date"],t["ticker"],t["entry_date"],t.get("strategy","")))
@@ -91,11 +165,16 @@ def _prequential_scores(candidates,config_name):
         status["scored_n"]+=1
     return scored,status
 
-def _accept(trade,policy_name):
+def _policy_thresholds(scored):
+    values=[float(t["model_expected_net_pct"]) for t in _period(scored,"development")
+            if np.isfinite(float(t.get("model_expected_net_pct",np.nan)))]
+    if not values:return {}
+    return {f"ev_p{int(q*100)}":round(float(np.quantile(values,q)),6) for q in EV_QUANTILES}
+
+def _accept(trade,policy_name,thresholds):
     if policy_name=="all_scored":return True
-    policy=POLICIES[policy_name]
-    return (trade["model_predicted_win_pct"]>=policy["win_pct"] and
-            trade["model_expected_net_pct"]>=policy["min_ev_pct"])
+    cutoff=thresholds.get(policy_name)
+    return cutoff is not None and float(trade["model_expected_net_pct"])>=cutoff
 
 def _resolve_nonoverlapping(trades):
     """At most one open trade per ticker; choose highest decision-time EV."""
@@ -112,34 +191,44 @@ def _resolve_nonoverlapping(trades):
 def _select_config(scored_by_config):
     result={}
     for name,rows in scored_by_config.items():
-        dev=_period(rows,"development");b=_brier(dev,"model_probability")
-        result[name]={"development_scored_n":b["n"],"development_brier":b["brier"]}
-    eligible=[(v["development_brier"],name) for name,v in result.items()
-              if v["development_brier"] is not None and v["development_scored_n"]>=MIN_POLICY_TRADES]
-    if not eligible:return None,result,"INSUFFICIENT_DEVELOPMENT_CALIBRATION_SAMPLE"
-    _,chosen=min(eligible,key=lambda x:(x[0],x[1]))
-    return chosen,result,"DEVELOPMENT_BRIER_SELECTED"
+        result[name]={}
+        for period in ("development","validation","diagnostic"):
+            subset=_period(rows,period)
+            result[name][period]={"auroc":_auc(subset),"brier":_brier(subset,"model_probability"),
+                                  "probability_spread":_probability_spread(subset)}
+    eligible=[(v["development"]["auroc"]["auroc"],name) for name,v in result.items()
+              if v["development"]["auroc"]["auroc"] is not None
+              and v["development"]["auroc"]["n"]>=MIN_POLICY_TRADES]
+    if not eligible:return None,result,"INSUFFICIENT_DEVELOPMENT_RANKING_SAMPLE"
+    _,chosen=max(eligible,key=lambda x:(x[0],x[1]))
+    return chosen,result,"DEVELOPMENT_AUROC_SELECTED"
 
-def _select_policy(scored):
-    dev=_period(scored,"development");results={}
-    for name in ("all_scored",*POLICIES):
-        accepted=[t for t in dev if _accept(t,name)]
-        results[name]=_trade_metrics(_resolve_nonoverlapping(accepted))
+def _policy_results(scored,thresholds,period):
+    pool=_period(scored,period);out={}
+    for name,cutoff in thresholds.items():
+        passed=[t for t in pool if _accept(t,name,thresholds)]
+        selected=_resolve_nonoverlapping(passed)
+        out[name]={"threshold_expected_net_pct":cutoff,"scored_candidates":len(pool),
+                   "gate_passed_candidates":len(passed),
+                   "acceptance_rate_pct":round(100*len(passed)/len(pool),2) if pool else None,
+                   "selected_trades":_trade_metrics(selected)}
+    return out
+
+def _select_policy(scored,thresholds,raw_candidates=None):
+    dev=_period(scored,"development");policy_table=_policy_results(scored,thresholds,"development")
+    results={name:row["selected_trades"] for name,row in policy_table.items()}
     eligible=[(m["mean_net_pct"],name) for name,m in results.items()
               if m["trades"]>=MIN_POLICY_TRADES and m["mean_net_pct"] is not None
               and m["mean_net_pct"]>MIN_DEVELOPMENT_EDGE]
     if eligible:
-        # Highest development mean net return, with sample size and name as deterministic tie-breaks.
+        # Select by development net return among the predeclared EV quantiles only.
         _,selected=max(eligible,key=lambda x:(x[0],results[x[1]]["trades"],x[1]))
-        return selected,results,"DEVELOPMENT_EDGE_SELECTED"
-    all_scored=results["all_scored"]
-    raw_dev=_trade_metrics(_period(scored,"development"))
-    if ((all_scored["trades"]>=MIN_POLICY_TRADES and all_scored["mean_net_pct"] is not None
-         and all_scored["mean_net_pct"]<=MIN_DEVELOPMENT_EDGE) or
-        (raw_dev["trades"]>=MIN_POLICY_TRADES and raw_dev["mean_net_pct"] is not None
-         and raw_dev["mean_net_pct"]<=MIN_DEVELOPMENT_EDGE)):
-        return None,results,"NO_DEVELOPMENT_EDGE"
-    return None,results,"INSUFFICIENT_DEVELOPMENT_SAMPLE"
+        return selected,policy_table,"DEVELOPMENT_EDGE_SELECTED"
+    raw_dev=_trade_metrics(_period(raw_candidates if raw_candidates is not None else scored,"development"))
+    if raw_dev["trades"]>=MIN_POLICY_TRADES and raw_dev["mean_net_pct"] is not None \
+            and raw_dev["mean_net_pct"]<=MIN_DEVELOPMENT_EDGE:
+        return None,policy_table,"NO_DEVELOPMENT_EDGE"
+    return None,policy_table,"INSUFFICIENT_DEVELOPMENT_SAMPLE"
 
 def _coverage(rows,requested):
     n=len({t["ticker"] for t in rows})
@@ -292,17 +381,12 @@ def run():
             scored_by_config[config_name],score_status[config_name]=_prequential_scores(combined,config_name)
         selected_config,config_development,config_status=_select_config(scored_by_config)
         scored=scored_by_config[selected_config] if selected_config else []
-        selected_policy,policy_development,policy_status=_select_policy(scored)
+        thresholds=_policy_thresholds(scored)
+        selected_policy,policy_development,policy_status=_select_policy(scored,thresholds,combined)
         dev_population=_trade_metrics(_resolve_nonoverlapping(_period(combined,"development")))
-        best_policy_metrics=(policy_development.get(selected_policy) if selected_policy
-                             else policy_development.get("all_scored",{}))
         raw_dev=_trade_metrics(_period(combined,"development"))
-        no_edge=(selected_policy is None and (
-            (best_policy_metrics.get("trades",0)>=MIN_POLICY_TRADES and
-             best_policy_metrics.get("mean_net_pct") is not None and best_policy_metrics["mean_net_pct"]<=0) or
-            (raw_dev["trades"]>=MIN_POLICY_TRADES and raw_dev["mean_net_pct"] is not None and raw_dev["mean_net_pct"]<=0)))
-        if no_edge:policy_status="NO_DEVELOPMENT_EDGE"
-        model_trades=_resolve_nonoverlapping([t for t in scored if _accept(t,selected_policy)]) if selected_policy else []
+        no_edge=policy_status=="NO_DEVELOPMENT_EDGE"
+        model_trades=_resolve_nonoverlapping([t for t in scored if _accept(t,selected_policy,thresholds)]) if selected_policy else []
         cohort_result={"requested":len(items),"loaded":len(rows),"errors":errors,
           "data_coverage_pct":round(100*len(rows)/len(items),2) if items else None,
           "data_complete":len(rows)==len(items) and not errors,
@@ -313,13 +397,19 @@ def run():
                             "combined_candidates":len(combined)},
           "legacy_selected_development_strategy":legacy_selected,"legacy_development_by_variant":legacy_dev,
           "selected_model_config":selected_config,"model_config_status":config_status,
-          "model_config_development_scores":config_development,"model_config_score_status":score_status,
+          "model_config_selection_metric":"development prequential AUROC; Brier is calibration diagnostic only",
+          "model_config_scores_by_period":config_development,"model_config_score_status":score_status,
+          "selected_config_candidate_legacy_coefficient_at_development_end":_development_legacy_coefficient(combined,selected_config),
           "selected_model_policy":selected_policy,"model_policy_status":policy_status,
+          "model_policy_thresholds_expected_net_pct":thresholds,
           "model_policy_development":policy_development,"development_population":dev_population,
+          "unselected_candidate_diagnostics":_unselected_candidate_diagnostics(legacy_candidates,broad_candidates),
             "no_development_edge_gate":{"status":"NO_DEVELOPMENT_EDGE" if no_edge else policy_status,
               "threshold_mean_net_pct":0.0,"development_candidate_n":raw_dev["trades"],
               "development_candidate_mean_net_pct":raw_dev["mean_net_pct"]},
-          "periods":{},"instruments":[]}
+          "periods":{},"candidate_family_score_diagnostics":{},"instruments":[]}
+        cohort_result["candidate_family_score_diagnostics"]={period:_family_score_diagnostics(scored,period)
+            for period in ("development","validation","diagnostic")}
         for period in ("validation","diagnostic"):
             old=_resolve_nonoverlapping(_period(legacy_trades,period));new=_resolve_nonoverlapping(_period(model_trades,period))
             oldm=_metrics_with_portfolio(old,len(items),frames,period);newm=_metrics_with_portfolio(new,len(items),frames,period)
@@ -329,13 +419,15 @@ def run():
             base_rows=[{**t,"base_probability":base} for t in candidates] if base is not None else []
             brier_base=_brier(base_rows,"base_probability");brier_model=_brier(candidates,"model_probability")
             calibration=_calibration(candidates)
+            policy_period=_policy_results(scored,thresholds,period)
             delta=_metric_delta(newm,oldm)
             cohort_result["periods"][period]={"legacy":oldm,"model":newm,"delta_model_minus_legacy":delta,
                 "paired_comparison":_overlap_report(old,new),
                 "calibration":{"candidate_sample_n":brier_model["n"],"base_brier":brier_base["brier"],
                     "model_brier":brier_model["brier"],"brier_improvement_base_minus_model":
                        round(brier_base["brier"]-brier_model["brier"],6) if brier_base["brier"] is not None and brier_model["brier"] is not None else None,
-                    **calibration}}
+                    "auroc":_auc(candidates),"probability_spread":_probability_spread(candidates),**calibration},
+                "policy_diagnostics":policy_period}
         for row in rows:
             old=row["legacy_variants"].get(legacy_selected,[]) if legacy_selected else []
             new=[t for t in model_trades if t["ticker"]==row["ticker"]]
