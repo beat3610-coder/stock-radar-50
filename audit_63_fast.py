@@ -638,6 +638,7 @@ def run():
             "model_comparison":dev_comp,"selected_model":selected,"selected_hyperparameters":MODEL_CONFIGS.get(selected),
             "minimum_training_samples":MIN_TRAIN_SAMPLES_BY_COHORT[cohort],
             "model_selection_metric":"development prequential Spearman R-IC, tie-break by top-bottom tercile realized R spread",
+            "selected_model_policy":policy,
             "selected_model_status":policy_status,"development_predicted_r_thresholds":thresholds,
             "development_policy_comparison":policy_dev,"periods":{},"instruments":[]}
         for period in ("development","validation","diagnostic"):

@@ -106,13 +106,17 @@ def _fit_snapshot(train_rows,train_x,config,min_train_samples=MIN_TRAIN_SAMPLES)
     y=y[positions];x=train_x[positions]
     if np.std(y)<1e-8:return None
     model=_estimator(config);model.fit(x,y)
-    # Auxiliary probability classifier is fitted only on outcomes already
-    # closed before this snapshot. It does not select the R-ranking model.
+    # Calibrate win probability from this estimator's own R predictions using
+    # a chronological tail that the calibrating regressor did not train on.
+    # This keeps AUROC model-specific and avoids in-sample fitted-score leakage.
     labels=(y>0).astype(int)
     calibrator=None
-    if np.unique(labels).size==2:
+    split=int(len(y)*0.8)
+    if len(y)-split>=30 and split>=MIN_TRAIN_SAMPLES//2 and np.unique(labels[split:]).size==2:
+        calibration_model=_estimator(config);calibration_model.fit(x[:split],y[:split])
+        calibration_r=np.asarray(calibration_model.predict(x[split:]),dtype=float)
         calibrator=LogisticRegression(C=0.2,solver="lbfgs",max_iter=250,random_state=RANDOM_SEED)
-        calibrator.fit(x,labels)
+        calibrator.fit(calibration_r.reshape(-1,1),labels[split:])
     return {"model":model,"calibrator":calibrator,"train_n":len(y),"train_r":y}
 
 def walk_forward_scores(candidates,config,min_train_samples=MIN_TRAIN_SAMPLES):
@@ -137,7 +141,7 @@ def walk_forward_scores(candidates,config,min_train_samples=MIN_TRAIN_SAMPLES):
         row_x=xall[idx:idx+1]
         pred_r=float(snapshot["model"].predict(row_x)[0])
         cal=snapshot["calibrator"]
-        prob=float(cal.predict_proba(row_x)[0,1]) if cal is not None else float(np.mean(snapshot["train_r"]>0))
+        prob=float(cal.predict_proba(np.asarray([[pred_r]]))[0,1]) if cal is not None else float(np.mean(snapshot["train_r"]>0))
         scored.append({**row,"realized_r":float(ys[idx]),"model_predicted_r":pred_r,
             "model_probability":prob,"model_predicted_win_pct":100*prob,
             "model_expected_net_pct":pred_r*float(row["entry_net_downside_pct"]),
