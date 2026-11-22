@@ -493,6 +493,13 @@ def _decorate_features(trade,frame,computed,breadth,market_gap):
     if idx<0:return trade
     close=frame.Close.astype(float);vol=frame.Volume.astype(float)
     px=float(close.iloc[idx]);c20=float(close.iloc[max(0,idx-20)]);c60=float(close.iloc[max(0,idx-60)])
+    # Model inputs and planned risk are frozen at signal close. Candidate
+    # builders also retain next-open execution fields for realized fills; never
+    # let those future prices leak into model features or the R denominator.
+    stop=float(trade.get("stop",px));take=float(trade.get("take",px))
+    planned_downside=max(0.0,100*(1-stop/px)+0.35)
+    planned_upside=max(0.0,100*(take/px-1)-0.35)
+    planned_rr=planned_upside/planned_downside if planned_downside>0 else 0.0
     returns=close.pct_change().iloc[max(0,idx-20):idx+1].dropna()
     dollar=px*float(vol.iloc[idx])
     row=computed.iloc[idx]
@@ -502,6 +509,8 @@ def _decorate_features(trade,frame,computed,breadth,market_gap):
         "signal_return_60d_pct":100*(px/c60-1) if c60 else 0,
         "signal_volatility_20d_pct":100*float(returns.std(ddof=0)) if len(returns) else 0,
         "signal_turnover_log10":float(np.log10(max(dollar,1))),
+        "entry_net_rr":planned_rr,"entry_net_upside_pct":planned_upside,
+        "entry_net_downside_pct":planned_downside,
         "market_breadth_pct":float(breadth.get(trade["signal_date"],50)),
         "market_ma200_gap_pct":float(market_gap.get(trade["signal_date"],0))})
     return trade
@@ -557,6 +566,7 @@ def run():
         "sample_start":SAMPLE_START,"sample_start_by_cohort":{},
         "windows":{"development_end":TRAIN_END,"validation_end":VALID_END,"diagnostic_end":HOLDOUT_END},
         "rank_target": "realized net return percent / entry net downside percent",
+        "feature_timing":"all model features and planned payoff/risk fields use signal-day close; next-open values are outcome/execution only",
         "model_comparison":{},"r_rank_metrics":{},"acceptance_rate":{},
         "cec6d80_baseline_source":archived_baseline.get("source_run_id"),
         "portfolio":{"max_concurrent_positions":5,"weighting":"equal initial notional slots"},"cohorts":{}}

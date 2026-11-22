@@ -1,9 +1,10 @@
 import unittest
+import numpy as np
 import pandas as pd
 
 from audit_63_fast import (_calibration,_equal_weight_replay,_overlap_report,
                            _auc,_development_legacy_coefficient,_policy_results,_policy_thresholds,
-                           _select_config,_select_policy)
+                           _select_config,_select_policy,_decorate_features)
 
 def trade(ticker,entry,exit_date,net,prob=.4,ev=-1.0):
     return {"ticker":ticker,"signal_date":entry,"entry_date":entry,"exit_date":exit_date,
@@ -13,6 +14,17 @@ def trade(ticker,entry,exit_date,net,prob=.4,ev=-1.0):
             "score":50.0,"strategy":"x","candidate_family":"broad"}
 
 class Audit63MetricsTests(unittest.TestCase):
+    def test_model_payoff_features_do_not_use_next_open(self):
+        dates=pd.bdate_range("2025-01-01",periods=230)
+        frame=pd.DataFrame({"Close":np.full(230,100.),"Volume":np.full(230,1000.)},index=dates)
+        computed=pd.DataFrame({"MA200":np.full(230,95.)},index=dates)
+        base={"ticker":"T","signal_date":str(dates[-1].date()),"stop":95.,"take":108.,
+              "entry_net_rr":0.2,"entry_net_upside_pct":1.,"entry_net_downside_pct":8.}
+        alt={**base,"entry":115.,"entry_net_rr":8.,"entry_net_upside_pct":40.,"entry_net_downside_pct":1.}
+        first=_decorate_features(base.copy(),frame,computed,{},{});second=_decorate_features(alt.copy(),frame,computed,{},{})
+        for key in ("entry_net_rr","entry_net_upside_pct","entry_net_downside_pct"):
+            self.assertEqual(first[key],second[key])
+
     def test_reliability_and_ece_are_reported(self):
         rows=[{"model_probability":.2,"net_pct":-1},{"model_probability":.8,"net_pct":1}]
         result=_calibration(rows)
