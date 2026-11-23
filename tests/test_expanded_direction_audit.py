@@ -5,9 +5,10 @@ import pandas as pd
 
 from expanded_direction_audit import (
     FEATURES, _features, _make_rows, _mandatory_market_items, _metrics, _trade_perf, direction_label,
+    _freeze_volatility_labels, _fit_temperature, _model,
 )
-
-from universe import MANDATORY_KR, MANDATORY_US
+from universe import MANDATORY_KR, MANDATORY_US, AUDIT_63_BENCHMARK
+from audit_63_fast import _frozen_audit_cohorts
 
 
 class ExpandedDirectionAuditTests(unittest.TestCase):
@@ -24,6 +25,36 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
         self.assertEqual(direction_label(.5, .5), "SIDEWAYS")
         with self.assertRaises(ValueError):
             direction_label(float("nan"), .5)
+
+    def test_frozen_benchmark_replaces_unstable_kospi_symbol(self):
+        self.assertEqual(len(AUDIT_63_BENCHMARK["KOSPI"]),30)
+        self.assertIn("015760",AUDIT_63_BENCHMARK["KOSPI"])
+        self.assertNotIn("096770",AUDIT_63_BENCHMARK["KOSPI"])
+        self.assertEqual(len(AUDIT_63_BENCHMARK["KOSDAQ"]),30)
+        cohorts=_frozen_audit_cohorts({"KR":[("096770","SK이노베이션","KR","화학")],"KQ":[]})
+        self.assertEqual([x[0] for x in cohorts["KOSPI"]],list(AUDIT_63_BENCHMARK["KOSPI"]))
+        self.assertEqual([x[0] for x in cohorts["TIGER_ETF"]],list(AUDIT_63_BENCHMARK["TIGER_ETF"]))
+
+    def test_volatility_band_k_uses_development_only(self):
+        rows=[]
+        for i,value in enumerate(range(1,101)):
+            rows.append({"cohort":"KOSPI","label_available_date":"2025-10-01" if i<80 else "2025-12-01",
+                         "volatility_unit_pct":1.0,"net_pct":float(value)})
+        report=_freeze_volatility_labels(rows)["KOSPI"]
+        self.assertEqual(report["development_n"],80)
+        self.assertAlmostEqual(report["k"],24.7)
+        self.assertEqual(sum(report["development_class_counts"].values()),80)
+
+    def test_classifiers_are_not_balanced_and_temperature_is_fitted(self):
+        logistic=_model("multinomial_logistic")
+        forest=_model("random_forest")
+        self.assertIsNone(logistic[-1].class_weight)
+        self.assertIsNone(forest.class_weight)
+        rows=[{"label_vol":("UP" if i%2 else "DOWN")} for i in range(120)]
+        probs=np.tile([.6,.1,.3],(120,1))
+        result=_fit_temperature(rows,probs)
+        self.assertEqual(result["fit_n"],120)
+        self.assertGreater(result["temperature"],0)
 
     def test_fixed_schema_feature_matrix(self):
         row={key:0.0 for key in FEATURES}
@@ -42,9 +73,11 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
 
     def test_selected_trades_include_drawdowns_and_avoidance(self):
         rows=[{"ticker":"A","entry_date":"2025-01-01","label_available_date":"2025-01-05","net_pct":-2,"label_0.5":"DOWN"},
-              {"ticker":"B","entry_date":"2025-01-02","label_available_date":"2025-01-06","net_pct":1,"label_0.5":"UP"}]
-        result=_trade_perf(rows[1:],rows,np.asarray([[.8,.1,.1],[.1,.1,.8]]))
-        self.assertEqual(result["n"],1)
+              {"ticker":"B","entry_date":"2025-01-02","label_available_date":"2025-01-06","net_pct":1,"label_0.5":"UP"},
+              {"ticker":"C","entry_date":"2025-01-03","label_available_date":"2025-01-07","net_pct":.5,"label_0.5":"UP"}]
+        result=_trade_perf(rows[1:],rows,np.asarray([[.8,.1,.1],[.1,.1,.8],[.1,.1,.8]]))
+        self.assertEqual(result["n"],2)
+        self.assertEqual(result["portfolio_5slot_trade_n"],2)
         self.assertEqual(result["rejected_down_n"],1)
         self.assertEqual(result["rejected_down_loss_avoided_pct"],2)
         self.assertIsNotNone(result["max_drawdown_5slot_pct"])

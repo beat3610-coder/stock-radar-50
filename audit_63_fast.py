@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from universe import get_universe, MANDATORY_KR, MANDATORY_US
+from universe import get_universe, MANDATORY_KR, MANDATORY_US, AUDIT_63_BENCHMARK
 from naver_api_universe import naver_api_top100
 from providers import (get_historical_prices,get_market_series_bundle,
                        get_historical_investor_flows)
@@ -348,6 +348,26 @@ def _audit_universe():
         print(f"AUDIT_UNIVERSE_NAVER_FALLBACK {type(exc).__name__}: {str(exc)[:180]}",flush=True)
         return get_universe(include_us=False)
 
+def _frozen_audit_cohorts(universe):
+    """Resolve names/sectors from metadata while keeping the audited symbols fixed."""
+    markets={"KOSPI":("KR","KR"),"KOSDAQ":("KQ","KQ")}
+    result={}
+    for cohort,(key,market) in markets.items():
+        by_code={str(item[0]):item for item in universe.get(key,[])}
+        rows=[]
+        for code in AUDIT_63_BENCHMARK[cohort]:
+            item=by_code.get(code)
+            rows.append(item if item is not None else (code,code,market,"sector metadata unavailable"))
+        result[cohort]=rows
+    kr_by_code={str(item[0]):item for item in universe.get("KR",[])}
+    etfs=[]
+    for code,name,_ in MANDATORY_KR:
+        item=kr_by_code.get(code)
+        etfs.append(item if item is not None and len(item)>=4 else (code,name,"KR","ETF"))
+    result["TIGER_ETF"]=etfs
+    result["SOXL"]=[("SOXL","SOXL","US","leveraged ETF")]
+    return result
+
 def _tag_candidates(legacy_by_variant,broad):
     all_legacy=[]
     for strategy,items in legacy_by_variant.items():
@@ -360,13 +380,13 @@ def _tag_candidates(legacy_by_variant,broad):
 
 def _run_pre_r_rank():
     universe=_audit_universe()
-    cohorts={"KOSPI":universe["KR"][:30],"KOSDAQ":universe["KQ"][:30],
-             "TIGER_ETF":universe["KR"][-2:],"SOXL":universe["US"][-1:]}
+    cohorts=_frozen_audit_cohorts(universe)
     out={"created_utc":datetime.now(timezone.utc).isoformat(),"status":"RESEARCH_ONLY_NOT_LIVE_APPROVED",
          "sample_start":SAMPLE_START,"windows":{"development_end":TRAIN_END,"validation_end":VALID_END,"diagnostic_end":HOLDOUT_END},
          "cost_round_trip_pct":0.35,"portfolio":{"max_concurrent_positions":MAX_PORTFOLIO_POSITIONS,
          "weighting":"equal initial notional slots","mdd":"daily mark-to-market"},
-         "universe_sources":{k:universe.get(k+"_source") for k in ("KR","KQ","US")},"cohorts":{}}
+         "universe_sources":{k:universe.get(k+"_source") for k in ("KR","KQ","US")},
+         "frozen_audit_benchmark":{k:list(v) for k,v in AUDIT_63_BENCHMARK.items()},"cohorts":{}}
     all_data_complete=True
     for cohort,items in cohorts.items():
         rows=[];legacy_by_variant={k:[] for k in PARAMS};broad_pool=[];frames={};errors=[]
@@ -737,8 +757,7 @@ def _model_diagnostics(rows):
 def run():
     started=datetime.now(timezone.utc)
     universe=_audit_universe()
-    cohorts={"KOSPI":universe["KR"][:30],"KOSDAQ":universe["KQ"][:30],
-             "TIGER_ETF":universe["KR"][-2:],"SOXL":universe["US"][-1:]}
+    cohorts=_frozen_audit_cohorts(universe)
     macro_frames,macro_sources=get_market_series_bundle(start_date=SAMPLE_START,end_date=MIN_END_DATE)
     baseline_path=Path("data/cec6d80-baseline.json")
     archived_baseline=json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
@@ -754,6 +773,7 @@ def run():
             "fixed_scale":True,"evaluation_period_scaling":False},
         "regime_distribution":{},"regime_performance":{},"ablation":{},
         "feature_coverage":{},"target_variants":{},"policy_comparison":{},
+        "frozen_audit_benchmark":{k:list(v) for k,v in AUDIT_63_BENCHMARK.items()},
         "feature_schema":{"version":"macro-relative-flow-v1","groups":{k:list(v) for k,v in FEATURE_GROUPS.items()},
             "full_numeric_feature_count":len(NUMERIC_FEATURES),"strategy_flags":6,"strategy_interactions":6,
             "feature_count_including_strategy_terms":len(NUMERIC_FEATURES)+12,"feature_limit":90,

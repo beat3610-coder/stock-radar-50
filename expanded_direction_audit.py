@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
+from scipy.optimize import minimize_scalar
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
@@ -24,12 +25,14 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from providers import get_historical_prices
-from universe import get_universe, MANDATORY_KR, MANDATORY_US
+from universe import get_universe, MANDATORY_KR, MANDATORY_US, AUDIT_63_BENCHMARK
 from engine import compute
 
 TRAIN_END="2025-11-01"; VALID_END="2026-04-01"; HOLDOUT_END="2026-11-01"
 SAMPLE_START="2016-01-01"; COST_PCT=.35; THETAS=(.3,.5,1.0)
 HORIZONS=(5,10,20); MIN_TRAIN=500; REFIT_MONTH=1; SIGNAL_STEP=5
+SIDEWAYS_TARGET_SHARE=.30
+SPREAD_CUTS=(.05,.10,.15); SIDEWAYS_MAX=(.25,.35,.45); EV_FLOORS=(0.0,.10,.20)
 FEATURES=("ret5","ret20","ret60","ret120","atr_pct","vol20_pct",
           "rsi","ma20_gap","ma60_gap","ma200_gap","turnover_ratio",
           "volume_flow5","gap_pct","intraday_strength20","xs_ret20",
@@ -55,16 +58,22 @@ def _ticker_set():
     rows={"KOSPI":[x for x in universe.get("KR",[]) if x[0] not in {e[0] for e in MANDATORY_KR}],
           "KOSDAQ":list(universe.get("KQ",[])),
           "US":[x for x in universe.get("US",[]) if x[0] not in {e[0] for e in MANDATORY_US}]}
+    # Include any frozen benchmark ticker absent from a refreshed ranking feed;
+    # this preserves audit coverage while recording an actual load failure.
+    for cohort,key,market in (("KOSPI","KOSPI","KR"),("KOSDAQ","KOSDAQ","KQ")):
+        present={str(x[0]) for x in rows[cohort]}
+        rows[cohort].extend((code,code,market,"frozen audit benchmark")
+                            for code in AUDIT_63_BENCHMARK[key] if code not in present)
     rows={c:[(ticker,name,market,sector) for ticker,name,market,sector in items] for c,items in rows.items()}
     rows["universe_sources"]={k:universe.get(k+"_source") for k in ("KR","KQ","US")}
     rows["universe_errors"]={k:universe.get(k+"_error") for k in ("KR","KQ") if universe.get(k+"_error")}
     return rows
 
 def _audit_symbols(universe):
-    return {"KOSPI":{x[0] for x in universe.get("KOSPI",[])[:30]},
-            "KOSDAQ":{x[0] for x in universe.get("KOSDAQ",[])[:30]},
-            "US":{"SOXL"},"TIGER_ETF":{x[0] for x in MANDATORY_KR}}
-
+    return {"KOSPI":set(AUDIT_63_BENCHMARK["KOSPI"]),
+            "KOSDAQ":set(AUDIT_63_BENCHMARK["KOSDAQ"]),
+            "US":set(AUDIT_63_BENCHMARK["SOXL"]),
+            "TIGER_ETF":set(AUDIT_63_BENCHMARK["TIGER_ETF"])}
 
 def _mandatory_market_items(items, market):
     """Normalize universe.py's (ticker, name, reason) entries for price loading."""
@@ -108,6 +117,9 @@ def _make_rows(frame,ticker,market,cohort):
                  "label_available_date":pd.Timestamp(x.index[exit_index]).date().isoformat(),
                  "horizon":h,"net_pct":net,"target_touch_theta_0.5":touch,**vals}
             for theta in THETAS:row[f"label_{theta}"]=direction_label(net,theta)
+            # Volatility is measured through the signal-day close only. The
+            # cohort k is selected from development labels, then frozen for OOS.
+            row["volatility_unit_pct"]=float(vol20.iloc[i])*float(np.sqrt(h/20))
             rows.append(row)
     return rows
 
@@ -138,9 +150,55 @@ def _features(rows,active=None):
 def _model(kind):
     if kind=="multinomial_logistic":
         return make_pipeline(SimpleImputer(strategy="constant",fill_value=0),StandardScaler(),
-             LogisticRegression(C=.15,max_iter=300,class_weight="balanced",random_state=3610))
+             LogisticRegression(C=.15,max_iter=300,class_weight=None,random_state=3610))
     return RandomForestClassifier(n_estimators=80,max_depth=5,min_samples_leaf=20,
-            class_weight="balanced_subsample",random_state=3610,n_jobs=1)
+            class_weight=None,random_state=3610,n_jobs=1)
+
+def _freeze_volatility_labels(rows):
+    """Choose a cohort-wide k using only labels mature before TRAIN_END."""
+    result={}; names=("DOWN","SIDEWAYS","UP")
+    for cohort in sorted({r["cohort"] for r in rows}):
+        dev=[r for r in rows if r["cohort"]==cohort and r["label_available_date"]<TRAIN_END
+             and np.isfinite(r.get("volatility_unit_pct",np.nan)) and r["volatility_unit_pct"]>0]
+        z=np.asarray([abs(float(r["net_pct"]))/float(r["volatility_unit_pct"]) for r in dev])
+        k=float(np.quantile(z,SIDEWAYS_TARGET_SHARE)) if len(z) else None
+        labels=[]
+        if k is not None:
+            for row in rows:
+                if row["cohort"]!=cohort:continue
+                band=k*float(row.get("volatility_unit_pct",0.0))
+                row["label_vol"]=direction_label(row["net_pct"],band) if band>0 else "SIDEWAYS"
+                row["label_vol_band_pct"]=band
+            labels=[r["label_vol"] for r in dev]
+        counts={name:labels.count(name) for name in names}
+        result[cohort]={"k":k,"development_n":len(dev),"development_class_counts":counts,
+          "development_class_share_pct":{n:round(100*counts[n]/len(dev),3) if dev else None for n in names},
+          "definition":"SIDEWAYS iff abs(net return after existing costs) <= k * signal-day 20d realized daily volatility * sqrt(h/20); UP/DOWN outside band",
+          "fit_scope":"development labels available strictly before TRAIN_END; k frozen for validation/diagnostic"}
+    return result
+
+def _apply_temperature(probs,temperature):
+    p=np.clip(np.asarray(probs,dtype=float),1e-9,1.)
+    logits=np.log(p)/max(float(temperature),1e-6)
+    logits-=logits.max(axis=1,keepdims=True)
+    exp=np.exp(logits)
+    return exp/exp.sum(axis=1,keepdims=True)
+
+def _fit_temperature(rows,probs,label_key="label_vol"):
+    names=("DOWN","SIDEWAYS","UP")
+    y=np.asarray([names.index(r[label_key]) for r in rows],dtype=int)
+    p=np.asarray(probs,dtype=float)
+    if len(y)<100:return {"temperature":1.0,"fit_n":len(y),"status":"INSUFFICIENT_DEV_OOF_FOR_CALIBRATION"}
+    def objective(log_t):
+        calibrated=_apply_temperature(p,np.exp(log_t))
+        return float(log_loss(y,calibrated,labels=[0,1,2]))
+    fit=minimize_scalar(objective,bounds=(-1.5,1.5),method="bounded",options={"xatol":1e-5})
+    return {"temperature":float(np.exp(fit.x)),"fit_n":len(y),"status":"DEVELOPMENT_OOF_TEMPERATURE_SCALING",
+            "development_oof_logloss_before":objective(0.),"development_oof_logloss_after":float(fit.fun)}
+
+def _choose_development_k(rows):
+    """Compatibility alias for callers/tests; returns frozen cohort settings."""
+    return _freeze_volatility_labels(rows)
 
 def _ece(y,p,klass):
     confidence=p[:,klass]; actual=(y==klass).astype(float); ece=0.; bins=[]
@@ -151,15 +209,21 @@ def _ece(y,p,klass):
             bins.append({"bin":f"{lo:.1f}-{hi:.1f}","n":int(mask.sum()),"confidence":conf,"observed":acc})
     return {"ece":ece,"bins":bins}
 
-def _metrics(rows,probs,theta=.5):
-    names=("DOWN","SIDEWAYS","UP"); label_key=f"label_{theta}"; y=np.asarray([names.index(r[label_key]) for r in rows]); pred=probs.argmax(axis=1)
+def _metrics(rows,probs,theta=.5,label_key=None):
+    names=("DOWN","SIDEWAYS","UP"); label_key=label_key or f"label_{theta}"; y=np.asarray([names.index(r[label_key]) for r in rows]); pred=probs.argmax(axis=1)
     cm=confusion_matrix(y,pred,labels=[0,1,2]);pr,re,fs,_=precision_recall_fscore_support(y,pred,labels=[0,1,2],zero_division=0)
     briers=[];eces={}
     for j,name in enumerate(names):
         actual=(y==j).astype(float); briers.append(float(np.mean((probs[:,j]-actual)**2))); eces[name]=_ece(y,probs,j)
-    out={"n":len(rows),"accuracy_pct":100*accuracy_score(y,pred),"balanced_accuracy_pct":100*balanced_accuracy_score(y,pred),
+    class_counts=np.bincount(y,minlength=3);priors=class_counts/max(1,len(y))
+    prior_entropy=float(-np.sum(priors[priors>0]*np.log(priors[priors>0])))
+    out={"n":len(rows),"label_key":label_key,"class_distribution":{names[j]:int(class_counts[j]) for j in range(3)},
+      "accuracy_pct":100*accuracy_score(y,pred),"majority_class_baseline_accuracy_pct":100*float(class_counts.max()/len(y)) if len(y) else None,
+      "balanced_accuracy_pct":100*balanced_accuracy_score(y,pred),
       "macro_f1_pct":100*f1_score(y,pred,average="macro",zero_division=0),"class_metrics":{},
       "confusion_matrix":{"labels":names,"counts":cm.tolist()},"multiclass_log_loss":log_loss(y,probs,labels=[0,1,2]),
+      "constant_prior_entropy_nats":prior_entropy,
+      "logloss_vs_constant_prior_nats":log_loss(y,probs,labels=[0,1,2])-prior_entropy,
       "class_brier":{n:briers[j] for j,n in enumerate(names)},"mean_class_brier":float(np.mean(briers)),"class_ece":eces}
     touches=[r.get("target_touch_theta_0.5") for r in rows]
     out["target_price_hit_diagnostic"]={"target_first_n":sum(x=="TARGET_FIRST" for x in touches),
@@ -210,70 +274,80 @@ def _trade_perf(selected,all_rows,probs,theta=.5):
       "rejected_down_correct_pct":100*float(np.mean([all_rows[i][f"label_{theta}"]=="DOWN" for i in down_pred])) if down_pred else None,
       "rejected_sideways_n":len(side_pred),"rejected_sideways_loss_avoided_pct":-sum(float(all_rows[i]["net_pct"]) for i in side_pred if float(all_rows[i]["net_pct"])<0)}
 
-def _backtest_model(rows,train_rows,kind,horizon,period):
+def _class_payoffs(rows):
+    return {name:(float(np.mean([r["net_pct"] for r in rows if r["label_vol"]==name]))
+                  if any(r["label_vol"]==name for r in rows) else 0.)
+            for name in ("DOWN","SIDEWAYS","UP")}
+
+def _policy_table(rows,probs,payoffs):
+    up,side,down=probs[:,2],probs[:,1],probs[:,0]
+    expected=up*payoffs["UP"]+side*payoffs["SIDEWAYS"]+down*payoffs["DOWN"]
+    table={}
+    for spread_cut in SPREAD_CUTS:
+      for side_max in SIDEWAYS_MAX:
+       for ev_floor in EV_FLOORS:
+        key=f"spread_ge_{spread_cut:.2f}_side_le_{side_max:.2f}_netEV_ge_{ev_floor:.2f}"
+        mask=((up-down)>=spread_cut)&(side<=side_max)&(expected>=ev_floor)
+        chosen=[r for r,keep in zip(rows,mask) if keep]
+        value=_trade_perf(chosen,rows,probs)
+        value.update({"spread_threshold":spread_cut,"sideways_probability_max":side_max,
+                      "net_expected_value_floor_pct":ev_floor})
+        table[key]=value
+    return table
+
+def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,payoffs=None):
     lo,hi={"development":(SAMPLE_START,TRAIN_END),"validation":(TRAIN_END,VALID_END),"diagnostic":(VALID_END,HOLDOUT_END)}[period]
     eval_rows=[r for r in rows if r["horizon"]==horizon and lo<=r["entry_date"]<hi and r["label_available_date"]<hi]
-    if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None}
+    if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None,"temperature":temperature_info}
     eval_rows.sort(key=lambda r:(r["signal_date"],r["ticker"]))
-    all_train=sorted([r for r in train_rows if r["horizon"]==horizon],key=lambda r:(r["label_available_date"],r["ticker"]))
+    all_train=sorted([r for r in train_rows if r["horizon"]==horizon and "label_vol" in r],key=lambda r:(r["label_available_date"],r["ticker"]))
     classes=("DOWN","SIDEWAYS","UP"); probs=np.full((len(eval_rows),3),1/3,dtype=float)
-    target_probs=np.full(len(eval_rows),.5,dtype=float); scored=[]
-    valid_years=set()
+    target_probs=np.full(len(eval_rows),.5,dtype=float);valid_years=set()
     for year in sorted({int(r["signal_date"][:4]) for r in eval_rows}):
-        snapshot_year=year-(year%2)
-        anchor=f"{snapshot_year}-01-01"; idx=[i for i,r in enumerate(eval_rows) if int(r["signal_date"][:4])//2==snapshot_year//2]
+        snapshot_year=year-(year%2); anchor=f"{snapshot_year}-01-01"
+        idx=[i for i,r in enumerate(eval_rows) if int(r["signal_date"][:4])//2==snapshot_year//2]
         past=[r for r in all_train if r["label_available_date"]<anchor and r["signal_date"]<anchor]
-        # The primary classifier is fixed at net ±0.5%. Sensitivity labels
-        # reuse this one set of causal probabilities below; no repeated fit.
-        label_key="label_0.5"
-        if len(past)<MIN_TRAIN or len({r[label_key] for r in past})<3:continue
+        if len(past)<MIN_TRAIN or len({r["label_vol"] for r in past})<3:continue
         active=_active_features(past)
         if not active:continue
-        model=_model(kind);model.fit(_features(past,active),np.asarray([classes.index(r[label_key]) for r in past]))
+        model=_model(kind);model.fit(_features(past,active),np.asarray([classes.index(r["label_vol"]) for r in past]))
         raw=model.predict_proba(_features([eval_rows[i] for i in idx],active)); cls=list(model.classes_)
-        p=np.zeros((len(idx),3));
+        p=np.zeros((len(idx),3))
         for j,c in enumerate(cls):p[:,int(c)]=raw[:,j]
         probs[idx]=p;valid_years.add(str(year))
         yhit=np.asarray([int(r.get("target_touch_theta_0.5")=="TARGET_FIRST") for r in past])
         if np.unique(yhit).size==2:
             hit_model=_model(kind);hit_model.fit(_features(past,active),yhit)
-            hit_raw=hit_model.predict_proba(_features([eval_rows[i] for i in idx],active))
-            hit_classes=list(hit_model.classes_)
+            hit_raw=hit_model.predict_proba(_features([eval_rows[i] for i in idx],active));hit_classes=list(hit_model.classes_)
             if 1 in hit_classes:target_probs[idx]=hit_raw[:,hit_classes.index(1)]
     valid=np.asarray([r["signal_date"][:4] in valid_years for r in eval_rows])
     eval_rows=[r for r,v in zip(eval_rows,valid) if v];probs=probs[valid];target_probs=target_probs[valid]
-    if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None}
-    labels=np.asarray([classes.index(r["label_0.5"]) for r in eval_rows])
-    valid=np.asarray([r["label_available_date"]< (TRAIN_END if period=="development" else VALID_END if period=="validation" else HOLDOUT_END) for r in eval_rows])
-    eval_rows=[r for r,v in zip(eval_rows,valid) if v];probs=probs[valid]; labels=labels[valid]
-    if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None}
-    target_actual=np.asarray([int(r.get("target_touch_theta_0.5")=="TARGET_FIRST") for r in eval_rows],dtype=float)
-    target_bins=[];target_ece=0.
-    for b in range(10):
-        mask=(target_probs>=b/10)&((target_probs<(b+1)/10) if b<9 else (target_probs<=1))
-        if mask.any():
-            conf=float(target_probs[mask].mean());obs=float(target_actual[mask].mean())
-            target_ece+=mask.sum()/len(eval_rows)*abs(conf-obs)
-            target_bins.append({"bin":f"{b/10:.1f}-{(b+1)/10:.1f}","n":int(mask.sum()),"mean_probability":conf,"observed_target_first_pct":100*obs})
-    target_hit_report={"target":"gross +0.5% touch before gross -0.5% stop; same-bar tie stop-first",
-      "n":len(eval_rows),"observed_target_first_pct":100*float(target_actual.mean()),
-      "mean_predicted_probability_pct":100*float(target_probs.mean()),
-      "brier":float(np.mean((target_probs-target_actual)**2)),"ece":target_ece,"reliability_bins":target_bins}
-    up=probs[:,2]; down=probs[:,0]; side=probs[:,1]
+    if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None,"temperature":temperature_info}
+    valid=np.asarray([r["label_available_date"]<(TRAIN_END if period=="development" else VALID_END if period=="validation" else HOLDOUT_END) for r in eval_rows])
+    eval_rows=[r for r,v in zip(eval_rows,valid) if v];probs=probs[valid];target_probs=target_probs[valid]
+    if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None,"temperature":temperature_info}
+    if period=="development" and temperature_info is None:
+        temperature_info=_fit_temperature(eval_rows,probs)
+    temperature=float((temperature_info or {}).get("temperature",1.0))
+    probs=_apply_temperature(probs,temperature)
+    payoffs=payoffs or (_class_payoffs(eval_rows) if period=="development" else {"DOWN":-1.,"SIDEWAYS":0.,"UP":1.})
     theta_results={}
     for theta in THETAS:
-        m=_metrics(eval_rows,probs,theta)
-        m["target_hit_probability"]=target_hit_report
-        policy_candidates={}
-        for cut in (.45,.50,.55):
-            buy=(up>=cut)&(down<.30)&(side<.50)
-            selected=[r for r,b in zip(eval_rows,buy) if b]
-            policy_candidates[f"p_up_ge_{cut:.2f}"]=_trade_perf(selected,eval_rows,probs,theta)
-        theta_results[str(theta)]={"metrics":m,"buy_policy_candidates":policy_candidates,
-                                   "buy_policy":policy_candidates["p_up_ge_0.50"]}
-    primary=theta_results["0.5"]
-    return {"n":len(eval_rows),"metrics":primary["metrics"],"theta_results":theta_results,
-            "buy_policy":primary["buy_policy"],"buy_policy_candidates":primary["buy_policy_candidates"]}
+        fixed=_metrics(eval_rows,probs,theta)
+        theta_results[str(theta)]={"metrics":fixed}
+    vol_metrics=_metrics(eval_rows,probs,label_key="label_vol")
+    target_actual=np.asarray([int(r.get("target_touch_theta_0.5")=="TARGET_FIRST") for r in eval_rows],dtype=float)
+    target_report={"n":len(eval_rows),"observed_target_first_pct":100*float(target_actual.mean()),
+      "mean_predicted_probability_pct":100*float(target_probs.mean()),"brier":float(np.mean((target_probs-target_actual)**2))}
+    vol_metrics["target_hit_probability"]=target_report
+    policies=_policy_table(eval_rows,probs,payoffs)
+    return {"n":len(eval_rows),"metrics":vol_metrics,"fixed_band_metrics":{k:v["metrics"] for k,v in theta_results.items()},
+      "theta_results":theta_results,"buy_policy_candidates":policies,"buy_policy":None,
+      "temperature":temperature_info,"class_payoffs_from_development":payoffs,
+      "policy_selection_scope":"development only; thresholds are spread, sideways-probability, and net EV after existing costs",
+      "probability_sample":{"p_up_p10_p50_p90":np.percentile(probs[:,2],[10,50,90]).tolist(),
+        "p_down_p10_p50_p90":np.percentile(probs[:,0],[10,50,90]).tolist(),
+        "p_sideways_p10_p50_p90":np.percentile(probs[:,1],[10,50,90]).tolist()}}
 
 def run_expanded_direction_audit():
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -312,17 +386,24 @@ def run_expanded_direction_audit():
     # ETF ranks are only within the two audited ETFs on the same date.
     for c in ("US","TIGER_ETF"):
         special_eval[c]=_rank_features(special_eval.get(c,[]))
+    volatility_k=_freeze_volatility_labels(rows+special_eval.get("US",[])+special_eval.get("TIGER_ETF",[]))
+    bycohort={c:[r for r in rows if r["cohort"]==c] for c in universe}
     equity_loaded=sum(1 for row in loaded if row.get("cohort") in universe)
     out={"universe_expansion":{"requested":sum(map(len,universe.values())),"loaded":equity_loaded,
       "evaluation_only_loaded":len(loaded)-equity_loaded,
       "failures":failures,"loaded_tickers":loaded,"training_pool_candidate_rows":{c:len(v) for c,v in bycohort.items()},
       "universe_sources":sources,"universe_lookup_errors":universe_errors,
       "audit63_scored_symbols":{c:len(set(r["ticker"] for r in v)&audit.get(c,set())) for c,v in bycohort.items()},
+      "frozen_audit_benchmark":{c:list(v) for c,v in AUDIT_63_BENCHMARK.items()},
+      "benchmark_missing_from_training_pool":{c:sorted(set(AUDIT_63_BENCHMARK.get(c,()))-set(x["ticker"] for x in bycohort.get(c,[]))) for c in bycohort},
       "cross_sectional_scope":"same signal date and same cohort only; missing symbols are excluded from that date rank",
       "periods":{"development_end":TRAIN_END,"validation_end":VALID_END,"diagnostic_end":HOLDOUT_END}},
       "label_variants":{"entry":"t+1 open","exit":"t+h close","horizons":list(HORIZONS),
-      "cost_pct":COST_PCT,"direction_thresholds_pct":list(THETAS),"sensitivity_selected_horizon":None},
-      "direction3":{},"selection_rule":"Development only: choose horizon/model by daily grouped Spearman of P(UP) vs net return, then top 15% mean net subject to >=100 selected development samples. Fixed buy rule P(UP)>=0.50, P(DOWN)<0.30, P(SIDEWAYS)<0.50.",
+      "cost_pct":COST_PCT,"legacy_fixed_thresholds_pct":list(THETAS),"sensitivity_selected_horizon":None,
+      "volatility_band":{"formula":"k_cohort * signal_day_realized_vol20_pct * sqrt(h/20)","target_development_sideways_share_pct":100*SIDEWAYS_TARGET_SHARE,
+        "cohort_parameters":volatility_k}},
+      "direction3":{"label_definition":"net return after existing cost; volatility-scaled symmetric SIDEWAYS band; cohort k fitted using only outcomes available before TRAIN_END","cohort_k":volatility_k,"probability_calibration":{},"policy_results":{}},
+      "selection_rule":"Development-only walk-forward: select one model/horizon by mean datewise Spearman(P(UP), realized net return), requiring positive IC and at least 100 top-15% development candidates. Calibrate multiclass probabilities with development OOF temperature scaling. Select spread + sideways-probability + net expected-value policy on development only; all selected policy OOS results are reported.",
       "feature_coverage":{"feature_names":list(FEATURES),"fixed_centers":CENTERS,"fixed_scales":SCALES,"feature_count":len(FEATURES),"cross_section_count_key":"xs_count","constant_column_policy":"recomputed from each past-only training snapshot and excluded when std is zero"}}
     for cohort,pool in bycohort.items():
         eval_rows=[r for r in pool if r["ticker"] in audit.get(cohort,set())]
@@ -336,48 +417,56 @@ def run_expanded_direction_audit():
             met=dev.get("metrics") or {}; ic=met.get("datewise_spearman_mean"); top=met.get("top15_mean_net_pct")
             score=(float(ic)+.01*float(top)) if ic is not None and top is not None and met.get("top15_n",0)>=100 else -1e9
             choices.append((score,model,horizon))
-        chosen=max(choices,default=(None,None,None))
+        eligible_choices=[x for x in choices if x[0]>0 and (development_cache[(x[1],x[2])].get("metrics") or {}).get("datewise_spearman_mean",0)>0]
+        chosen=max(eligible_choices,default=(-1e9,None,None))
         cohort_report={"selected_model_development_only":chosen[1],"selected_horizon_development_only":chosen[2],
-          "selected_model_horizon_development_score":chosen[0],"universe_comparison":{},"periods":{}}
+          "selected_model_horizon_development_score":chosen[0],"development_model_grid":{
+            f"{model}_h{h}":{"datewise_spearman_mean":(v.get("metrics") or {}).get("datewise_spearman_mean"),
+              "datewise_spearman_n_days":(v.get("metrics") or {}).get("datewise_spearman_n_days"),
+              "accuracy_pct":(v.get("metrics") or {}).get("accuracy_pct"),
+              "majority_class_baseline_accuracy_pct":(v.get("metrics") or {}).get("majority_class_baseline_accuracy_pct"),
+              "multiclass_log_loss":(v.get("metrics") or {}).get("multiclass_log_loss"),
+              "constant_prior_entropy_nats":(v.get("metrics") or {}).get("constant_prior_entropy_nats"),
+              "score":s}
+            for s,model,h in choices for v in [development_cache[(model,h)]]},
+          "universe_comparison":{},"periods":{}}
         for fit_name,training in (("63_audit_symbols",pool63),("available_full_universe",pool)):
-          comparisons={};selected_cuts={};selected_oos={}
-          raw_by_horizon={}
-          for horizon in HORIZONS:
-            raw_by_horizon[horizon]={}
-            for period in ("development","validation","diagnostic"):
-              if fit_name=="63_audit_symbols" and period=="development" and chosen[1] is not None:
-                raw=development_cache.get((chosen[1],horizon))
-              else:
-                raw=_backtest_model(eval_rows,training,chosen[1],horizon,period) if chosen[1] else {"n":0}
-              raw_by_horizon[horizon][period]=raw or {"n":0}
-          for theta in THETAS:
-            for horizon in HORIZONS:
-              period_rows={}
-              for period,raw in raw_by_horizon[horizon].items():
-                measured=(raw.get("theta_results") or {}).get(str(theta))
-                period_rows[period]=({"n":raw.get("n",0),**measured} if measured else
-                    {"n":0,"metrics":None,"buy_policy":None,"buy_policy_candidates":{}})
-              dev=period_rows["development"];dev_metrics=dev.get("metrics") or {}
-              dev_policies=dev.get("buy_policy_candidates",{})
-              dev_ic=dev_metrics.get("datewise_spearman_mean")
-              eligible=[(v.get("mean_net_pct"),key) for key,v in dev_policies.items()
-                        if v.get("n",0)>=100 and v.get("mean_net_pct") is not None
-                        and v.get("mean_net_pct")>0 and dev_ic is not None and dev_ic>0]
-              selected_cut=max(eligible,default=(None,None))[1]
-              key=f"theta_{theta}_horizon_{horizon}"
-              selected_cuts[key]=selected_cut
-              if selected_cut:
-                selected_oos[key]={"selection":"development only","threshold":selected_cut,
-                  "development_datewise_ic":dev_ic,"periods":{p:(v.get("buy_policy_candidates",{}).get(selected_cut)) for p,v in period_rows.items()}}
-              else:
-                selected_oos[key]={"selection":"NO_DEVELOPMENT_EDGE","threshold":None,
-                  "periods":{p:{"n":0,"win_rate_pct":None,"mean_net_pct":None,"coverage_pct":0.0} for p in period_rows}}
-              comparisons[key]=period_rows
+          comparisons={};chosen_policy=None;threshold_source=None
+          if chosen[1] is not None:
+            h=chosen[2]
+            dev=(development_cache[(chosen[1],h)] if fit_name=="63_audit_symbols" else
+                 _backtest_model(eval_rows,training,chosen[1],h,"development"))
+            dev_payoffs=dev.get("class_payoffs_from_development") or _class_payoffs([r for r in training if r["horizon"]==h and r["label_available_date"]<TRAIN_END])
+            dev_grid=dev.get("buy_policy_candidates",{})
+            eligible=[(v.get("mean_net_pct"),key) for key,v in dev_grid.items()
+                      if v.get("n",0)>=MIN_TRAIN and v.get("mean_net_pct") is not None and v.get("mean_net_pct")>0]
+            chosen_policy=max(eligible,default=(None,None),key=lambda x:(x[0],x[1]))[1]
+            threshold_source={"policy":chosen_policy,"calibration":dev.get("temperature"),"class_payoffs":dev_payoffs,
+              "selection_rule":"highest development mean net among predeclared spread/side/netEV grid with at least MIN_TRAIN accepted development trades; policy selection does not use validation/diagnostic"}
+            periods={"development":dev}
+            for period in ("validation","diagnostic"):
+                periods[period]=_backtest_model(eval_rows,training,chosen[1],h,period,
+                  temperature_info=dev.get("temperature"),payoffs=dev_payoffs)
+            for period,raw in periods.items():
+                met=raw.get("metrics");grid=raw.get("buy_policy_candidates",{})
+                comparisons[period]={"n":raw.get("n",0),"metrics":met,"fixed_band_metrics":raw.get("fixed_band_metrics"),
+                  "selected_policy":chosen_policy,"selected_policy_metrics":grid.get(chosen_policy) if chosen_policy else None,
+                  "all_development_grid_policy_results":grid if period=="development" else None,
+                  "probability_sample":raw.get("probability_sample")}
+            if fit_name=="63_audit_symbols":
+                cohort_report["development_policy_grid"]=dev_grid
+                cohort_report["selected_policy_thresholds"]=threshold_source
+            else:
+                cohort_report["full_universe_development_policy_grid"]=dev_grid
+          else:
+            comparisons={p:{"n":0,"metrics":None,"selected_policy":None,"selected_policy_metrics":None} for p in ("development","validation","diagnostic")}
           cohort_report["universe_comparison"][fit_name]=comparisons
-          cohort_report.setdefault("selected_buy_cut_by_development",{})[fit_name]=selected_cuts
-          cohort_report.setdefault("selected_policy_results_by_development",{})[fit_name]=selected_oos
+          if chosen[1] is not None:
+            cohort_report.setdefault("calibration_by_universe",{})[fit_name]=threshold_source["calibration"]
+          cohort_report.setdefault("policy_selection_status_by_universe",{})[fit_name]=("DEVELOPMENT_POLICY_SELECTED" if chosen_policy else "NO_DEVELOPMENT_EDGE")
         cohort_report["policy_status"]=("SELECTED_ON_DEVELOPMENT_ONLY" if any(v for d in cohort_report.get("selected_buy_cut_by_development",{}).values() for v in d.values())
-          else "NO_DEVELOPMENT_EDGE")
+          else ("DEVELOPMENT_POLICY_SELECTED" if chosen[1] is not None and cohort_report.get("selected_policy_thresholds",{}).get("policy") else "NO_DEVELOPMENT_EDGE"))
+        cohort_report["selected_model_policy_validation_diagnostic"]={name:cohort_report["universe_comparison"].get(name,{}) for name in ("63_audit_symbols","available_full_universe")}
         cover={}
         dev_rows=[r for r in pool if SAMPLE_START<=r["signal_date"] and r["label_available_date"]<TRAIN_END]
         excluded=[]
@@ -394,6 +483,16 @@ def run_expanded_direction_audit():
         out["direction3"][cohort]=cohort_report
     out["direction3"]["TIGER_ETF"]={"status":"NO_INDEPENDENT_TRAINING_UNIVERSE","evaluation_rows_n":len(special_eval.get("TIGER_ETF",[])),
       "reason":"ETFs are kept as a separate cohort; the expanded 300-equity pool does not mix them with Korean ordinary shares."}
+    out["direction3"]["calibration_scope"]="development OOF probabilities only; one scalar temperature per selected model/horizon/training universe; applied unchanged to validation and diagnostic"
+    out["direction3"]["probability_calibration"]={cohort:value.get("calibration_by_universe",{})
+        for cohort,value in out["direction3"].items() if isinstance(value,dict) and "universe_comparison" in value}
+    out["direction3"]["policy_results"]={cohort:{universe_name:periods for universe_name,periods in value.get("universe_comparison",{}).items()}
+        for cohort,value in out["direction3"].items() if isinstance(value,dict) and "universe_comparison" in value}
+    out["direction3"]["label_definition_comparison"]={cohort:{"volatility_band":v,
+      "fixed_pct_band_development_class_counts":{
+        str(theta):{name:sum(r.get(f"label_{theta}")==name for r in bycohort.get(cohort,[]) if r["label_available_date"]<TRAIN_END)
+                    for name in ("DOWN","SIDEWAYS","UP")} for theta in THETAS}}
+      for cohort,v in volatility_k.items()}
     # Preserve readable, auditable source/data failures separately.
     Path("data").mkdir(exist_ok=True)
     return out
