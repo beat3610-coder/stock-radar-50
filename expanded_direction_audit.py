@@ -7,9 +7,12 @@ using labels available strictly before the signal date.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 import json
+import os
 from pathlib import Path
+import re
+import time
 
 import numpy as np
 import pandas as pd
@@ -24,15 +27,18 @@ from sklearn.metrics import (accuracy_score, balanced_accuracy_score,
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from providers import get_historical_prices, get_market_series_bundle
+from providers import (get_historical_investor_flows, get_historical_prices,
+                      get_market_series_bundle)
 from universe import get_universe, MANDATORY_KR, MANDATORY_US, AUDIT_63_BENCHMARK
 from engine import compute
 from market_context import build_market_context
 
 TRAIN_END="2025-11-01"; VALID_END="2026-04-01"; HOLDOUT_END="2026-11-01"
+MIN_END_DATE=(date.fromisoformat(HOLDOUT_END)+timedelta(days=12)).isoformat()
 SAMPLE_START="2016-01-01"; COST_PCT=.35; THETAS=(.3,.5,1.0)
 HORIZONS=(5,10,20); MIN_TRAIN=500; REFIT_MONTH=1; SIGNAL_STEP=5
 SIDEWAYS_TARGET_SHARE=.30
+MIN_DEVELOPMENT_IC=.01
 SPREAD_CUTS=(.05,.10,.15); SIDEWAYS_MAX=(.25,.35,.45); EV_FLOORS=(0.0,.10,.20)
 BASE_FEATURES=("ret5","ret20","ret60","ret120","atr_pct","vol20_pct",
           "rsi","ma20_gap","ma60_gap","ma200_gap","turnover_ratio",
@@ -97,6 +103,139 @@ def _ticker_set():
     rows["universe_sources"]={k:universe.get(k+"_source") for k in ("KR","KQ","US")}
     rows["universe_errors"]={k:universe.get(k+"_error") for k in ("KR","KQ") if universe.get(k+"_error")}
     return rows
+
+def korean_flow_targets(universe):
+    """Unique KOSPI/KOSDAQ common stocks only; omit ETFs, ETNs and US rows."""
+    excluded={str(code).zfill(6) for code,_,_ in MANDATORY_KR}
+    targets=[];seen=set()
+    for cohort,market in (("KOSPI","KR"),("KOSDAQ","KQ")):
+        for item in universe.get(cohort,[]):
+            ticker,name=item[0],item[1]
+            code=str(ticker).strip().zfill(6)
+            label=str(name).upper()
+            if (not re.fullmatch(r"\d{6}",code) or code in excluded or code in seen or
+                re.search(r"ETF|ETN|SPAC|스팩|우선주|우$|우B$|우C$|우[0-9]",label)):
+                continue
+            targets.append({"ticker":code,"name":str(name),"cohort":cohort,"market":market})
+            seen.add(code)
+    return targets
+
+def _edge_label_status(model_selected,chosen_ic):
+    if not model_selected:
+        return "NO_MODEL_WITH_NONZERO_DEVELOPMENT_N"
+    if chosen_ic is not None and np.isfinite(chosen_ic) and float(chosen_ic)>=MIN_DEVELOPMENT_IC:
+        return "DEVELOPMENT_EDGE_SELECTED"
+    return "DIAGNOSTIC_MODEL_SELECTED_NO_DEVELOPMENT_EDGE"
+
+def _collect_extended_pool_flows(universe,flow_frames,*,flow_source_coverage=None,budget_seconds=None,workers=None,
+                                 flow_fetcher=None,progress=None,clock=None):
+    """Extend the audit's existing 63 flow frames to all Korean model stocks.
+
+    New symbols are collected in bounded concurrent waves. Existing benchmark
+    frames are reused verbatim, and unfinished names remain absent so feature
+    construction keeps their flow values missing rather than fabricating zeros.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    if flow_fetcher is None:flow_fetcher=get_historical_investor_flows
+    if clock is None:clock=time.monotonic
+    budget=float(os.environ.get("FLOW_BUDGET_SECONDS","3000") if budget_seconds is None else budget_seconds)
+    worker_count=max(1,int(os.environ.get("FLOW_WORKERS","12") if workers is None else workers))
+    budget=max(0.0,budget)
+    targets=korean_flow_targets(universe)
+    started=clock();known={str(key).zfill(6):value for key,value in flow_frames.items()}
+    # Preserve the caller's dictionary and its exact existing DataFrame objects.
+    for code,value in list(flow_frames.items()):known[str(code).zfill(6)]=value
+    reused={x["ticker"] for x in targets if x["ticker"] in known and
+            known[x["ticker"]] is not None and not known[x["ticker"]].empty}
+    pending=[x for x in targets if x["ticker"] not in reused]
+    source_coverage=flow_source_coverage or {}
+    attempted=[];available_new=set();failures=[];rows_new=0;requests_n=0
+    ticker_results={};completed_count=0
+    retry_log=[];not_attempted=[];reserve_seconds=min(180.0,max(0.0,budget*.06))
+    index=0
+    while index<len(pending):
+        elapsed=max(0.0,clock()-started)
+        if budget-elapsed<=reserve_seconds:
+            not_attempted.extend({**x,"reason":"flow time budget exhausted before request"} for x in pending[index:])
+            break
+        batch=pending[index:index+worker_count];index+=len(batch)
+        attempted.extend(x["ticker"] for x in batch)
+        with ThreadPoolExecutor(max_workers=min(worker_count,len(batch))) as executor:
+            futures={executor.submit(flow_fetcher,item["ticker"],start_date="2015-12-01",
+                                    end_date=MIN_END_DATE):item for item in batch}
+            for future in as_completed(futures):
+                completed_count+=1
+                item=futures[future];code=item["ticker"]
+                try:
+                    frame,source=future.result()
+                    if frame is None or frame.empty:
+                        raise ValueError("flow collector returned an empty frame")
+                    diag=frame.attrs.get("collection_diagnostics",{})
+                    frame.attrs.setdefault("collection_diagnostics",diag)
+                    flow_frames[code]=frame;known[code]=frame;available_new.add(code)
+                    rows_new+=len(frame);requests_n+=int(diag.get("requests_n",0) or 0)
+                    retry_log.extend(diag.get("retry_log",[]) or [])
+                    ticker_results[code]={**diag,"ticker":code,"status":"ok","source":source,
+                        "available":True,"rows_n":len(frame)}
+                    if progress:progress(item,len(targets),completed_count,len(frame),int(diag.get("requests_n",0) or 0),"ok")
+                except Exception as exc:
+                    diag=getattr(exc,"diagnostics",{}) or {}
+                    requests_n+=int(diag.get("requests_n",0) or 0)
+                    retry_log.extend(diag.get("retry_log",[]) or [])
+                    failure={**item,"reason":str(exc)[:500],"requests_n":int(diag.get("requests_n",0) or 0)}
+                    failures.append(failure)
+                    ticker_results[code]={**diag,**failure,"status":"unavailable","available":False}
+                    if progress:progress(item,len(targets),completed_count,0,int(diag.get("requests_n",0) or 0),"unavailable")
+        if index<len(pending) and clock()-started>=budget-reserve_seconds:
+            not_attempted.extend({**x,"reason":"flow time budget exhausted before request"} for x in pending[index:])
+            break
+    elapsed=max(0.0,clock()-started)
+    available={x["ticker"] for x in targets if x["ticker"] in known and
+               known[x["ticker"]] is not None and not known[x["ticker"]].empty}
+    reused_by_cohort={c:{x["ticker"] for x in targets if x["cohort"]==c and x["ticker"] in reused}
+                      for c in ("KOSPI","KOSDAQ")}
+    attempted_by_cohort={c:{x["ticker"] for x in targets if x["cohort"]==c and x["ticker"] in set(attempted)}
+                         for c in ("KOSPI","KOSDAQ")}
+    available_by_cohort={c:{x["ticker"] for x in targets if x["cohort"]==c and x["ticker"] in available}
+                         for c in ("KOSPI","KOSDAQ")}
+    target_by_cohort={c:[x for x in targets if x["cohort"]==c] for c in ("KOSPI","KOSDAQ")}
+    coverage={}
+    for c,items in target_by_cohort.items():
+        available_set=available_by_cohort[c]
+        coverage[c]={"requested_symbols":len(items),"preexisting_reused_symbols":len(reused_by_cohort[c]),
+          "attempted_symbols":len(attempted_by_cohort[c]),"available_symbols":len(available_set),
+          "coverage_pct":round(100*len(available_set)/len(items),3) if items else None,
+          "rows_n":sum(len(known[t]) for t in available_set)}
+    not_attempted_codes={x["ticker"] for x in not_attempted}
+    by_ticker={}
+    for item in targets:
+        code=item["ticker"]
+        if code in ticker_results:
+            by_ticker[code]=ticker_results[code]
+        elif code in reused:
+            frame=known[code];diag=frame.attrs.get("collection_diagnostics",{})
+            by_ticker[code]={**source_coverage.get(code,{}),**diag,"ticker":code,
+                "status":"reused_existing_63_flow","source":source_coverage.get(code,{}).get("source"),
+                "attempted":False,"available":True,"rows_n":len(frame),
+                "first_date":str(pd.Timestamp(frame.index.min()).date()),
+                "last_date":str(pd.Timestamp(frame.index.max()).date())}
+        elif code in not_attempted_codes:
+            by_ticker[code]={**item,"status":"not_attempted_budget","attempted":False,
+                "available":False,"rows_n":0,"requests_n":0,"reason":"flow time budget exhausted before request"}
+    report={"source":"Naver mobile stock trend API; unauthenticated; no KRX login/paid API",
+      "requested_start":"2015-12-01","requested_end":MIN_END_DATE,
+      "extended_296_pool_attempted":bool(attempted),
+      "requested_symbols":len(targets),"preexisting_reused_symbols":len(reused),
+      "attempted_symbols":len(attempted),"available_symbols":len(available),
+      "newly_available_symbols":len(available_new),"total_requests_n":requests_n,
+      "rows_n":sum(len(known[t]) for t in available),"new_rows_n":rows_new,
+      "budget_seconds":budget,"budget_used_seconds":round(elapsed,3),
+      "budget_exhausted":bool(not_attempted or elapsed>=budget),
+      "workers":worker_count,"attempted_tickers":attempted,
+      "failures":failures,"not_attempted":not_attempted,"by_ticker":by_ticker,"retry_log":retry_log,
+      "coverage_by_cohort":coverage}
+    return report
 
 def _audit_symbols(universe):
     return {"KOSPI":set(AUDIT_63_BENCHMARK["KOSPI"]),
@@ -475,6 +614,8 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
     special_eval["TIGER_ETF"]=_rank_features(special_eval.get("TIGER_ETF",[]))
     if macro_frames is None:
         macro_frames,macro_diagnostics=get_market_series_bundle(start_date=SAMPLE_START,end_date=HOLDOUT_END)
+    extended_pool_collection=_collect_extended_pool_flows(universe,flow_frames,
+        flow_source_coverage=flow_source_coverage)
     _attach_context_features(rows,frames_by_cohort,macro_frames,flow_frames)
     for c in ("US","TIGER_ETF"):
         _attach_context_features(special_eval.get(c,[]),{c:frames_by_cohort.get(c,{})},macro_frames,flow_frames)
@@ -502,7 +643,10 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
       "cost_pct":COST_PCT,"legacy_fixed_thresholds_pct":list(THETAS),"sensitivity_selected_horizon":None,
       "volatility_band":{"formula":"k_cohort * signal_day_realized_vol20_pct * sqrt(h/20)","target_development_sideways_share_pct":100*SIDEWAYS_TARGET_SHARE,
         "cohort_parameters":volatility_k}},
-      "direction3":{"label_definition":"net return after existing cost; volatility-scaled symmetric SIDEWAYS band; cohort k fitted using only outcomes available before TRAIN_END","cohort_k":volatility_k,"probability_calibration":{},"policy_results":{}},
+      "direction3":{"label_definition":"net return after existing cost; volatility-scaled symmetric SIDEWAYS band; cohort k fitted using only outcomes available before TRAIN_END","cohort_k":volatility_k,"probability_calibration":{},"policy_results":{},
+        "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC},
+      "extended_pool_collection":extended_pool_collection,
+      "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC,
       "selection_rule":"Development-only walk-forward: select one model/horizon by mean datewise Spearman(P(UP), realized net return), requiring positive IC and at least 100 top-15% development candidates. Calibrate multiclass probabilities with development OOF temperature scaling. Select spread + sideways-probability + net expected-value policy on development only; all selected policy OOS results are reported.",
       "feature_coverage":{"feature_names":list(FEATURES),"fixed_centers":CENTERS,"fixed_scales":SCALES,"feature_count":len(FEATURES),"cross_section_count_key":"xs_count","constant_column_policy":"recomputed from each past-only training snapshot and excluded when std is zero"}}
     for cohort,pool in bycohort.items():
@@ -538,8 +682,8 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
         cohort_report={"selected_model_development_only":chosen[1],"selected_horizon_development_only":chosen[2],
           "training_pool_scope":"available full ordinary-US equity cohort; SOXL is evaluation-only" if cohort=="US" else "63 audit cohort for selection; full cohort reported as separate training comparison",
           "selected_development_datewise_spearman":chosen_ic,
-          "model_selection_status":"DEVELOPMENT_EDGE_SELECTED" if chosen[1] is not None and chosen_ic is not None and chosen_ic>0 else
-            ("DIAGNOSTIC_MODEL_SELECTED_NO_DEVELOPMENT_EDGE" if chosen[1] is not None else "NO_MODEL_WITH_NONZERO_DEVELOPMENT_N"),
+          "model_selection_status":_edge_label_status(chosen[1] is not None,chosen_ic),
+          "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC,
           "selected_model_horizon_development_score":chosen[0],"development_model_grid":{
             f"{model}_h{h}":{"datewise_spearman_mean":(v.get("metrics") or {}).get("datewise_spearman_mean"),
               "datewise_spearman_n_days":(v.get("metrics") or {}).get("datewise_spearman_n_days"),

@@ -1096,13 +1096,20 @@ def run():
     from expanded_direction_audit import run_expanded_direction_audit
     out["flow_collection"]={"source":"Naver mobile stock trend API; no KRX login/pykrx or paid source",
         "requested_start":"2015-12-01","priority":"frozen KOSPI30 + KOSDAQ30 + 2 TIGER ETFs",
-        "extended_296_pool_attempted":False,"extended_pool_reason":"The 60-minute cap prioritizes full flow histories for the fixed 63-instrument audit; remaining equities are explicitly unavailable in this run.",
         "available_symbols":sum(v.get("available",False) for v in all_flow_sources.values()),
         "attempted_symbols":sum(bool(v.get("attempted",False)) for v in all_flow_sources.values()),
         "by_ticker":all_flow_sources}
     expanded=run_expanded_direction_audit(flow_frames=all_flow_frames,flow_source_coverage=all_flow_sources,
         macro_frames=macro_frames,macro_diagnostics=macro_sources)
     out["universe_expansion"]=expanded["universe_expansion"]
+    out["extended_pool_collection"]=expanded["extended_pool_collection"]
+    out["flow_collection"]["extended_296_pool_attempted"]=bool(
+        expanded["extended_pool_collection"].get("attempted_symbols",0))
+    out["flow_collection"]["extended_pool_reason"]=(
+        "Extended KOSPI/KOSDAQ ordinary-share flow collection ran inside direction3; unavailable or budget-deferred symbols remain NaN."
+        if out["flow_collection"]["extended_296_pool_attempted"] else
+        "No new extended-pool flow request was issued; provided benchmark flow frames were reused and missing symbols remain NaN.")
+    out["flow_collection"]["extended_pool_collection"]=expanded["extended_pool_collection"]
     out["label_variants"]=expanded["label_variants"]
     out["direction3"]=expanded["direction3"]
     out["feature_coverage"]["expanded_direction_model"]=expanded["feature_coverage"]

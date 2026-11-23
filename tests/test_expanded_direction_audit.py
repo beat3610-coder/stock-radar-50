@@ -7,12 +7,15 @@ import numpy as np
 import pandas as pd
 
 from expanded_direction_audit import (
-    FEATURES, FLOW_FEATURES, _features, _make_rows, _mandatory_market_items, _metrics, _trade_perf, direction_label,
-    _freeze_volatility_labels, _fit_temperature, _model, _training_rows_for, _selection_rows_for,
+    FEATURES, FLOW_FEATURES, MIN_DEVELOPMENT_IC, _collect_extended_pool_flows,
+    _edge_label_status, _features, _make_rows, _mandatory_market_items, _metrics,
+    _trade_perf, direction_label, _freeze_volatility_labels, _fit_temperature,
+    _model, _training_rows_for, _selection_rows_for,
 )
 from providers import get_historical_investor_flows
 from universe import MANDATORY_KR, MANDATORY_US, AUDIT_63_BENCHMARK
 from audit_63_fast import _frozen_audit_cohorts
+from market_context import _flow_features
 
 
 class ExpandedDirectionAuditTests(unittest.TestCase):
@@ -82,6 +85,53 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
         self.assertIs(_training_rows_for("KOSPI",full,benchmark),benchmark)
         self.assertIs(_selection_rows_for("US",full,benchmark),full)
         self.assertIs(_selection_rows_for("KOSPI",full,benchmark),benchmark)
+
+    def test_edge_status_requires_minimum_development_ic_without_changing_selection(self):
+        self.assertEqual(MIN_DEVELOPMENT_IC,.01)
+        self.assertEqual(_edge_label_status(True,.00054),
+                         "DIAGNOSTIC_MODEL_SELECTED_NO_DEVELOPMENT_EDGE")
+        self.assertEqual(_edge_label_status(True,.02),"DEVELOPMENT_EDGE_SELECTED")
+        self.assertEqual(_edge_label_status(False,None),"NO_MODEL_WITH_NONZERO_DEVELOPMENT_N")
+
+    def test_extended_pool_flow_attempt_flag_comes_from_actual_calls_and_reuses_input(self):
+        dates=pd.bdate_range("2026-01-01",periods=3)
+        preexisting=pd.DataFrame({"foreign_net_shares":[1,2,3],
+                                  "institution_net_shares":[-1,0,1]},index=dates)
+        preexisting.attrs["collection_diagnostics"]={"requests_n":4,"first_date":"2026-01-01",
+                                                     "last_date":"2026-01-05"}
+        fetched=[]
+        def fetch(code,**kwargs):
+            fetched.append(code)
+            frame=preexisting.copy()
+            frame.attrs["collection_diagnostics"]={"requests_n":2,"first_date":"2026-01-01",
+                "last_date":"2026-01-05","attempted":True,"available":True}
+            return frame,"Naver mobile stock trend API"
+        universe={"KOSPI":[("005930","삼성전자","KR","전자")],
+                  "KOSDAQ":[("247540","에코프로비엠","KQ","화학")],"US":[("AAPL","Apple","US","Tech")]}
+        frames={"005930":preexisting}
+        result=_collect_extended_pool_flows(universe,frames,budget_seconds=60,workers=1,
+                                             flow_fetcher=fetch)
+        self.assertTrue(result["attempted_symbols"]>0)
+        self.assertEqual(result["attempted_symbols"],1)
+        self.assertEqual(result["preexisting_reused_symbols"],1)
+        self.assertEqual(fetched,["247540"])
+        self.assertIs(frames["005930"],preexisting)
+        self.assertNotIn("AAPL",frames)
+        self.assertEqual(result["coverage_by_cohort"]["KOSPI"]["available_symbols"],1)
+
+    def test_failed_extended_flow_remains_missing_not_zero(self):
+        dates=pd.bdate_range("2026-01-01",periods=45)
+        price=pd.DataFrame({"Open":100.,"High":101.,"Low":99.,"Close":100.,"Volume":1000.},index=dates)
+        def fail(code,**kwargs):raise RuntimeError("provider unavailable")
+        universe={"KOSPI":[],"KOSDAQ":[("247540","에코프로비엠","KQ","화학")],"US":[]}
+        frames={}
+        result=_collect_extended_pool_flows(universe,frames,budget_seconds=60,workers=1,flow_fetcher=fail)
+        self.assertEqual(result["attempted_symbols"],1)
+        self.assertTrue(result["extended_296_pool_attempted"])
+        features=_flow_features(price,None)
+        self.assertTrue(features["foreign_flow_5d_to_turnover"].isna().all())
+        self.assertTrue(features["institution_flow_20d_to_turnover"].isna().all())
+        self.assertEqual(features["flow_data_available"].iloc[-1],0.0)
 
     def test_naver_flow_collector_pages_backward_and_records_coverage(self):
         class Response:
