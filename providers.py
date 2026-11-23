@@ -237,7 +237,7 @@ def get_historical_investor_flows(code,*,start_date="2015-12-01",end_date=None):
         except Exception:
             cached=pd.DataFrame(columns=["foreign_net_shares","institution_net_shares"])
     rows=cached.to_dict("index") if not cached.empty else {}
-    requests_n=0;attempts=[];failures=[];pages=0
+    requests_n=0;attempts=[];failures=[];pages=0;consecutive_no_progress=0
     session=requests.Session()
     session.headers.update({"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36",
         "Referer":"https://m.stock.naver.com/","Accept":"application/json, text/plain, */*"})
@@ -288,15 +288,31 @@ def get_historical_investor_flows(code,*,start_date="2015-12-01",end_date=None):
             except (KeyError,ValueError,TypeError):continue
         pages+=1
         if not page_rows:
-            failures.append(f"cursor={cursor or 'latest'}: empty/invalid trend rows")
+            # An empty response is the normal end of history for a listing
+            # whose IPO predates the requested start boundary. A non-empty,
+            # unparseable response remains an explicit provider failure.
+            if payload:failures.append(f"cursor={cursor or 'latest'}: non-empty page had no usable trend rows")
             break
         before=len(rows)
         for day,foreign,institution in page_rows:
             rows[day]={"foreign_net_shares":foreign,"institution_net_shares":institution}
         page_oldest=min(row[0] for row in page_rows)
-        if page_oldest<=start or len(rows)==before:
-            if page_oldest>start and len(rows)==before:failures.append(f"cursor={cursor}: no pagination progress")
+        if page_oldest<=start:
             break
+        if len(rows)==before:
+            consecutive_no_progress+=1
+            if consecutive_no_progress>3:
+                failures.append(f"cursor={cursor or 'latest'}: no pagination progress after {consecutive_no_progress} consecutive pages")
+                break
+            # Naver occasionally repeats the same ten-session page for a
+            # cursor on a non-trading day. Step the bizdate back one calendar
+            # day and retry; subsequent repeated pages continue stepping back.
+            next_cursor=(pd.Timestamp(page_oldest)-pd.Timedelta(days=1)).normalize()
+            if cursor is not None:
+                next_cursor=min(next_cursor,pd.Timestamp(cursor)-pd.Timedelta(days=1))
+            cursors.append(next_cursor.strftime("%Y%m%d"))
+            continue
+        consecutive_no_progress=0
         next_cursor=page_oldest.strftime("%Y%m%d")
         if next_cursor==cursor:
             failures.append(f"cursor={cursor}: provider cursor did not move")

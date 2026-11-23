@@ -8,7 +8,8 @@ import pandas as pd
 
 from expanded_direction_audit import (
     FEATURES, FLOW_FEATURES, MIN_DEVELOPMENT_IC, _collect_extended_pool_flows,
-    _edge_label_status, _features, _make_rows, _mandatory_market_items, _metrics,
+    _comparison_fit_spec, _edge_label_status, _features, _flow_ablation_metadata,
+    _make_rows, _mandatory_market_items, _metrics,
     _trade_perf, direction_label, _freeze_volatility_labels, _fit_temperature,
     _model, _training_rows_for, _selection_rows_for,
 )
@@ -93,6 +94,38 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
         self.assertEqual(_edge_label_status(True,.02),"DEVELOPMENT_EDGE_SELECTED")
         self.assertEqual(_edge_label_status(False,None),"NO_MODEL_WITH_NONZERO_DEVELOPMENT_N")
 
+    def test_korean_universe_fits_use_distinct_training_rows_and_frozen_evaluation(self):
+        pool=[{"ticker":f"P{i:03d}"} for i in range(200)]
+        pool63=pool[:63]
+        eval_rows=[{"ticker":f"E{i:03d}"} for i in range(63)]
+        for cohort in ("KOSPI","KOSDAQ"):
+            audit=_comparison_fit_spec(cohort,"63_audit_symbols",pool,pool63,eval_rows)
+            full=_comparison_fit_spec(cohort,"available_full_universe",pool,pool63,eval_rows)
+            self.assertIs(audit["training_rows"],pool63)
+            self.assertIs(full["training_rows"],pool)
+            self.assertIs(audit["evaluation_rows"],eval_rows)
+            self.assertIs(full["evaluation_rows"],eval_rows)
+            self.assertEqual(audit["training_rows_n"],63)
+            self.assertEqual(full["training_rows_n"],200)
+            self.assertEqual(audit["evaluation_tickers_n"],63)
+            self.assertEqual(full["evaluation_tickers_n"],63)
+            audit_ablation=_flow_ablation_metadata("random_forest",10,"spread_0.10",audit)
+            full_ablation=_flow_ablation_metadata("random_forest",10,"spread_0.10",full)
+            for key in ("same_model","same_horizon","policy_key","policy_threshold_source",
+                        "evaluation_rows_n","evaluation_tickers_n"):
+                self.assertEqual(audit_ablation[key],full_ablation[key])
+            self.assertNotEqual(audit_ablation["training_rows_n"],full_ablation["training_rows_n"])
+
+    def test_us_universe_fits_both_keep_full_us_training_pool(self):
+        pool=[{"ticker":f"US{i:03d}"} for i in range(98)]
+        pool63=[{"ticker":"SOXL"}]
+        eval_rows=[{"ticker":"SOXL"}]
+        for fit_name in ("63_audit_symbols","available_full_universe"):
+            spec=_comparison_fit_spec("US",fit_name,pool,pool63,eval_rows)
+            self.assertIs(spec["training_rows"],pool)
+            self.assertIs(spec["evaluation_rows"],eval_rows)
+            self.assertEqual(spec["evaluation_tickers_n"],1)
+
     def test_extended_pool_flow_attempt_flag_comes_from_actual_calls_and_reuses_input(self):
         dates=pd.bdate_range("2026-01-01",periods=3)
         preexisting=pd.DataFrame({"foreign_net_shares":[1,2,3],
@@ -160,6 +193,41 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
                 self.assertEqual(diag["first_date"],"2026-11-02")
                 self.assertEqual(diag["last_date"],"2026-11-20")
                 self.assertTrue(diag["available"])
+
+    def test_naver_duplicate_page_steps_cursor_back_and_continues(self):
+        class Response:
+            status_code=200
+            def __init__(self,rows):self.rows=rows
+            def raise_for_status(self):pass
+            def json(self):return self.rows
+        class Session:
+            def __init__(self):self.headers={};self.calls=[]
+            def get(self,url,params,timeout):
+                self.calls.append(params.get("bizdate"))
+                if len(self.calls)==1:
+                    days=pd.bdate_range("2023-06-12",periods=10)
+                elif len(self.calls)==2:
+                    days=pd.bdate_range("2023-05-29",periods=10)
+                else:
+                    return Response([])
+                rows=[{"bizdate":d.strftime("%Y%m%d"),"foreignerPureBuyQuant":"100",
+                       "organPureBuyQuant":"-50"} for d in reversed(days)]
+                return Response(rows)
+        with tempfile.TemporaryDirectory() as directory:
+            cache=Path(directory)/"prices"
+            flow_dir=cache.parent/"flows";flow_dir.mkdir()
+            cached_dates=pd.bdate_range("2023-06-12","2023-06-30")
+            cached=pd.DataFrame({"foreign_net_shares":10,"institution_net_shares":-5},index=cached_dates)
+            cached.to_csv(flow_dir/"naver_105560.csv",index_label="Date")
+            session=Session()
+            with patch("providers.PRICE_CACHE",cache),patch("requests.Session",lambda:session):
+                frame,_=get_historical_investor_flows("105560",start_date="2023-06-01",end_date="2023-06-30")
+            self.assertEqual(session.calls,["20230612","20230611"])
+            self.assertEqual(str(frame.index.min().date()),"2023-06-01")
+            diag=frame.attrs["collection_diagnostics"]
+            self.assertEqual(diag["first_date"],"2023-06-01")
+            self.assertEqual(diag["requests_n"],2)
+            self.assertEqual(diag["failures"],[])
 
     def test_three_class_metrics_and_confusion_labels(self):
         rows=[{"label_0.5":"DOWN","net_pct":-1,"signal_date":"2025-01-01"},

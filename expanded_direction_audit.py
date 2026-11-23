@@ -563,6 +563,32 @@ def _training_rows_for(cohort,pool,pool63):
     """Use same-cohort ordinary US equities to train the SOXL audit model."""
     return pool if cohort=="US" else pool63
 
+def _comparison_fit_spec(cohort,fit_name,pool,pool63,eval_rows):
+    """Resolve training rows per universe comparison while freezing evaluation rows."""
+    if cohort=="US":
+        training=pool
+        scope="available full ordinary-US equity cohort; SOXL evaluation-only (same training pool for both fit labels)"
+    elif fit_name=="63_audit_symbols":
+        training=pool63
+        scope="frozen 63 audit benchmark symbols within this Korean cohort"
+    elif fit_name=="available_full_universe":
+        training=pool
+        scope="all available ordinary shares in this Korean cohort"
+    else:
+        raise ValueError(f"unknown universe fit: {fit_name}")
+    return {"training_rows":training,"evaluation_rows":eval_rows,
+        "training_rows_n":len(training),"training_scope":scope,
+        "evaluation_rows_n":len(eval_rows),
+        "evaluation_tickers_n":len({str(row["ticker"]) for row in eval_rows})}
+
+def _flow_ablation_metadata(model,horizon,policy_key,fit_spec):
+    return {"same_model":model,"same_horizon":horizon,"policy_key":policy_key,
+        "policy_threshold_source":"frozen 63-symbol development selection; unchanged",
+        "training_rows_n":fit_spec["training_rows_n"],
+        "training_scope":fit_spec["training_scope"],
+        "evaluation_rows_n":fit_spec["evaluation_rows_n"],
+        "evaluation_tickers_n":fit_spec["evaluation_tickers_n"]}
+
 def _selection_rows_for(cohort,pool,benchmark_rows):
     """Select US model/horizon on full-universe OOS-development forecasts."""
     return pool if cohort=="US" else benchmark_rows
@@ -694,53 +720,74 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
               "score":s}
             for s,model,h in choices for v in [development_cache[(model,h)]]},
           "universe_comparison":{},"periods":{}}
-        for fit_name,training in (("63_audit_symbols",pool63),("available_full_universe",pool)):
-          comparisons={};chosen_policy=None;threshold_source=None
-          training=_training_rows_for(cohort,pool,pool63)
+        selected_policy=None;selection_dev=None;selection_payoffs=None;selection_grid={}
+        if chosen[1] is not None:
+            h=chosen[2]
+            selection_dev=development_cache[(chosen[1],h)]
+            selection_payoffs=selection_dev.get("class_payoffs_from_development") or _class_payoffs(
+                [r for r in selection_training if r["horizon"]==h and r["label_available_date"]<TRAIN_END])
+            selection_grid=selection_dev.get("buy_policy_candidates",{})
+            eligible=[(v.get("mean_net_pct"),key) for key,v in selection_grid.items()
+                      if v.get("n",0)>=MIN_TRAIN and v.get("mean_net_pct") is not None and v.get("mean_net_pct")>0]
+            selected_policy=max(eligible,default=(None,None),key=lambda x:(x[0],x[1]))[1]
+            cohort_report["development_policy_grid"]=selection_grid
+            cohort_report["selected_policy_thresholds"]={"policy":selected_policy,
+              "calibration":selection_dev.get("temperature"),"class_payoffs":selection_payoffs,
+              "selection_rule":"selected from the frozen 63-symbol development evaluation only; reused unchanged across training-universe and flow ablations"}
+        cohort_report["fit_metadata_by_universe"]={}
+        for fit_name in ("63_audit_symbols","available_full_universe"):
+          spec=_comparison_fit_spec(cohort,fit_name,pool,pool63,eval_rows)
+          training=spec["training_rows"];fixed_eval_rows=spec["evaluation_rows"]
+          fit_meta={k:v for k,v in spec.items() if k not in ("training_rows","evaluation_rows")}
+          cohort_report["fit_metadata_by_universe"][fit_name]=fit_meta
+          comparisons={}
           if chosen[1] is not None:
             h=chosen[2]
-            dev_for_policy=(development_cache[(chosen[1],h)] if fit_name=="63_audit_symbols" or cohort=="US" else
-                 _backtest_model(eval_rows,training,chosen[1],h,"development"))
-            dev_payoffs=dev_for_policy.get("class_payoffs_from_development") or _class_payoffs([r for r in training if r["horizon"]==h and r["label_available_date"]<TRAIN_END])
-            dev_grid=dev_for_policy.get("buy_policy_candidates",{})
-            eligible=[(v.get("mean_net_pct"),key) for key,v in dev_grid.items()
-                      if v.get("n",0)>=MIN_TRAIN and v.get("mean_net_pct") is not None and v.get("mean_net_pct")>0]
-            chosen_policy=max(eligible,default=(None,None),key=lambda x:(x[0],x[1]))[1]
-            threshold_source={"policy":chosen_policy,"calibration":dev_for_policy.get("temperature"),"class_payoffs":dev_payoffs,
-              "selection_rule":"highest development mean net among predeclared spread/side/netEV grid with at least MIN_TRAIN accepted development trades; policy selection does not use validation/diagnostic"}
-            dev=(dev_for_policy if cohort!="US" and fit_name=="63_audit_symbols" else
-                 _backtest_model(eval_rows,training,chosen[1],h,"development",
-                   temperature_info=dev_for_policy.get("temperature"),payoffs=dev_payoffs))
+            if fit_name=="63_audit_symbols" or cohort=="US":
+                fit_dev=selection_dev
+            else:
+                fit_dev=_backtest_model(fixed_eval_rows,training,chosen[1],h,"development")
+            fit_payoffs=fit_dev.get("class_payoffs_from_development") or _class_payoffs(
+                [r for r in training if r["horizon"]==h and r["label_available_date"]<TRAIN_END])
+            dev=(fit_dev if cohort!="US" and fit_name=="63_audit_symbols" else
+                 _backtest_model(fixed_eval_rows,training,chosen[1],h,"development",
+                   temperature_info=fit_dev.get("temperature"),payoffs=fit_payoffs))
             periods={"development":dev}
             for period in ("validation","diagnostic"):
-                periods[period]=_backtest_model(eval_rows,training,chosen[1],h,period,
-                  temperature_info=dev_for_policy.get("temperature"),payoffs=dev_payoffs)
+                periods[period]=_backtest_model(fixed_eval_rows,training,chosen[1],h,period,
+                  temperature_info=fit_dev.get("temperature"),payoffs=fit_payoffs)
             for period,raw in periods.items():
                 met=raw.get("metrics");grid=raw.get("buy_policy_candidates",{})
                 comparisons[period]={"n":raw.get("n",0),"metrics":met,"fixed_band_metrics":raw.get("fixed_band_metrics"),
-                  "selected_policy":chosen_policy,"selected_policy_metrics":grid.get(chosen_policy) if chosen_policy else None,
+                  "selected_policy":selected_policy,"selected_policy_metrics":grid.get(selected_policy) if selected_policy else None,
+                  "training_rows_n":len(training),"training_scope":spec["training_scope"],
+                  "evaluation_rows_n":len(fixed_eval_rows),"evaluation_tickers_n":spec["evaluation_tickers_n"],
                   "all_development_grid_policy_results":grid if period=="development" else None,
                   "probability_sample":raw.get("probability_sample")}
             if fit_name=="63_audit_symbols":
-                cohort_report["development_policy_grid"]=dev_grid
-                cohort_report["selected_policy_thresholds"]=threshold_source
+                cohort_report["selected_policy_thresholds"].update(
+                    {"calibration":fit_dev.get("temperature"),"class_payoffs":fit_payoffs})
             else:
-                cohort_report["full_universe_development_policy_grid"]=dev_grid
+                cohort_report["full_universe_development_policy_grid"]=fit_dev.get("buy_policy_candidates",{})
+            cohort_report.setdefault("calibration_by_universe",{})[fit_name]=fit_dev.get("temperature")
+            cohort_report.setdefault("policy_selection_status_by_universe",{})[fit_name]=(
+                "DEVELOPMENT_POLICY_SELECTED_FROM_63_FIXED_FOR_COMPARISON" if selected_policy else "NO_DEVELOPMENT_EDGE")
           else:
-            comparisons={p:{"n":0,"metrics":None,"selected_policy":None,"selected_policy_metrics":None} for p in ("development","validation","diagnostic")}
+            comparisons={p:{"n":0,"metrics":None,"selected_policy":None,"selected_policy_metrics":None,
+                "training_rows_n":len(training),"training_scope":spec["training_scope"],
+                "evaluation_rows_n":len(fixed_eval_rows),"evaluation_tickers_n":spec["evaluation_tickers_n"]}
+                for p in ("development","validation","diagnostic")}
+            cohort_report.setdefault("policy_selection_status_by_universe",{})[fit_name]="NO_DEVELOPMENT_EDGE"
           cohort_report["universe_comparison"][fit_name]=comparisons
-          if chosen[1] is not None:
-            cohort_report.setdefault("calibration_by_universe",{})[fit_name]=threshold_source["calibration"]
-          cohort_report.setdefault("policy_selection_status_by_universe",{})[fit_name]=("DEVELOPMENT_POLICY_SELECTED" if chosen_policy else "NO_DEVELOPMENT_EDGE")
         # Feature ablation reuses the selected model, horizon, label, and
         # development-selected policy threshold. Only flow inputs are removed;
         # validation/diagnostic are reported, never used for reselection.
         if chosen[1] is not None:
             h=chosen[2];base_dev=development_cache[(chosen[1],h)]
             policy_key=(cohort_report.get("selected_policy_thresholds") or {}).get("policy")
-            ablation={"same_model":chosen[1],"same_horizon":h,"excluded_features":list(FLOW_FEATURES),
-              "policy_threshold_source":"with-flow development selection; unchanged for no-flow ablation",
-              "policy_key":policy_key,"periods":{}}
+            audit_spec=_comparison_fit_spec(cohort,"63_audit_symbols",pool,pool63,eval_rows)
+            ablation={**_flow_ablation_metadata(chosen[1],h,policy_key,audit_spec),
+              "excluded_features":list(FLOW_FEATURES),"periods":{}}
             noflow_selection_dev=_backtest_model(selection_rows,selection_training,chosen[1],h,"development",exclude_features=FLOW_FEATURES)
             noflow_temp=noflow_selection_dev.get("temperature");noflow_payoffs=noflow_selection_dev.get("class_payoffs_from_development")
             audit_dev_with=(base_dev if cohort!="US" else _backtest_model(eval_rows,selection_training,chosen[1],h,"development",
@@ -758,9 +805,29 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
                     temperature_info=noflow_temp,payoffs=noflow_payoffs,exclude_features=FLOW_FEATURES)
                 ablation["periods"][period]={"with_flow":_ablation_period_summary(raw_with,policy_key),
                     "without_flow":_ablation_period_summary(raw_without,policy_key)}
+            full_spec=_comparison_fit_spec(cohort,"available_full_universe",pool,pool63,eval_rows)
+            full_training=full_spec["training_rows"];full_eval=full_spec["evaluation_rows"]
+            full_dev_with=_backtest_model(full_eval,full_training,chosen[1],h,"development")
+            full_dev_without=_backtest_model(full_eval,full_training,chosen[1],h,"development",
+                exclude_features=FLOW_FEATURES)
+            full_with_temp=full_dev_with.get("temperature");full_with_payoffs=full_dev_with.get("class_payoffs_from_development")
+            full_without_temp=full_dev_without.get("temperature");full_without_payoffs=full_dev_without.get("class_payoffs_from_development")
+            full_periods={"development":{"with_flow":_ablation_period_summary(full_dev_with,policy_key),
+                "without_flow":_ablation_period_summary(full_dev_without,policy_key)}}
+            for period in ("validation","diagnostic"):
+                full_with=_backtest_model(full_eval,full_training,chosen[1],h,period,
+                    temperature_info=full_with_temp,payoffs=full_with_payoffs)
+                full_without=_backtest_model(full_eval,full_training,chosen[1],h,period,
+                    temperature_info=full_without_temp,payoffs=full_without_payoffs,
+                    exclude_features=FLOW_FEATURES)
+                full_periods[period]={"with_flow":_ablation_period_summary(full_with,policy_key),
+                    "without_flow":_ablation_period_summary(full_without,policy_key)}
+            ablation["full_universe_training"]={**_flow_ablation_metadata(chosen[1],h,policy_key,full_spec),
+              "periods":full_periods}
             cohort_report["flow_ablation"]=ablation
         else:
-            cohort_report["flow_ablation"]={"status":"NO_DEVELOPMENT_MODEL_SELECTED","same_model_comparison":False}
+            cohort_report["flow_ablation"]={"status":"NO_DEVELOPMENT_MODEL_SELECTED","same_model_comparison":False,
+                "full_universe_training":{"status":"NO_DEVELOPMENT_MODEL_SELECTED","same_model_comparison":False}}
         cohort_report["policy_status"]=("SELECTED_ON_DEVELOPMENT_ONLY" if any(v for d in cohort_report.get("selected_buy_cut_by_development",{}).values() for v in d.values())
           else ("DEVELOPMENT_POLICY_SELECTED" if chosen[1] is not None and cohort_report.get("selected_policy_thresholds",{}).get("policy") else "NO_DEVELOPMENT_EDGE"))
         cohort_report["selected_model_policy_validation_diagnostic"]={name:cohort_report["universe_comparison"].get(name,{}) for name in ("63_audit_symbols","available_full_universe")}
