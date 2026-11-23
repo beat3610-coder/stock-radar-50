@@ -8,7 +8,7 @@ import pandas as pd
 
 from expanded_direction_audit import (
     FEATURES, FLOW_FEATURES, _features, _make_rows, _mandatory_market_items, _metrics, _trade_perf, direction_label,
-    _freeze_volatility_labels, _fit_temperature, _model, _training_rows_for,
+    _freeze_volatility_labels, _fit_temperature, _model, _training_rows_for, _selection_rows_for,
 )
 from providers import get_historical_investor_flows
 from universe import MANDATORY_KR, MANDATORY_US, AUDIT_63_BENCHMARK
@@ -80,6 +80,8 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
         full=[{"ticker":"AAA"},{"ticker":"BBB"}];benchmark=[{"ticker":"SOXL"}]
         self.assertIs(_training_rows_for("US",full,benchmark),full)
         self.assertIs(_training_rows_for("KOSPI",full,benchmark),benchmark)
+        self.assertIs(_selection_rows_for("US",full,benchmark),full)
+        self.assertIs(_selection_rows_for("KOSPI",full,benchmark),benchmark)
 
     def test_naver_flow_collector_pages_backward_and_records_coverage(self):
         class Response:
