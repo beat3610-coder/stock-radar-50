@@ -4,11 +4,20 @@ import numpy as np
 import pandas as pd
 
 from expanded_direction_audit import (
-    FEATURES, _features, _make_rows, _metrics, _trade_perf, direction_label,
+    FEATURES, _features, _make_rows, _mandatory_market_items, _metrics, _trade_perf, direction_label,
 )
+
+from universe import MANDATORY_KR, MANDATORY_US
 
 
 class ExpandedDirectionAuditTests(unittest.TestCase):
+    def test_mandatory_etfs_normalize_universe_three_field_rows(self):
+        self.assertEqual(list(_mandatory_market_items(MANDATORY_US,"US")),[("SOXL","SOXL","US")])
+        self.assertEqual(list(_mandatory_market_items(MANDATORY_KR,"KR")),[
+            ("472150","TIGER 배당커버드콜액티브","KR"),
+            ("0262B0","TIGER 200커버드콜액티브","KR"),
+        ])
+
     def test_fixed_threshold_labels(self):
         self.assertEqual(direction_label(.51, .5), "UP")
         self.assertEqual(direction_label(-.51, .5), "DOWN")

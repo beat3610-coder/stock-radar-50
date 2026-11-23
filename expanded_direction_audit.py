@@ -65,6 +65,12 @@ def _audit_symbols(universe):
             "KOSDAQ":{x[0] for x in universe.get("KOSDAQ",[])[:30]},
             "US":{"SOXL"},"TIGER_ETF":{x[0] for x in MANDATORY_KR}}
 
+
+def _mandatory_market_items(items, market):
+    """Normalize universe.py's (ticker, name, reason) entries for price loading."""
+    for ticker, name, _reason in items:
+        yield ticker, name, market
+
 def _make_rows(frame,ticker,market,cohort):
     x=compute(frame); rows=[]; close=x.Close.astype(float); volume=x.Volume.astype(float)
     turnover=close*volume; high=x.High.astype(float); low=x.Low.astype(float); op=x.Open.astype(float)
@@ -291,13 +297,13 @@ def run_expanded_direction_audit():
     bycohort={c:[r for r in rows if r["cohort"]==c] for c in universe}
     # Keep the mandated leveraged ETF in the 63-instrument evaluation. It is
     # never mixed into the ordinary-US cross-section used to train the model.
-    for ticker,name,market,sector in MANDATORY_US:
+    for ticker,name,market in _mandatory_market_items(MANDATORY_US,"US"):
         try:
             frame,source=get_historical_prices(ticker,market,start_date=SAMPLE_START,min_bars=250)
             special_eval.setdefault("US",[]).extend(_make_rows(frame,ticker,market,"US"))
             loaded.append({"ticker":ticker,"cohort":"US_eval_only","first_date":str(frame.index.min().date()),"source":source,"rows":len(special_eval["US"])})
         except Exception as exc:failures.append({"ticker":ticker,"cohort":"US_eval_only","reason":str(exc)[:220]})
-    for ticker,name,market,sector in MANDATORY_KR:
+    for ticker,name,market in _mandatory_market_items(MANDATORY_KR,"KR"):
         try:
             frame,source=get_historical_prices(ticker,market,start_date=SAMPLE_START,min_bars=250)
             special_eval.setdefault("TIGER_ETF",[]).extend(_make_rows(frame,ticker,market,"TIGER_ETF"))
