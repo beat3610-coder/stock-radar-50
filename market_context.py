@@ -4,8 +4,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-INDEX_FOR_COHORT={"KOSPI":"KOSPI","KOSDAQ":"KOSDAQ","TIGER_ETF":"KOSPI","SOXL":"SOX"}
-US_COHORTS={"SOXL"}
+INDEX_FOR_COHORT={"KOSPI":"KOSPI","KOSDAQ":"KOSDAQ","TIGER_ETF":"KOSPI","SOXL":"SOX","US":"SOX"}
+US_COHORTS={"SOXL","US"}
 REGIME_RULE={
     "risk_off":"(cohort index below MA200 and realized volatility ratio > 1.2) OR VIX 250-observation expanding percentile > 0.80 OR USD/KRW 20-day change > +3%.",
     "risk_on":"cohort index above MA200 and volatility ratio <= 1.2 and VIX percentile <= 0.80 and USD/KRW 20-day change <= +3%; otherwise NEUTRAL when inputs exist.",
@@ -61,13 +61,17 @@ def _at(series,day,strict_prior):
     try:return float(series.iloc[pos])
     except (TypeError,ValueError):return np.nan
 
-def _macro_feature_row(day,cohort,macro_frames,indicators=None):
+def _macro_feature_row(day,cohort,macro_frames,indicators=None,strict_prior_override=None):
     index_key=INDEX_FOR_COHORT[cohort]
     # Korean signals are generated at the Korean close: same-day US closes are
-    # later information and therefore excluded. SOXL is a US signal and may
-    # use its own same-day close. This conservative calendar-date shift is
-    # recorded in the audit artifact.
-    strict_prior=cohort not in US_COHORTS
+    # later information and therefore excluded. Direction3 additionally uses
+    # strict prior-session macro alignment for all cohorts, including US/SOXL.
+    # Macro feeds and US indices are published on separate market clocks. For
+    # every signal use only the last completed US session; Korean local index
+    # features may use the signal-day Korean close. US cohort SOXL/SOX trend is
+    # likewise shifted to the last completed session by strict_prior_index.
+    strict_prior=True if strict_prior_override is None else bool(strict_prior_override)
+    strict_prior_index=cohort in US_COHORTS
     indicators=indicators or _macro_indicators(macro_frames)
     index_ind=indicators.get(index_key,{})
     vals={}
@@ -76,7 +80,7 @@ def _macro_feature_row(day,cohort,macro_frames,indicators=None):
                       ("ret20","market_index_return_20d_pct"),("ret60","market_index_return_60d_pct"),
                       ("vol20","market_index_volatility_20d_pct"),("vol_ratio","market_volatility_ratio"),
                       ("dd120","market_drawdown_120_pct")):
-        vals[label]=_at(index_ind.get(key),day,False)
+        vals[label]=_at(index_ind.get(key),day,strict_prior_index)
     vix=indicators.get("VIX",{})
     fx=indicators.get("USDKRW",{})
     vals.update({
@@ -89,7 +93,7 @@ def _macro_feature_row(day,cohort,macro_frames,indicators=None):
     })
     for key,macro_key in (("sp500_return_20d_pct","SP500"),("sox_return_20d_pct","SOX")):
         vals[key]=_at(indicators.get(macro_key,{}).get("ret20"),day,strict_prior)
-    vals["_benchmark_return_120d_pct"]=_at(indicators.get(index_key,{}).get("ret120"),day,False)
+    vals["_benchmark_return_120d_pct"]=_at(indicators.get(index_key,{}).get("ret120"),day,strict_prior_index)
     idx_ma=vals.get("market_index_ma200_gap_pct")
     vol_ratio=vals.get("market_volatility_ratio")
     vix_pct=vals.get("vix_expanding_percentile")
@@ -105,8 +109,8 @@ def _macro_feature_row(day,cohort,macro_frames,indicators=None):
     elif all(np.isfinite(v) for v in (idx_ma,vol_ratio,vix_pct,fx20)) and idx_ma>0 and vol_ratio<=1.2 and vix_pct<=0.80 and fx20<=3.0:
         regime="RISK_ON"
     else:regime="NEUTRAL"
-    vals["market_risk_on"]=1.0 if regime=="RISK_ON" else 0.0
-    vals["market_risk_off"]=1.0 if regime=="RISK_OFF" else 0.0
+    vals["market_risk_on"]=(1.0 if regime=="RISK_ON" else 0.0) if regime!="UNKNOWN" else np.nan
+    vals["market_risk_off"]=(1.0 if regime=="RISK_OFF" else 0.0) if regime!="UNKNOWN" else np.nan
     vals["market_regime"]=regime
     return vals
 
@@ -133,32 +137,48 @@ def _price_features(frame):
 
 def _flow_features(price_frame,flow_frame):
     if flow_frame is None or flow_frame.empty:
-        return pd.DataFrame(index=price_frame.index)
+        out=pd.DataFrame(index=price_frame.index)
+        for label in ("foreign","institution"):
+            out[f"{label}_flow_5d_to_turnover"]=np.nan
+            out[f"{label}_flow_20d_to_turnover"]=np.nan
+            out[f"{label}_buy_streak"]=np.nan
+        out["flow_direction_agreement"]=np.nan
+        out["flow_data_available"]=0.0
+        return out
     flow=flow_frame.copy()
     flow_index=pd.DatetimeIndex(pd.to_datetime(flow.index))
     if flow_index.tz is not None:flow_index=flow_index.tz_localize(None)
     flow.index=flow_index.normalize()
     flow=flow[~flow.index.duplicated(keep="last")].sort_index()
+    for key in ("foreign_net_shares","institution_net_shares"):
+        if key not in flow:flow[key]=np.nan
     close=pd.to_numeric(price_frame.Close,errors="coerce")
     turnover=(close*pd.to_numeric(price_frame.get("Volume",0),errors="coerce").fillna(0))
     avg_turnover=turnover.rolling(20,min_periods=15).mean().replace(0,np.nan)
-    data=flow.reindex(price_frame.index).fillna(0)
+    # Exact-date join only: signal-day close flows may feed the next-open
+    # decision, but there is no forward/backward fill from a later session.
+    data=flow.reindex(price_frame.index)
+    observed=data[["foreign_net_shares","institution_net_shares"]].notna().any(axis=1)
     out={}
     for label,key in (("foreign","foreign_net_shares"),("institution","institution_net_shares")):
-        shares=pd.to_numeric(data.get(key,pd.Series(0,index=price_frame.index)),errors="coerce").fillna(0)
+        shares=pd.to_numeric(data.get(key,pd.Series(np.nan,index=price_frame.index)),errors="coerce")
         value=shares*close
         out[f"{label}_flow_5d_to_turnover"]=value.rolling(5,min_periods=5).sum()/avg_turnover
         out[f"{label}_flow_20d_to_turnover"]=value.rolling(20,min_periods=20).sum()/avg_turnover
-        positive=shares.gt(0)
         streak=[];n=0
-        for flag in positive.to_numpy():
-            n=n+1 if flag else 0
-            streak.append(n)
+        for share in shares.to_numpy():
+            if not np.isfinite(share):
+                n=0;streak.append(np.nan)
+            else:
+                n=n+1 if share>0 else 0
+                streak.append(float(n))
         out[f"{label}_buy_streak"]=pd.Series(streak,index=price_frame.index,dtype=float)
     inst20=out["institution_flow_20d_to_turnover"]
     foreign20=out["foreign_flow_20d_to_turnover"]
-    out["flow_direction_agreement"]=(np.sign(inst20)==np.sign(foreign20)).astype(float)
-    out["flow_data_available"]=pd.Series(1.0,index=price_frame.index)
+    both=inst20.notna()&foreign20.notna()
+    agreement=np.sign(inst20)*np.sign(foreign20)
+    out["flow_direction_agreement"]=agreement.where(both,np.nan)
+    out["flow_data_available"]=observed.rolling(20,min_periods=1).mean().fillna(0.0)
     return pd.DataFrame(out,index=price_frame.index)
 
 def build_market_context(frames,macro_frames,cohort,flow_frames=None):
@@ -169,13 +189,11 @@ def build_market_context(frames,macro_frames,cohort,flow_frames=None):
     macro_indicators=_macro_indicators(macro_frames)
     for ticker,frame in frames.items():
         flows=flow_data[ticker]
-        if flows.empty:
-            for c in ("foreign_flow_5d_to_turnover","foreign_flow_20d_to_turnover",
-                      "institution_flow_5d_to_turnover","institution_flow_20d_to_turnover",
-                      "foreign_buy_streak","institution_buy_streak","flow_direction_agreement"):
-                flows[c]=0.0
+        if not flows.index.equals(frame.index):
+            flows=flows.reindex(frame.index)
+        if "flow_data_available" not in flows:
             flows["flow_data_available"]=0.0
-        else:flow_data[ticker]=flows.reindex(frame.index).fillna(0)
+        flow_data[ticker]=flows
     union=sorted(set(pd.Timestamp(d).normalize() for frame in frames.values() for d in frame.index))
     market_rows={str(day.date()):_macro_feature_row(day,cohort,macro_frames,macro_indicators) for day in union}
     # Same-date cross-sectional ranks use only constituents with an observed value
@@ -201,7 +219,7 @@ def build_market_context(frames,macro_frames,cohort,flow_frames=None):
         for ticker,frame in frames.items():
             if day not in frame.index:continue
             pf=price_data[ticker];flow=flow_data[ticker]
-            flow_values={k:float(flow.at[day,k]) if day in flow.index and pd.notna(flow.at[day,k]) else 0.0 for k in flow.columns}
+            flow_values={k:float(flow.at[day,k]) if day in flow.index and pd.notna(flow.at[day,k]) else np.nan for k in flow.columns}
             row={k:float(v) if np.isscalar(v) and not isinstance(v,str) and pd.notna(v) else np.nan for k,v in macro.items() if k not in ("market_regime","_benchmark_return_120d_pct")}
             for rank_name,metric in rank_fields.items():
                 row[rank_name]=cross[rank_name].get(ticker,np.nan)

@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from market_context import _macro_feature_row, build_market_context
+from market_context import _flow_features, _macro_feature_row, build_market_context
 
 
 class MarketContextTests(unittest.TestCase):
@@ -24,6 +24,31 @@ class MarketContextTests(unittest.TestCase):
         macro2["SP500"].loc[dates[30],"Close"]=macro2["SP500"].loc[dates[30],"Close"]*2
         changed=_macro_feature_row(dates[30],"KOSPI",macro2)
         self.assertAlmostEqual(kr["sp500_return_20d_pct"],changed["sp500_return_20d_pct"])
+
+    def test_us_signal_uses_strict_prior_sox_close(self):
+        dates=pd.bdate_range("2025-01-01",periods=35)
+        sox=self.frame(dates,2000)
+        before=_macro_feature_row(dates[-1],"US",{"SOX":sox})
+        changed=sox.copy();changed.loc[dates[-1],"Close"]*=3
+        after=_macro_feature_row(dates[-1],"US",{"SOX":changed})
+        self.assertAlmostEqual(before["market_index_return_20d_pct"],after["market_index_return_20d_pct"])
+
+    def test_missing_flows_stay_nan_and_are_not_fabricated_as_zero(self):
+        dates=pd.bdate_range("2025-01-01",periods=45);prices=self.frame(dates)
+        flows=pd.DataFrame({"foreign_net_shares":np.r_[np.nan*np.ones(15),np.arange(30)-15],
+                            "institution_net_shares":np.r_[np.nan*np.ones(15),np.arange(30)[::-1]-15]},index=dates)
+        values=_flow_features(prices,flows)
+        self.assertTrue(values["foreign_flow_5d_to_turnover"].iloc[:15].isna().all())
+        self.assertTrue(values["institution_flow_20d_to_turnover"].iloc[:34].isna().any())
+        self.assertEqual(values["flow_data_available"].iloc[0],0.0)
+        self.assertGreater(values["flow_data_available"].nunique(),2)
+        agreement=values["flow_direction_agreement"].dropna()
+        self.assertTrue(set(agreement.unique()).issubset({-1.0,0.0,1.0}))
+        self.assertFalse((values["foreign_buy_streak"].dropna()==0).all())
+        changed=flows.copy();changed.iloc[-1,:]=1e12
+        unchanged_before=_flow_features(prices,changed)
+        pd.testing.assert_series_equal(values["foreign_flow_5d_to_turnover"].iloc[:-1],
+            unchanged_before["foreign_flow_5d_to_turnover"].iloc[:-1])
 
     def test_cross_section_ranks_exclude_unlisted_rows_and_report_counts(self):
         dates=pd.bdate_range("2024-01-01",periods=80)
@@ -54,6 +79,8 @@ class MarketContextTests(unittest.TestCase):
         self.assertEqual(row["market_regime"],"RISK_OFF")
         unknown=_macro_feature_row(dates[0],"KOSPI",{})
         self.assertEqual(unknown["market_regime"],"UNKNOWN")
+        self.assertTrue(np.isnan(unknown["market_risk_off"]))
+        self.assertTrue(np.isnan(unknown["market_risk_on"]))
 
 
 if __name__=="__main__":unittest.main()

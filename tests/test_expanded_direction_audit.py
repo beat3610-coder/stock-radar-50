@@ -1,12 +1,16 @@
 import unittest
+from unittest.mock import patch
+from pathlib import Path
+import tempfile
 
 import numpy as np
 import pandas as pd
 
 from expanded_direction_audit import (
-    FEATURES, _features, _make_rows, _mandatory_market_items, _metrics, _trade_perf, direction_label,
-    _freeze_volatility_labels, _fit_temperature, _model,
+    FEATURES, FLOW_FEATURES, _features, _make_rows, _mandatory_market_items, _metrics, _trade_perf, direction_label,
+    _freeze_volatility_labels, _fit_temperature, _model, _training_rows_for,
 )
+from providers import get_historical_investor_flows
 from universe import MANDATORY_KR, MANDATORY_US, AUDIT_63_BENCHMARK
 from audit_63_fast import _frozen_audit_cohorts
 
@@ -49,7 +53,12 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
         logistic=_model("multinomial_logistic")
         forest=_model("random_forest")
         self.assertIsNone(logistic[-1].class_weight)
-        self.assertIsNone(forest.class_weight)
+        self.assertIsNone(forest[-1].class_weight)
+        x=np.asarray([[0.,np.nan],[1.,2.],[-1.,1.],[2.,np.nan],[-2.,0.],[.5,3.]],dtype=float)
+        y=np.asarray([0,1,2,1,0,2])
+        forest.fit(x,y)
+        self.assertEqual(list(forest.classes_),[0,1,2])
+        self.assertEqual(forest.predict_proba(x).shape,(6,3))
         rows=[{"label_vol":("UP" if i%2 else "DOWN")} for i in range(120)]
         probs=np.tile([.6,.1,.3],(120,1))
         result=_fit_temperature(rows,probs)
@@ -61,6 +70,44 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
         x=_features([row])
         self.assertEqual(x.shape,(1,len(FEATURES)))
         self.assertTrue(np.isfinite(x).all())
+
+    def test_fixed_schema_includes_flow_macro_and_relative_features(self):
+        self.assertTrue(set(FLOW_FEATURES).issubset(FEATURES))
+        row={key:0.0 for key in FEATURES}
+        self.assertEqual(_features([row]).shape,(1,len(FEATURES)))
+
+    def test_us_soxl_uses_the_available_ordinary_us_training_pool(self):
+        full=[{"ticker":"AAA"},{"ticker":"BBB"}];benchmark=[{"ticker":"SOXL"}]
+        self.assertIs(_training_rows_for("US",full,benchmark),full)
+        self.assertIs(_training_rows_for("KOSPI",full,benchmark),benchmark)
+
+    def test_naver_flow_collector_pages_backward_and_records_coverage(self):
+        class Response:
+            status_code=200
+            def __init__(self,rows):self.rows=rows
+            def raise_for_status(self):pass
+            def json(self):return self.rows
+        class Session:
+            def __init__(self):self.headers={};self.calls=[]
+            def get(self,url,params,timeout):
+                self.calls.append(params)
+                if len(self.calls)==1:days=pd.bdate_range("2026-11-18",periods=3)
+                elif len(self.calls)==2:days=pd.bdate_range("2026-11-04",periods=10)
+                else:days=pd.bdate_range("2026-10-28",periods=5)
+                rows=[{"bizdate":d.strftime("%Y%m%d"),"foreignerPureBuyQuant":"+1,234",
+                       "organPureBuyQuant":"-234"} for d in reversed(days)]
+                return Response(rows)
+        with tempfile.TemporaryDirectory() as directory:
+            from providers import HistoricalFlowError
+            with patch("providers.PRICE_CACHE",Path(directory)/"prices"),patch("requests.Session",Session):
+                frame,source=get_historical_investor_flows("005930",start_date="2026-11-01",end_date="2026-11-20")
+                self.assertIn("Naver mobile",source)
+                self.assertEqual(len(frame),15)
+                diag=frame.attrs["collection_diagnostics"]
+                self.assertEqual(diag["requests_n"],3)
+                self.assertEqual(diag["first_date"],"2026-11-02")
+                self.assertEqual(diag["last_date"],"2026-11-20")
+                self.assertTrue(diag["available"])
 
     def test_three_class_metrics_and_confusion_labels(self):
         rows=[{"label_0.5":"DOWN","net_pct":-1,"signal_date":"2025-01-01"},

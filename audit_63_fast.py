@@ -758,7 +758,7 @@ def run():
     started=datetime.now(timezone.utc)
     universe=_audit_universe()
     cohorts=_frozen_audit_cohorts(universe)
-    macro_frames,macro_sources=get_market_series_bundle(start_date=SAMPLE_START,end_date=MIN_END_DATE)
+    macro_frames,macro_sources=get_market_series_bundle(start_date="2016-01-01",end_date=MIN_END_DATE)
     baseline_path=Path("data/cec6d80-baseline.json")
     archived_baseline=json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.exists() else {}
     out={"created_utc":started.isoformat(),"status":"RESEARCH_ONLY_NOT_LIVE_APPROVED",
@@ -781,6 +781,7 @@ def run():
             "limit_rationale":"59 fixed-scale numeric values + six strategy one-hots + six strategy×net-RR interactions = 71 fixed columns; schema fixed before OOS and no evaluation-window fitting/selection."},
         "cec6d80_baseline_source":archived_baseline.get("source_run_id"),
         "portfolio":{"max_concurrent_positions":5,"weighting":"equal initial notional slots"},"cohorts":{}}
+    all_flow_frames={};all_flow_sources={};all_development_feature_rows=[]
     integrity=True
     for cohort,items in cohorts.items():
         legacy_by_variant={s:[] for s in PARAMS};broad=[];frames={};computed_by={};instruments=[];errors=[]
@@ -802,26 +803,37 @@ def run():
         flow_frames={};flow_sources={}
         if cohort=="SOXL":
             flow_sources={"SOXL":{"status":"not_applicable","source":None,
-                "reason":"US-listed security; KR investor-flow history does not apply. Turnover ratio and signed-volume-flow features are used."}}
+                "ticker":"SOXL","attempted":False,"available":False,"requests_n":0,"rows_n":0,
+                "first_date":None,"last_date":None,
+                "reason":"US-listed security; Korean foreign/institution flow source does not apply. flow_data_available is explicitly zero."}}
         else:
-            with ThreadPoolExecutor(max_workers=8) as executor:
+            with ThreadPoolExecutor(max_workers=12) as executor:
                 future_to_ticker={}
                 for ticker,_,_,_ in items:
                     if ticker not in frames:
-                        flow_sources[ticker]={"status":"unavailable","source":None,"reason":"OHLCV history unavailable"}
+                        flow_sources[ticker]={"status":"unavailable","source":None,"attempted":False,"available":False,
+                            "requests_n":0,"rows_n":0,"first_date":None,"last_date":None,
+                            "reason":"OHLCV history unavailable"}
                     elif pd.Timestamp(frames[ticker].index[0]).date()>pd.Timestamp(HOLDOUT_END).date():
-                        flow_sources[ticker]={"status":"unavailable","source":None,"reason":"listing begins after the fixed holdout window"}
+                        flow_sources[ticker]={"status":"unavailable","source":None,"attempted":False,"available":False,
+                            "requests_n":0,"rows_n":0,"first_date":None,"last_date":None,
+                            "reason":"listing begins after the fixed holdout window"}
                     else:
                         future_to_ticker[executor.submit(get_historical_investor_flows,ticker,
-                            start_date=SAMPLE_START,end_date=MIN_END_DATE)]=ticker
+                            start_date="2015-12-01",end_date=MIN_END_DATE)]=ticker
                 for future in as_completed(future_to_ticker):
                     ticker=future_to_ticker[future]
                     try:
                         flow_frames[ticker],source=future.result()
-                        flow_sources[ticker]={"status":"ok","source":source,"observations":len(flow_frames[ticker]),
-                            "first_date":str(flow_frames[ticker].index.min().date()),"last_date":str(flow_frames[ticker].index.max().date())}
+                        diag=flow_frames[ticker].attrs.get("collection_diagnostics",{})
+                        flow_sources[ticker]={**diag,"status":"ok","source":source,
+                            "observations":len(flow_frames[ticker]),"available":True}
                     except Exception as exc:
-                        flow_sources[ticker]={"status":"unavailable","source":None,"reason":str(exc)[:250]}
+                        diag=getattr(exc,"diagnostics",{})
+                        flow_sources[ticker]={**diag,"ticker":ticker,"status":"unavailable","source":None,
+                            "attempted":diag.get("attempted",True),"available":False,"reason":str(exc)[:500]}
+        all_flow_frames.update(flow_frames)
+        all_flow_sources.update(flow_sources)
         context=build_market_context(frames,macro_frames,cohort,flow_frames)
         for inst in instruments:inst["investor_flow_source"]=flow_sources.get(inst["ticker"],{})
         breadth,gap=_make_cohort_context(frames)
@@ -855,14 +867,15 @@ def run():
             "model_eligible_symbols":sorted(eligible),"model_excluded_symbols":{k:v for k,v in symbol_dev.items() if k not in eligible}}
         out["sample_start_by_cohort"][cohort]["cross_sectional_rank_counts"]=context["cross_sectional_rank_counts"]
         out["sample_start_by_cohort"][cohort]["flow_source_coverage"]={
-            "available_symbols":sum(v.get("status")=="ok" for v in flow_sources.values()),
-            "attempted_symbols":sum(v.get("status") in ("ok","unavailable") for v in flow_sources.values()),
+            "available_symbols":sum(v.get("available",v.get("status")=="ok") for v in flow_sources.values()),
+            "attempted_symbols":sum(bool(v.get("attempted",False)) for v in flow_sources.values()),
             "sources":flow_sources}
         out["regime_distribution"][cohort]={}
         dev_variant={s:_trade_metrics(_period(ts,"development")) for s,ts in legacy_by_variant.items()}
         valid_variants=[s for s,m in dev_variant.items() if m["trades"]>=MIN_POLICY_TRADES and m.get("mean_net_pct") is not None]
         legacy_choice=max(valid_variants,key=lambda s:(dev_variant[s]["mean_net_pct"],s),default=None)
         development_rows=_period(eligible_rows,"development")
+        all_development_feature_rows.extend(development_rows)
         feature_coverage,excluded_features=_feature_coverage(development_rows)
         for col in excluded_features:print(f"FEATURE_AUTO_EXCLUDED cohort={cohort} feature={col} reason=zero_development_std",flush=True)
         excluded_numeric_count=len(set(excluded_features)&set(NUMERIC_FEATURES))
@@ -1066,13 +1079,29 @@ def run():
             "model":selected_config,"target":selected_target,"status":model_policy_status,
             "legacy_policy":selected_legacy_policy,"validation":cohort_result["periods"]["validation"],
             "diagnostic":cohort_result["periods"]["diagnostic"]},ensure_ascii=False),flush=True)
+    overall_flow_coverage,overall_flow_excluded=_feature_coverage(all_development_feature_rows)
+    flow_feature_keys=[key for key in overall_flow_coverage if key in {
+        "foreign_flow_5d_to_turnover","foreign_flow_20d_to_turnover",
+        "institution_flow_5d_to_turnover","institution_flow_20d_to_turnover",
+        "foreign_buy_streak","institution_buy_streak","flow_direction_agreement","flow_data_available"}]
+    out["feature_coverage"]["all_cohorts"]={"development_rows_n":len(all_development_feature_rows),
+        "by_feature":{key:overall_flow_coverage[key] for key in flow_feature_keys},
+        "auto_excluded_constant_features":[key for key in overall_flow_excluded if key in flow_feature_keys],
+        "scope":"combined audited Korean KOSPI/KOSDAQ, TIGER ETF, and SOXL development candidates; no missing-flow value is treated as observed zero"}
     out["data_integrity_status"]="PASS" if integrity else "FAIL"
     out["runtime_seconds"]=(datetime.now(timezone.utc)-started).total_seconds()
     Path("data").mkdir(exist_ok=True);Path("data/audit-63-latest.json").write_text(json.dumps(out,ensure_ascii=False,indent=2,default=str),encoding="utf-8")
     if not integrity:raise SystemExit("FAILED: incomplete 63-instrument OHLCV coverage; see data/audit-63-latest.json")
     print("AUDIT_EXPANDED_UNIVERSE_DIRECTION_START",flush=True)
     from expanded_direction_audit import run_expanded_direction_audit
-    expanded=run_expanded_direction_audit()
+    out["flow_collection"]={"source":"Naver mobile stock trend API; no KRX login/pykrx or paid source",
+        "requested_start":"2015-12-01","priority":"frozen KOSPI30 + KOSDAQ30 + 2 TIGER ETFs",
+        "extended_296_pool_attempted":False,"extended_pool_reason":"The 60-minute cap prioritizes full flow histories for the fixed 63-instrument audit; remaining equities are explicitly unavailable in this run.",
+        "available_symbols":sum(v.get("available",False) for v in all_flow_sources.values()),
+        "attempted_symbols":sum(bool(v.get("attempted",False)) for v in all_flow_sources.values()),
+        "by_ticker":all_flow_sources}
+    expanded=run_expanded_direction_audit(flow_frames=all_flow_frames,flow_source_coverage=all_flow_sources,
+        macro_frames=macro_frames,macro_diagnostics=macro_sources)
     out["universe_expansion"]=expanded["universe_expansion"]
     out["label_variants"]=expanded["label_variants"]
     out["direction3"]=expanded["direction3"]

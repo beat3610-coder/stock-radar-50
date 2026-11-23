@@ -24,27 +24,56 @@ from sklearn.metrics import (accuracy_score, balanced_accuracy_score,
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from providers import get_historical_prices
+from providers import get_historical_prices, get_market_series_bundle
 from universe import get_universe, MANDATORY_KR, MANDATORY_US, AUDIT_63_BENCHMARK
 from engine import compute
+from market_context import build_market_context
 
 TRAIN_END="2025-11-01"; VALID_END="2026-04-01"; HOLDOUT_END="2026-11-01"
 SAMPLE_START="2016-01-01"; COST_PCT=.35; THETAS=(.3,.5,1.0)
 HORIZONS=(5,10,20); MIN_TRAIN=500; REFIT_MONTH=1; SIGNAL_STEP=5
 SIDEWAYS_TARGET_SHARE=.30
 SPREAD_CUTS=(.05,.10,.15); SIDEWAYS_MAX=(.25,.35,.45); EV_FLOORS=(0.0,.10,.20)
-FEATURES=("ret5","ret20","ret60","ret120","atr_pct","vol20_pct",
+BASE_FEATURES=("ret5","ret20","ret60","ret120","atr_pct","vol20_pct",
           "rsi","ma20_gap","ma60_gap","ma200_gap","turnover_ratio",
           "volume_flow5","gap_pct","intraday_strength20","xs_ret20",
           "xs_ret60","xs_volatility20","xs_turnover20")
+MACRO_FEATURES=("vix_level","vix_change_5d_pct","vix_expanding_percentile","usdkrw_change_20d_pct",
+ "sp500_return_20d_pct","sox_return_20d_pct","market_index_ma20_gap_pct","market_index_ma60_gap_pct",
+ "market_index_ma200_gap_pct","market_index_return_5d_pct","market_index_return_20d_pct",
+ "market_index_return_60d_pct","market_index_volatility_20d_pct","market_volatility_ratio",
+ "market_drawdown_120_pct","market_risk_off","market_risk_on")
+RELATIVE_FEATURES=("excess_return_20d_pct","excess_return_60d_pct","excess_return_120d_pct")
+FLOW_FEATURES=("foreign_flow_5d_to_turnover","foreign_flow_20d_to_turnover",
+ "institution_flow_5d_to_turnover","institution_flow_20d_to_turnover","foreign_buy_streak",
+ "institution_buy_streak","flow_direction_agreement","flow_data_available")
+FEATURES=BASE_FEATURES+MACRO_FEATURES+RELATIVE_FEATURES+FLOW_FEATURES
 CENTERS={"ret5":0,"ret20":0,"ret60":0,"ret120":0,"atr_pct":3,"vol20_pct":3,
  "rsi":50,"ma20_gap":0,"ma60_gap":0,"ma200_gap":0,"turnover_ratio":1,
  "volume_flow5":0,"gap_pct":0,"intraday_strength20":.5,"xs_ret20":.5,
- "xs_ret60":.5,"xs_volatility20":.5,"xs_turnover20":.5}
+ "xs_ret60":.5,"xs_volatility20":.5,"xs_turnover20":.5,
+ "vix_level":20,"vix_change_5d_pct":0,"vix_expanding_percentile":.5,"usdkrw_change_20d_pct":0,
+ "sp500_return_20d_pct":0,"sox_return_20d_pct":0,"market_index_ma20_gap_pct":0,"market_index_ma60_gap_pct":0,
+ "market_index_ma200_gap_pct":0,"market_index_return_5d_pct":0,"market_index_return_20d_pct":0,
+ "market_index_return_60d_pct":0,"market_index_volatility_20d_pct":25,"market_volatility_ratio":1,
+ "market_drawdown_120_pct":0,"market_risk_off":0,"market_risk_on":0,
+ "excess_return_20d_pct":0,"excess_return_60d_pct":0,"excess_return_120d_pct":0,
+ "foreign_flow_5d_to_turnover":0,"foreign_flow_20d_to_turnover":0,
+ "institution_flow_5d_to_turnover":0,"institution_flow_20d_to_turnover":0,
+ "foreign_buy_streak":0,"institution_buy_streak":0,"flow_direction_agreement":0,"flow_data_available":0}
 SCALES={"ret5":10,"ret20":20,"ret60":35,"ret120":55,"atr_pct":3,"vol20_pct":5,
  "rsi":25,"ma20_gap":10,"ma60_gap":18,"ma200_gap":30,"turnover_ratio":2,
  "volume_flow5":1,"gap_pct":5,"intraday_strength20":.5,"xs_ret20":.5,
- "xs_ret60":.5,"xs_volatility20":.5,"xs_turnover20":.5}
+ "xs_ret60":.5,"xs_volatility20":.5,"xs_turnover20":.5,
+ "vix_level":20,"vix_change_5d_pct":20,"vix_expanding_percentile":.5,"usdkrw_change_20d_pct":5,
+ "sp500_return_20d_pct":10,"sox_return_20d_pct":15,"market_index_ma20_gap_pct":10,"market_index_ma60_gap_pct":18,
+ "market_index_ma200_gap_pct":30,"market_index_return_5d_pct":8,"market_index_return_20d_pct":15,
+ "market_index_return_60d_pct":25,"market_index_volatility_20d_pct":30,"market_volatility_ratio":1,
+ "market_drawdown_120_pct":30,"market_risk_off":1,"market_risk_on":1,
+ "excess_return_20d_pct":20,"excess_return_60d_pct":35,"excess_return_120d_pct":55,
+ "foreign_flow_5d_to_turnover":2,"foreign_flow_20d_to_turnover":4,
+ "institution_flow_5d_to_turnover":2,"institution_flow_20d_to_turnover":4,
+ "foreign_buy_streak":10,"institution_buy_streak":10,"flow_direction_agreement":1,"flow_data_available":1}
 
 def direction_label(net_return_pct,theta_pct=.5):
     value=float(net_return_pct)
@@ -139,20 +168,51 @@ def _rank_features(rows):
         for j in ix:rows[j]["xs_count"]=len(ix)
     return rows
 
+def _attach_context_features(rows,frames_by_cohort,macro_frames,flow_frames):
+    """Attach close-timestamped macro, relative-strength and observed flow data."""
+    direct=MACRO_FEATURES+FLOW_FEATURES
+    excess_map={"stock_excess_return_20d_pct":"excess_return_20d_pct",
+                "stock_excess_return_60d_pct":"excess_return_60d_pct",
+                "stock_excess_return_120d_pct":"excess_return_120d_pct"}
+    for cohort,frames in frames_by_cohort.items():
+        if not frames:continue
+        cohort_flows={ticker:flow_frames[ticker] for ticker in frames if ticker in flow_frames}
+        context=build_market_context(frames,macro_frames,cohort,cohort_flows)
+        for row in rows:
+            if row["cohort"]!=cohort:continue
+            values=context["features"].get(row["ticker"],{}).get(row["signal_date"],{})
+            for key in direct:
+                value=values.get(key,np.nan)
+                # A measured zero explicitly means no flow coverage. Other
+                # missing flow values stay NaN and are never imputed as zero.
+                if key=="flow_data_available" and not np.isfinite(value):value=0.0
+                row[key]=float(value) if value is not None else np.nan
+            for source,target in excess_map.items():row[target]=values.get(source,np.nan)
+            row["market_regime"]=values.get("market_regime","UNKNOWN")
+    return rows
+
 def _active_features(rows):
-    return tuple(k for k in FEATURES if np.std([float(r.get(k,CENTERS[k])) for r in rows])>1e-12)
+    active=[]
+    for key in FEATURES:
+        values=np.asarray([float(r.get(key,CENTERS[key])) for r in rows],dtype=float)
+        values=values[np.isfinite(values)]
+        if len(values) and np.std(values)>1e-12:active.append(key)
+    return tuple(active)
 
 def _features(rows,active=None):
     active=FEATURES if active is None else active
-    return np.asarray([[np.clip((float(r.get(k,CENTERS[k]))-CENTERS[k])/SCALES[k],-5,5) for k in active]
-                       for r in rows],dtype=np.float32)
+    def scaled(row,key):
+        value=float(row.get(key,CENTERS[key]))
+        return float(np.clip((value-CENTERS[key])/SCALES[key],-5,5)) if np.isfinite(value) else np.nan
+    return np.asarray([[scaled(r,k) for k in active] for r in rows],dtype=np.float32)
 
 def _model(kind):
     if kind=="multinomial_logistic":
         return make_pipeline(SimpleImputer(strategy="constant",fill_value=0),StandardScaler(),
              LogisticRegression(C=.15,max_iter=300,class_weight=None,random_state=3610))
-    return RandomForestClassifier(n_estimators=80,max_depth=5,min_samples_leaf=20,
-            class_weight=None,random_state=3610,n_jobs=1)
+    return make_pipeline(SimpleImputer(strategy="constant",fill_value=0),
+            RandomForestClassifier(n_estimators=80,max_depth=5,min_samples_leaf=20,
+            class_weight=None,random_state=3610,n_jobs=1))
 
 def _freeze_volatility_labels(rows):
     """Choose a cohort-wide k using only labels mature before TRAIN_END."""
@@ -295,7 +355,7 @@ def _policy_table(rows,probs,payoffs):
         table[key]=value
     return table
 
-def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,payoffs=None):
+def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,payoffs=None,exclude_features=()):
     lo,hi={"development":(SAMPLE_START,TRAIN_END),"validation":(TRAIN_END,VALID_END),"diagnostic":(VALID_END,HOLDOUT_END)}[period]
     eval_rows=[r for r in rows if r["horizon"]==horizon and lo<=r["entry_date"]<hi and r["label_available_date"]<hi]
     if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None,"temperature":temperature_info}
@@ -308,7 +368,7 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
         idx=[i for i,r in enumerate(eval_rows) if int(r["signal_date"][:4])//2==snapshot_year//2]
         past=[r for r in all_train if r["label_available_date"]<anchor and r["signal_date"]<anchor]
         if len(past)<MIN_TRAIN or len({r["label_vol"] for r in past})<3:continue
-        active=_active_features(past)
+        active=tuple(k for k in _active_features(past) if k not in set(exclude_features))
         if not active:continue
         model=_model(kind);model.fit(_features(past,active),np.asarray([classes.index(r["label_vol"]) for r in past]))
         raw=model.predict_proba(_features([eval_rows[i] for i in idx],active)); cls=list(model.classes_)
@@ -349,11 +409,28 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
         "p_down_p10_p50_p90":np.percentile(probs[:,0],[10,50,90]).tolist(),
         "p_sideways_p10_p50_p90":np.percentile(probs[:,1],[10,50,90]).tolist()}}
 
-def run_expanded_direction_audit():
+def _ablation_period_summary(result,policy_key):
+    metrics=result.get("metrics") or {}
+    policies=result.get("buy_policy_candidates") or {}
+    policy=policies.get(policy_key) if policy_key else None
+    return {"n":result.get("n",0),"accuracy_pct":metrics.get("accuracy_pct"),
+      "majority_class_baseline_accuracy_pct":metrics.get("majority_class_baseline_accuracy_pct"),
+      "multiclass_log_loss":metrics.get("multiclass_log_loss"),
+      "constant_prior_entropy_nats":metrics.get("constant_prior_entropy_nats"),
+      "class_brier":metrics.get("class_brier"),"class_ece":metrics.get("class_ece"),
+      "selected_policy":policy_key,"policy_metrics":policy}
+
+def _training_rows_for(cohort,pool,pool63):
+    """Use same-cohort ordinary US equities to train the SOXL audit model."""
+    return pool if cohort=="US" else pool63
+
+def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,macro_frames=None,macro_diagnostics=None):
     from concurrent.futures import ThreadPoolExecutor, as_completed
     universe=_ticker_set(); audit=_audit_symbols(universe); rows=[]; loaded=[]; failures=[]; special_eval={}
+    flow_frames=flow_frames or {};flow_source_coverage=flow_source_coverage or {}
     sources=universe.pop("universe_sources",{}); universe_errors=universe.pop("universe_errors",{})
     jobs=[(c,item) for c,items in universe.items() for item in items]
+    frames_by_cohort={c:{} for c in universe}
     with ThreadPoolExecutor(max_workers=12) as pool:
       futs={pool.submit(get_historical_prices,item[0],item[2],start_date=SAMPLE_START,min_bars=250):(cohort,item)
             for cohort,item in jobs}
@@ -363,29 +440,40 @@ def run_expanded_direction_audit():
             frame,source=fut.result()
             first=pd.Timestamp(frame.index.min()).date().isoformat()
             if pd.Timestamp(frame.index.max()).date().isoformat()<HOLDOUT_END:raise ValueError("history ends before fixed HOLDOUT_END")
+            frames_by_cohort[cohort][ticker]=frame
             made=_make_rows(frame,ticker,market,cohort);rows.extend(made)
             loaded.append({"ticker":ticker,"cohort":cohort,"first_date":first,"source":source,"rows":len(made)})
         except Exception as exc:failures.append({"ticker":ticker,"cohort":cohort,"reason":str(exc)[:220]})
-    rows=_rank_features(rows)
     audit_tickers=set().union(*audit.values())
-    bycohort={c:[r for r in rows if r["cohort"]==c] for c in universe}
     # Keep the mandated leveraged ETF in the 63-instrument evaluation. It is
     # never mixed into the ordinary-US cross-section used to train the model.
     for ticker,name,market in _mandatory_market_items(MANDATORY_US,"US"):
         try:
             frame,source=get_historical_prices(ticker,market,start_date=SAMPLE_START,min_bars=250)
+            frames_by_cohort.setdefault("US",{})[ticker]=frame
             special_eval.setdefault("US",[]).extend(_make_rows(frame,ticker,market,"US"))
             loaded.append({"ticker":ticker,"cohort":"US_eval_only","first_date":str(frame.index.min().date()),"source":source,"rows":len(special_eval["US"])})
         except Exception as exc:failures.append({"ticker":ticker,"cohort":"US_eval_only","reason":str(exc)[:220]})
     for ticker,name,market in _mandatory_market_items(MANDATORY_KR,"KR"):
         try:
             frame,source=get_historical_prices(ticker,market,start_date=SAMPLE_START,min_bars=250)
+            frames_by_cohort.setdefault("TIGER_ETF",{})[ticker]=frame
             special_eval.setdefault("TIGER_ETF",[]).extend(_make_rows(frame,ticker,market,"TIGER_ETF"))
             loaded.append({"ticker":ticker,"cohort":"TIGER_ETF_eval_only","first_date":str(frame.index.min().date()),"source":source,"rows":len(special_eval["TIGER_ETF"])})
         except Exception as exc:failures.append({"ticker":ticker,"cohort":"TIGER_ETF_eval_only","reason":str(exc)[:220]})
-    # ETF ranks are only within the two audited ETFs on the same date.
+    # Same-date US cross-sectional ranks include SOXL as a benchmark member;
+    # ETF-only ranks remain within the frozen two-ETF cohort.
+    us_symbols={r["ticker"] for r in special_eval.get("US",[])}
+    rows=_rank_features(rows+special_eval.get("US",[]))
+    special_eval["US"]=[r for r in rows if r["ticker"] in us_symbols and r["cohort"]=="US"]
+    rows=[r for r in rows if r["ticker"] not in us_symbols]
+    bycohort={c:[r for r in rows if r["cohort"]==c] for c in universe}
+    special_eval["TIGER_ETF"]=_rank_features(special_eval.get("TIGER_ETF",[]))
+    if macro_frames is None:
+        macro_frames,macro_diagnostics=get_market_series_bundle(start_date=SAMPLE_START,end_date=HOLDOUT_END)
+    _attach_context_features(rows,frames_by_cohort,macro_frames,flow_frames)
     for c in ("US","TIGER_ETF"):
-        special_eval[c]=_rank_features(special_eval.get(c,[]))
+        _attach_context_features(special_eval.get(c,[]),{c:frames_by_cohort.get(c,{})},macro_frames,flow_frames)
     volatility_k=_freeze_volatility_labels(rows+special_eval.get("US",[])+special_eval.get("TIGER_ETF",[]))
     bycohort={c:[r for r in rows if r["cohort"]==c] for c in universe}
     equity_loaded=sum(1 for row in loaded if row.get("cohort") in universe)
@@ -393,9 +481,17 @@ def run_expanded_direction_audit():
       "evaluation_only_loaded":len(loaded)-equity_loaded,
       "failures":failures,"loaded_tickers":loaded,"training_pool_candidate_rows":{c:len(v) for c,v in bycohort.items()},
       "universe_sources":sources,"universe_lookup_errors":universe_errors,
-      "audit63_scored_symbols":{c:len(set(r["ticker"] for r in v)&audit.get(c,set())) for c,v in bycohort.items()},
+      "audit63_scored_symbols":{c:len((set(r["ticker"] for r in v)|
+          (set(r["ticker"] for r in special_eval.get("US",[])) if c=="US" else set()))&audit.get(c,set()))
+          for c,v in bycohort.items()},
       "frozen_audit_benchmark":{c:list(v) for c,v in AUDIT_63_BENCHMARK.items()},
-      "benchmark_missing_from_training_pool":{c:sorted(set(AUDIT_63_BENCHMARK.get(c,()))-set(x["ticker"] for x in bycohort.get(c,[]))) for c in bycohort},
+      "benchmark_missing_from_training_pool":{c:sorted(set(AUDIT_63_BENCHMARK.get({"US":"SOXL"}.get(c,c),()))-
+          set(x["ticker"] for x in bycohort.get(c,[]))) for c in bycohort},
+      "benchmark_evaluation_coverage":{"US":{"benchmark_key":"SOXL","evaluation_only_tickers":sorted({r["ticker"] for r in special_eval.get("US",[])}),
+          "training_pool_exclusion_reason":"SOXL is retained as the 63-symbol evaluation instrument and excluded from the ordinary-US training pool."}},
+      "flow_collection_coverage":flow_source_coverage,
+      "macro_series_diagnostics":macro_diagnostics or {},
+      "feature_point_in_time":"All row features use signal-day close or earlier. Direction3 macro features use strict prior US session closes for VIX, USD/KRW, S&P 500, SOX; cohort-local Korean index features use the signal-day Korean close.",
       "cross_sectional_scope":"same signal date and same cohort only; missing symbols are excluded from that date rank",
       "periods":{"development_end":TRAIN_END,"validation_end":VALID_END,"diagnostic_end":HOLDOUT_END}},
       "label_variants":{"entry":"t+1 open","exit":"t+h close","horizons":list(HORIZONS),
@@ -409,17 +505,33 @@ def run_expanded_direction_audit():
         eval_rows=[r for r in pool if r["ticker"] in audit.get(cohort,set())]
         eval_rows.extend(special_eval.get(cohort,[]))
         pool63=[r for r in eval_rows]
+        # SOXL is evaluation-only; selection and every forecast for it must be
+        # trained from the available ordinary-US cohort, never the 162-row ETF.
+        selection_training=_training_rows_for(cohort,pool,pool63)
         choices=[];development_cache={}
         for horizon in HORIZONS:
           for model in ("multinomial_logistic","random_forest"):
-            dev=_backtest_model(eval_rows,pool63,model,horizon,"development")
+            dev=_backtest_model(eval_rows,selection_training,model,horizon,"development")
             development_cache[(model,horizon)]=dev
             met=dev.get("metrics") or {}; ic=met.get("datewise_spearman_mean"); top=met.get("top15_mean_net_pct")
             score=(float(ic)+.01*float(top)) if ic is not None and top is not None and met.get("top15_n",0)>=100 else -1e9
             choices.append((score,model,horizon))
-        eligible_choices=[x for x in choices if x[0]>0 and (development_cache[(x[1],x[2])].get("metrics") or {}).get("datewise_spearman_mean",0)>0]
+        if cohort=="US":
+            # Diagnostics must still score evaluation-only SOXL from the full
+            # ordinary-US training pool even when no development edge exists.
+            # This selects a diagnostic model only; the independent no-edge
+            # gate below still prevents a buy policy from being selected.
+            eligible_choices=[x for x in choices if x[0]>-1e8 and (development_cache[(x[1],x[2])].get("n",0)>0)]
+        else:
+            eligible_choices=[x for x in choices if x[0]>0 and (development_cache[(x[1],x[2])].get("metrics") or {}).get("datewise_spearman_mean",0)>0]
         chosen=max(eligible_choices,default=(-1e9,None,None))
+        chosen_ic=((development_cache[(chosen[1],chosen[2])].get("metrics") or {}).get("datewise_spearman_mean")
+                   if chosen[1] is not None else None)
         cohort_report={"selected_model_development_only":chosen[1],"selected_horizon_development_only":chosen[2],
+          "training_pool_scope":"available full ordinary-US equity cohort; SOXL is evaluation-only" if cohort=="US" else "63 audit cohort for selection; full cohort reported as separate training comparison",
+          "selected_development_datewise_spearman":chosen_ic,
+          "model_selection_status":"DEVELOPMENT_EDGE_SELECTED" if chosen[1] is not None and chosen_ic is not None and chosen_ic>0 else
+            ("DIAGNOSTIC_MODEL_SELECTED_NO_DEVELOPMENT_EDGE" if chosen[1] is not None else "NO_MODEL_WITH_NONZERO_DEVELOPMENT_N"),
           "selected_model_horizon_development_score":chosen[0],"development_model_grid":{
             f"{model}_h{h}":{"datewise_spearman_mean":(v.get("metrics") or {}).get("datewise_spearman_mean"),
               "datewise_spearman_n_days":(v.get("metrics") or {}).get("datewise_spearman_n_days"),
@@ -432,9 +544,10 @@ def run_expanded_direction_audit():
           "universe_comparison":{},"periods":{}}
         for fit_name,training in (("63_audit_symbols",pool63),("available_full_universe",pool)):
           comparisons={};chosen_policy=None;threshold_source=None
+          training=_training_rows_for(cohort,pool,pool63)
           if chosen[1] is not None:
             h=chosen[2]
-            dev=(development_cache[(chosen[1],h)] if fit_name=="63_audit_symbols" else
+            dev=(development_cache[(chosen[1],h)] if fit_name=="63_audit_symbols" and cohort!="US" else
                  _backtest_model(eval_rows,training,chosen[1],h,"development"))
             dev_payoffs=dev.get("class_payoffs_from_development") or _class_payoffs([r for r in training if r["horizon"]==h and r["label_available_date"]<TRAIN_END])
             dev_grid=dev.get("buy_policy_candidates",{})
@@ -464,6 +577,33 @@ def run_expanded_direction_audit():
           if chosen[1] is not None:
             cohort_report.setdefault("calibration_by_universe",{})[fit_name]=threshold_source["calibration"]
           cohort_report.setdefault("policy_selection_status_by_universe",{})[fit_name]=("DEVELOPMENT_POLICY_SELECTED" if chosen_policy else "NO_DEVELOPMENT_EDGE")
+        # Feature ablation reuses the selected model, horizon, label, and
+        # development-selected policy threshold. Only flow inputs are removed;
+        # validation/diagnostic are reported, never used for reselection.
+        if chosen[1] is not None:
+            h=chosen[2];base_dev=development_cache[(chosen[1],h)]
+            policy_key=(cohort_report.get("selected_policy_thresholds") or {}).get("policy")
+            ablation={"same_model":chosen[1],"same_horizon":h,"excluded_features":list(FLOW_FEATURES),
+              "policy_threshold_source":"with-flow development selection; unchanged for no-flow ablation",
+              "policy_key":policy_key,"periods":{}}
+            noflow_dev=_backtest_model(eval_rows,selection_training,chosen[1],h,"development",exclude_features=FLOW_FEATURES)
+            noflow_temp=noflow_dev.get("temperature");noflow_payoffs=noflow_dev.get("class_payoffs_from_development")
+            for period,raw_with in (("development",base_dev),):
+                raw_without=noflow_dev
+                ablation["periods"][period]={"with_flow":_ablation_period_summary(raw_with,policy_key),
+                    "without_flow":_ablation_period_summary(raw_without,policy_key)}
+            for period in ("validation","diagnostic"):
+                train_for=_training_rows_for(cohort,pool,pool63)
+                raw_with=(development_cache[(chosen[1],h)] if period=="development" else
+                    _backtest_model(eval_rows,train_for,chosen[1],h,period,
+                      temperature_info=base_dev.get("temperature"),payoffs=base_dev.get("class_payoffs_from_development")))
+                raw_without=_backtest_model(eval_rows,train_for,chosen[1],h,period,
+                    temperature_info=noflow_temp,payoffs=noflow_payoffs,exclude_features=FLOW_FEATURES)
+                ablation["periods"][period]={"with_flow":_ablation_period_summary(raw_with,policy_key),
+                    "without_flow":_ablation_period_summary(raw_without,policy_key)}
+            cohort_report["flow_ablation"]=ablation
+        else:
+            cohort_report["flow_ablation"]={"status":"NO_DEVELOPMENT_MODEL_SELECTED","same_model_comparison":False}
         cohort_report["policy_status"]=("SELECTED_ON_DEVELOPMENT_ONLY" if any(v for d in cohort_report.get("selected_buy_cut_by_development",{}).values() for v in d.values())
           else ("DEVELOPMENT_POLICY_SELECTED" if chosen[1] is not None and cohort_report.get("selected_policy_thresholds",{}).get("policy") else "NO_DEVELOPMENT_EDGE"))
         cohort_report["selected_model_policy_validation_diagnostic"]={name:cohort_report["universe_comparison"].get(name,{}) for name in ("63_audit_symbols","available_full_universe")}

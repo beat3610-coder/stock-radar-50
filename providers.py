@@ -10,6 +10,11 @@ from engine import normalize
 PRICE_CACHE = Path(os.environ.get("STOCK_RADAR_PRICE_CACHE", ".cache/stock-radar/prices"))
 RETRY_DELAYS = (0.5, 1.0)
 
+class HistoricalFlowError(RuntimeError):
+    def __init__(self,message,diagnostics):
+        super().__init__(message)
+        self.diagnostics=diagnostics
+
 def _cache_path(code, market, start):
     key=hashlib.sha256(f"{market}:{code}:{start}".encode()).hexdigest()[:24]
     return PRICE_CACHE/f"{key}.csv"
@@ -207,35 +212,120 @@ def get_market_series_bundle(*,start_date="2016-01-01",end_date=None):
     return frames,diagnostics
 
 
-def get_historical_investor_flows(code,*,start_date="2016-01-01",end_date=None):
-    """Cached daily KRX investor net-buy share history; raises with source detail."""
-    end=(dt.date.today()+dt.timedelta(days=1)).isoformat() if end_date is None else str(pd.Timestamp(end_date).date())
+def get_historical_investor_flows(code,*,start_date="2015-12-01",end_date=None):
+    """Fetch/cache dated foreign/institution share flows from Naver's free API.
+
+    The API returns ten trading sessions at a time. ``bizdate`` walks backward
+    from the oldest returned session, so this collector can build an auditable
+    2015+ history without KRX credentials or a paid feed. Partial histories are
+    returned with diagnostics; callers must preserve missing values as NaN.
+    """
+    import logging
+    import requests
+    code=str(code).strip().zfill(6)
+    start=pd.Timestamp(start_date).normalize()
+    end=(pd.Timestamp(dt.date.today()) if end_date is None else pd.Timestamp(end_date)).normalize()
     cache_root=PRICE_CACHE.parent/"flows";cache_root.mkdir(parents=True,exist_ok=True)
-    key=hashlib.sha256(f"{code}:{start_date}:{end}".encode()).hexdigest()[:24]
-    path=cache_root/f"{key}.csv"
+    path=cache_root/f"naver_{code}.csv";meta_path=path.with_suffix(".json")
+    cached=pd.DataFrame(columns=["foreign_net_shares","institution_net_shares"])
     if path.exists():
         try:
             cached=pd.read_csv(path,index_col=0,parse_dates=True)
-            cached.index=pd.to_datetime(cached.index)
+            cached.index=pd.to_datetime(cached.index).tz_localize(None).normalize()
             cached=cached.apply(pd.to_numeric,errors="coerce").dropna(how="all")
-            if not cached.empty:return cached,"validated local KRX investor-flow cache"
-        except Exception:pass
-    try:
-        from pykrx import stock
-        start=pd.Timestamp(start_date).strftime("%Y%m%d");finish=pd.Timestamp(end).strftime("%Y%m%d")
-        data=stock.get_market_trading_volume_by_date(start,finish,str(code).zfill(6),on="순매수")
-        if data is None or data.empty:raise ValueError("KRX returned an empty investor-flow frame")
-        ins=next((col for col in data.columns if "기관합계" in str(col)),None)
-        foreign=next((col for col in data.columns if "외국인합계" in str(col) or str(col)=="외국인"),None)
-        if ins is None or foreign is None:
-            raise ValueError(f"KRX investor-flow columns missing: {list(data.columns)}")
-        frame=data[[ins,foreign]].copy();frame.columns=["institution_net_shares","foreign_net_shares"]
-        frame.index=pd.to_datetime(frame.index);frame=frame.apply(pd.to_numeric,errors="coerce").dropna(how="all").sort_index()
-        if len(frame)<250:raise ValueError(f"KRX daily-flow history too short: {len(frame)} observations")
+            cached=cached[~cached.index.duplicated(keep="last")].sort_index()
+        except Exception:
+            cached=pd.DataFrame(columns=["foreign_net_shares","institution_net_shares"])
+    rows=cached.to_dict("index") if not cached.empty else {}
+    requests_n=0;attempts=[];failures=[];pages=0
+    session=requests.Session()
+    session.headers.update({"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36",
+        "Referer":"https://m.stock.naver.com/","Accept":"application/json, text/plain, */*"})
+
+    def parse_count(value):
+        if value is None:return float("nan")
+        text=str(value).replace(",","").replace("+","").strip()
+        return float(text) if text else float("nan")
+
+    # Refresh the recent edge when cache is stale; then page back until the
+    # requested historical boundary or a genuinely partial provider response.
+    recent_missing=(not rows or max(rows)<end-pd.Timedelta(days=7))
+    cursors=[None] if recent_missing else []
+    oldest=pd.Timestamp(min(rows)) if rows else None
+    if oldest is not None and oldest>start and not recent_missing:
+        cursors.append(oldest.strftime("%Y%m%d"))
+    seen_cursors=set()
+    while cursors:
+        cursor=cursors.pop(0)
+        if cursor in seen_cursors:continue
+        seen_cursors.add(cursor)
+        params={} if cursor is None else {"bizdate":cursor}
+        payload=None
+        for attempt in range(1,4):
+            requests_n+=1
+            try:
+                response=session.get(f"https://m.stock.naver.com/api/stock/{code}/trend",params=params,timeout=15)
+                if response.status_code in (429,500,502,503,504):
+                    raise requests.HTTPError(f"HTTP {response.status_code}",response=response)
+                response.raise_for_status();payload=response.json()
+                if not isinstance(payload,list):raise ValueError(f"unexpected JSON shape {type(payload).__name__}")
+                break
+            except Exception as exc:
+                message=f"cursor={cursor or 'latest'} try={attempt}: {type(exc).__name__}: {str(exc)[:140]}"
+                attempts.append(message)
+                if attempt<3:time.sleep(.35*(2**(attempt-1)))
+        if payload is None:
+            failures.append(attempts[-1] if attempts else "request failed")
+            break
+        page_rows=[]
+        for item in payload:
+            try:
+                day=pd.to_datetime(str(item["bizdate"]),format="%Y%m%d").normalize()
+                foreign=parse_count(item.get("foreignerPureBuyQuant"))
+                institution=parse_count(item.get("organPureBuyQuant"))
+                if day<=end and (pd.notna(foreign) or pd.notna(institution)):
+                    page_rows.append((day,foreign,institution))
+            except (KeyError,ValueError,TypeError):continue
+        pages+=1
+        if not page_rows:
+            failures.append(f"cursor={cursor or 'latest'}: empty/invalid trend rows")
+            break
+        before=len(rows)
+        for day,foreign,institution in page_rows:
+            rows[day]={"foreign_net_shares":foreign,"institution_net_shares":institution}
+        page_oldest=min(row[0] for row in page_rows)
+        if page_oldest<=start or len(rows)==before:
+            if page_oldest>start and len(rows)==before:failures.append(f"cursor={cursor}: no pagination progress")
+            break
+        next_cursor=page_oldest.strftime("%Y%m%d")
+        if next_cursor==cursor:
+            failures.append(f"cursor={cursor}: provider cursor did not move")
+            break
+        cursors.append(next_cursor)
+        # Persist every successful page so an interrupted run resumes at the
+        # cached oldest date instead of repeating completed requests.
+        frame=pd.DataFrame.from_dict(rows,orient="index").sort_index()
+        frame.index=pd.to_datetime(frame.index)
         frame.to_csv(path,index_label="Date")
-        return frame,"pykrx KRX daily investor net-buy shares"
-    except Exception as exc:
-        raise RuntimeError(f"historical KRX investor flow unavailable for {code}: {type(exc).__name__}: {str(exc)[:180]}") from exc
+
+    frame=pd.DataFrame.from_dict(rows,orient="index")
+    if not frame.empty:
+        frame.index=pd.to_datetime(frame.index).normalize()
+        frame=frame.apply(pd.to_numeric,errors="coerce").sort_index()
+        frame=frame.loc[(frame.index>=start)&(frame.index<=end)]
+        frame=frame[~frame.index.duplicated(keep="last")]
+    diagnostics={"ticker":code,"source":"Naver mobile stock trend API","source_url":f"https://m.stock.naver.com/api/stock/{code}/trend",
+      "requested_start":str(start.date()),"requested_end":str(end.date()),"first_date":str(frame.index.min().date()) if not frame.empty else None,
+      "last_date":str(frame.index.max().date()) if not frame.empty else None,"rows_n":len(frame),"requests_n":requests_n,
+      "pages_n":pages,"attempted":requests_n>0 or path.exists(),"available":not frame.empty,"failures":failures,"retry_log":attempts}
+    if not frame.empty:
+        frame.to_csv(path,index_label="Date")
+    meta_path.write_text(json.dumps(diagnostics,ensure_ascii=False,indent=2),encoding="utf-8")
+    frame.attrs["collection_diagnostics"]=diagnostics
+    if frame.empty:
+        logging.getLogger("stock_radar.flows").error("Naver historical investor flow unavailable %s: %s",code,diagnostics)
+        raise HistoricalFlowError("Naver mobile API returned no usable investor-flow rows: "+" | ".join(failures or attempts[-3:] or ["empty range/cache"]),diagnostics)
+    return frame,"Naver mobile stock trend API (foreign/institution net-buy shares)"
 
 
 def verify_recent_close(code, market, primary_date, primary_price, primary_source,
