@@ -279,12 +279,21 @@ class DisclosureTests(unittest.TestCase):
         self.assertFalse(result["diagnostics"]["attempted"])
         self.assertEqual(result["diagnostics"]["requests_n"],0)
         self.assertIn("manual disclosure-warmup workflow",result["diagnostics"]["reason"])
-        self.assertEqual(_disclosure_failure_reasons_top({"005930":result}),[])
-        self.assertEqual(_disclosure_failure_reasons_top({}),[])
+        self.assertEqual(_disclosure_failure_reasons_top({"005930":result}),
+                         {"failure_reasons_top5":[],"cache_missing_symbols_n":1})
+        self.assertEqual(_disclosure_failure_reasons_top({}),
+                         {"failure_reasons_top5":[],"cache_missing_symbols_n":0})
         failed=dict(result)
         failed["diagnostics"]={**result["diagnostics"],"failures":["RuntimeError: cache read"]}
         self.assertEqual(_disclosure_failure_reasons_top({"005930":failed}),
-                         [{"reason":"RuntimeError","count":1}])
+                         {"failure_reasons_top5":[{"reason":"RuntimeError","count":1}],
+                          "cache_missing_symbols_n":1})
+        failed["diagnostics"]={**result["diagnostics"],
+            "failures":["No warmup cache; use the manual disclosure-warmup workflow.",
+                        "HTTPError: HTTP 503 Service Unavailable"]}
+        self.assertEqual(_disclosure_failure_reasons_top({"005930":failed}),
+                         {"failure_reasons_top5":[{"reason":"HTTP 503","count":1}],
+                          "cache_missing_symbols_n":1})
 
     def test_risk_off_gate_removes_legacy_entries_and_fundamentals_are_not_evaluated(self):
         rows=[{"ticker":"A","entry_date":"2025-01-02","exit_date":"2025-01-05","market_regime":"RISK_OFF"},

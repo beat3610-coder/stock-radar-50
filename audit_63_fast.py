@@ -1018,9 +1018,21 @@ def _disclosure_bad_title_counts(items,disclosure_by_ticker,limit=10):
 
 def _disclosure_failure_reasons_top(disclosure_by_ticker,limit=5):
     counts=Counter()
-    for result in disclosure_by_ticker.values():
-        for failure in result.get("diagnostics",{}).get("failures",[]):
-            message=str(failure)
+    cache_missing_symbols=set()
+    cache_markers=("no warmup cache","cache-only","cache only")
+    for ticker,result in disclosure_by_ticker.items():
+        diagnostics=result.get("diagnostics",{})
+        failures=[str(failure) for failure in diagnostics.get("failures",[])]
+        status_messages=[str(diagnostics.get("reason", "")),*failures]
+        if any(marker in message.lower() for message in status_messages for marker in cache_markers):
+            cache_missing_symbols.add(str(ticker))
+        for message in failures:
+            lower=message.lower()
+            normal_cache_status=any(marker in lower for marker in cache_markers)
+            actual_failure=(re.search(r"HTTP(?:Error)?:\s*HTTP\s*\d{3}",message,re.I)
+                or any(marker in lower for marker in ("sslerror","connectionerror","remotedisconnected","timeout")))
+            if normal_cache_status and not actual_failure:
+                continue
             status=re.search(r"HTTP(?:Error)?:\s*HTTP\s*(\d{3})",message,re.I)
             if status:reason=f"HTTP {status.group(1)}"
             elif "SSLError" in message:reason="SSLError"
@@ -1030,8 +1042,9 @@ def _disclosure_failure_reasons_top(disclosure_by_ticker,limit=5):
             elif "reached page cap" in message:reason="Page cap reached"
             else:reason=message.split(":",1)[0][:100] or "Unknown failure"
             counts[reason]+=1
-    return [{"reason":reason,"count":count}
-        for reason,count in sorted(counts.items(),key=lambda item:(-item[1],item[0]))[:limit]]
+    return {"failure_reasons_top5":[{"reason":reason,"count":count}
+        for reason,count in sorted(counts.items(),key=lambda item:(-item[1],item[0]))[:limit]],
+        "cache_missing_symbols_n":len(cache_missing_symbols)}
 
 
 def _focused_liquidity_ranking(cohort,items,frames):
@@ -1336,7 +1349,7 @@ def run():
         "requested_start":"2015-12-01","requested_end":MIN_END_DATE,
         "throttling":"DART HTTP 503 under bulk collection; cache resumes failed year-pages on later runs",
         "partial_symbols_n":len(disclosure_collection.get("partial_symbols",[])),
-        "failure_reasons_top5":_disclosure_failure_reasons_top(disclosure_by_ticker,limit=5),
+        **_disclosure_failure_reasons_top(disclosure_by_ticker,limit=5),
         "by_ticker":{code:{"first_date":v.get("diagnostics",{}).get("first_date"),
             "last_date":v.get("diagnostics",{}).get("last_date"),"rows_n":len(v.get("records",[])),
             "requests_n":v.get("diagnostics",{}).get("requests_n",0),
