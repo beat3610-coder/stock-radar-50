@@ -5,6 +5,7 @@ are scored prequentially, and model configuration/policy selection uses only
 development observations. This file is research-only and never approves live use.
 """
 import json
+from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -21,7 +22,8 @@ from predictive_model import CONFIGS, DEFAULT_CONFIG, prepare_snapshot, predict_
 from audit_300 import metrics
 from market_context import build_market_context, REGIME_RULE, INDEX_FOR_COHORT
 from disclosures import (collect_company_disclosures,disclosure_features_for_signal,
-                         BAD_KEYWORDS,POSITIVE_KEYWORDS,PERIODIC_KEYWORDS)
+                         BAD_KEYWORDS,BAD_TITLE_EXCLUSIONS,bad_disclosure_keyword_matches,
+                         POSITIVE_KEYWORDS,PERIODIC_KEYWORDS)
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from r_rank_model import (FEATURE_GROUPS, NUMERIC_FEATURES, CENTERS, SCALES, STRATEGIES,
                           MIN_TRAIN_SAMPLES_BY_COHORT, MODEL_CONFIGS, accepts as r_accepts,
@@ -889,6 +891,21 @@ def _regime_trade_metrics(trades):
         out[regime]=_trade_metrics(group)
     return out
 
+def _disclosure_bad_title_counts(items,disclosure_by_ticker,limit=10):
+    counts=Counter();matched_by_title={};seen=set()
+    for item in items:
+        ticker=str(item[0])
+        if ticker in seen:continue
+        seen.add(ticker)
+        for row in disclosure_by_ticker.get(ticker,{}).get("records",[]):
+            title=str(row.get("title", "")).strip()
+            matches=bad_disclosure_keyword_matches(title)
+            if matches:
+                counts[title]+=1
+                matched_by_title[title]=list(matches)
+    return [{"title":title,"count":count,"matched_keywords":matched_by_title[title]}
+        for title,count in sorted(counts.items(),key=lambda item:(-item[1],item[0]))[:limit]]
+
 def _model_diagnostics(rows):
     return {"r_rank_metrics":_rank_metrics(rows),"auroc":_auc(rows),
             "brier":_brier(rows,"model_probability"),"ece":_calibration(rows).get("ece"),
@@ -913,6 +930,7 @@ def run():
             "fixed_scale":True,"evaluation_period_scaling":False},
         "regime_distribution":{},"regime_performance":{},"ablation":{},
         "feature_coverage":{},"target_variants":{},"policy_comparison":{},"policy_ladder":{},
+        "disclosure_coverage":{},
         "direction3_role":"diagnostic_only; all buy decisions come exclusively from the legacy policy ladder",
         "frozen_audit_benchmark":{k:list(v) for k,v in AUDIT_63_BENCHMARK.items()},
         "feature_schema":{"version":"macro-relative-flow-v1","groups":{k:list(v) for k,v in FEATURE_GROUPS.items()},
@@ -1069,10 +1087,14 @@ def run():
                     if np.isfinite(value):observed.append(value)
                 disclosure_coverage[period_name][feature]={"rows_n":len(period_candidates),
                     "non_missing_n":len(observed),"non_missing_pct":round(100*len(observed)/len(period_candidates),2) if period_candidates else 0.0}
-        out.setdefault("disclosure_feature_coverage",{})[cohort]={
+        disclosure_coverage_summary={
             "periods":disclosure_coverage,"data_missing_tickers":missing_disclosure_tickers,
             "available_symbols_n":len(items)-len(missing_disclosure_tickers),"requested_symbols_n":len(items),
-            "abstain_when_unavailable":True}
+            "abstain_when_unavailable":True,
+            "bad_title_keywords":list(BAD_KEYWORDS),"bad_title_exclusions":list(BAD_TITLE_EXCLUSIONS),
+            "disclosure_bad_title_counts":_disclosure_bad_title_counts(items,disclosure_by_ticker,limit=10)}
+        out.setdefault("disclosure_coverage",{})[cohort]=disclosure_coverage_summary
+        out.setdefault("disclosure_feature_coverage",{})[cohort]=disclosure_coverage_summary
         development_rows=_period(eligible_rows,"development")
         all_development_feature_rows.extend(development_rows)
         feature_coverage,excluded_features=_feature_coverage(development_rows)

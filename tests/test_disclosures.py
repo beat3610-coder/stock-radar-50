@@ -6,9 +6,11 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 
-from audit_63_fast import (_legacy_policy_stage,_not_evaluated_fundamental_stage)
+from audit_63_fast import (_legacy_policy_stage,_not_evaluated_fundamental_stage,
+                           _disclosure_bad_title_counts)
 from disclosures import (collect_company_disclosures,disclosure_features_for_signal,
-                         get_company_disclosures,parse_disclosure_html)
+                         get_company_disclosures,parse_disclosure_html,
+                         bad_disclosure_keyword_matches)
 
 
 FIXTURE="""<table><tr><th>접수일자</th><th>공시대상회사</th><th>보고서명</th><th>제출인</th></tr>
@@ -35,6 +37,29 @@ class DisclosureTests(unittest.TestCase):
         self.assertEqual(result["disclosure_positive_20d"],0)
         self.assertEqual(result["disclosure_periodic_days_since"],1)
         self.assertTrue(np.isnan(disclosure_features_for_signal(records,"2026-01-05",idx,available=False)["disclosure_bad_60d"]))
+
+    def test_bad_titles_use_specific_terms_and_explicit_exclusions(self):
+        ordinary_share_change="최대주주등소유주식변동신고서"
+        foreign_delisting="주요사항보고서(해외증권시장주권등상장폐지결정)"
+        self.assertEqual(bad_disclosure_keyword_matches(ordinary_share_change),())
+        self.assertEqual(bad_disclosure_keyword_matches(foreign_delisting),())
+        self.assertEqual(bad_disclosure_keyword_matches("임원ㆍ주요주주 소유주식변동"),())
+        self.assertEqual(bad_disclosure_keyword_matches("주요주주 주식변동"),())
+        self.assertTrue(bad_disclosure_keyword_matches("유상증자결정"))
+        self.assertIn("전환사채권발행결정",bad_disclosure_keyword_matches("전환사채권발행결정"))
+        self.assertIn("최대주주 변경",bad_disclosure_keyword_matches("최대주주 변경 결정"))
+
+    def test_bad_title_counts_are_reported_by_cohort_input_and_exclude_false_hits(self):
+        ticker="005930"
+        docs={ticker:{"records":[
+            {"title":"최대주주등소유주식변동신고서"},
+            {"title":"주요사항보고서(해외증권시장주권등상장폐지결정)"},
+            {"title":"유상증자결정"},{"title":"유상증자결정"},
+            {"title":"전환사채권발행결정"}]}}
+        result=_disclosure_bad_title_counts([(ticker,"삼성전자","KR","IT")],docs)
+        self.assertEqual(result,[
+            {"title":"유상증자결정","count":2,"matched_keywords":["유상증자"]},
+            {"title":"전환사채권발행결정","count":1,"matched_keywords":["전환사채권발행결정"]}])
 
     def test_ten_year_span_is_requested_as_calendar_years(self):
         class Response:

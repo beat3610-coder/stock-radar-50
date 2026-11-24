@@ -16,11 +16,21 @@ DISCLOSURE_URL="https://dart.fss.or.kr/dsab007/detailSearch.ax"
 DEFAULT_CACHE=Path(".cache/stock-radar/disclosures")
 MAX_PAGES_PER_COMPANY_YEAR=30
 MAX_RESULTS=100
-BAD_KEYWORDS=("유상증자","전환사채","신주인수권","횡령","배임","감사의견","관리종목",
- "상장폐지","불성실공시","영업정지","채무불이행","소송","최대주주","공급계약 해지")
+BAD_KEYWORDS=("유상증자","전환사채권발행결정","신주인수권부사채","횡령","배임",
+ "감사의견 거절","의견거절","관리종목 지정","상장폐지사유 발생",
+ "불성실공시법인 지정","영업정지","채무불이행","최대주주 변경","최대주주변경",
+ "경영권 분쟁","소송등의 제기","공급계약 해지")
+BAD_TITLE_EXCLUSIONS=("소유주식변동신고서","임원ㆍ주요주주","주요주주","해외증권시장")
 POSITIVE_KEYWORDS=("자기주식취득","자사주취득","자기주식 취득","단일판매·공급계약체결",
  "단일판매공급계약체결","무상증자")
 PERIODIC_KEYWORDS=("사업보고서","반기보고서","분기보고서")
+
+
+def bad_disclosure_keyword_matches(title):
+    """Return predeclared bad-title matches, honoring explicit exclusions."""
+    title=str(title or "")
+    if any(term in title for term in BAD_TITLE_EXCLUSIONS):return ()
+    return tuple(term for term in BAD_KEYWORDS if term in title)
 
 
 class _DisclosureTableParser(HTMLParser):
@@ -173,8 +183,8 @@ def disclosure_features_for_signal(records,signal_date,price_index,available=Tru
     lookback_dates={window:(ix[max(0,loc-window)] if len(ix) and loc>=0 else signal-pd.Timedelta(days=window*2)) for window in (20,60)}
     recent20=[x for x in eligible if x[0]>=lookback_dates[20]]
     recent60=[x for x in eligible if x[0]>=lookback_dates[60]]
-    bad20=sum(any(word in title for word in BAD_KEYWORDS) for _,title in recent20)
-    bad60=sum(any(word in title for word in BAD_KEYWORDS) for _,title in recent60)
+    bad20=sum(bool(bad_disclosure_keyword_matches(title)) for _,title in recent20)
+    bad60=sum(bool(bad_disclosure_keyword_matches(title)) for _,title in recent60)
     positive20=sum(any(word in title for word in POSITIVE_KEYWORDS) for _,title in recent20)
     periodic=[d for d,title in eligible if any(word in title for word in PERIODIC_KEYWORDS)]
     if periodic:
