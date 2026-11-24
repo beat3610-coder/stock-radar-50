@@ -48,6 +48,42 @@ FOCUSED_MIN_DATA_COMPLETENESS=0.95
 FOCUSED_MIN_DEVELOPMENT_BARS=200
 FOCUSED_UNIVERSE_SIZES=(10,20,30)
 FOCUSED_CORE_KOSPI=("005930","000660","035420")
+DISCLOSURE_WARMUP_REQUEST_PATH=Path("data/disclosure-warmup-request.json")
+DISCLOSURE_WARMUP_MAX_BUDGET_SECONDS=2400.0
+
+
+def _run_disclosure_warmup_request():
+    """Opt-in, bounded DART cache warmup requested by a committed file.
+
+    The audit itself stays cache-only. A run that should spend part of its budget
+    filling the shared cache declares it here, so no workflow input or secret is
+    needed and the request is visible in the repository history.
+    """
+    path=DISCLOSURE_WARMUP_REQUEST_PATH
+    if not path.exists():
+        return None
+    try:
+        request=json.loads(path.read_text(encoding="utf-8"))
+    except (OSError,ValueError) as exc:
+        return {"status":"INVALID_REQUEST","error":str(exc)[:200]}
+    if not request.get("enabled"):
+        return {"status":"DISABLED","request":request}
+    budget=min(max(0.0,float(request.get("time_budget_seconds",1800))),
+        DISCLOSURE_WARMUP_MAX_BUDGET_SECONDS)
+    workers=min(3,max(1,int(request.get("workers",2))))
+    print(f"DISCLOSURE_WARMUP_REQUEST budget_seconds={budget} workers={workers} "
+          f"reason={str(request.get('reason',''))[:120]}",flush=True)
+    from disclosure_warmup import run_warmup as run_disclosure_warmup
+    report=run_disclosure_warmup(time_budget_seconds=budget,workers=workers,
+        priority_benchmark=bool(request.get("priority_benchmark",True)))
+    return {"status":"COMPLETED","request":request,"budget_seconds":budget,"workers":workers,
+        "requested_symbols":report.get("requested_symbols"),
+        "attempted_symbols":report.get("attempted_symbols"),
+        "available_symbols":report.get("available_symbols"),
+        "budget_used_seconds":report.get("budget_used_seconds"),
+        "budget_exhausted":report.get("budget_exhausted"),
+        "failures_n":len(report.get("failures") or [])}
+
 
 def _period(trades,period):
     if period=="development":
@@ -1165,7 +1201,28 @@ def _focused_recommendation(sets,baseline_dev):
         "recommended_tickers":selected,"candidate_development_table":table}
 
 
-def _focused_universe_ablation(cohorts,frames_by_cohort,policy_trades_by_cohort,policy_info):
+def _policy_stage_trade_records(ladder,legacy_choice_rows):
+    """Compact per-stage trade rows so the universe tables can be re-checked offline."""
+    stages={}
+    for stage_name in ("legacy_only","legacy_risk_off_hard_gate","legacy_risk_off_trend_filter"):
+        entry=ladder.get(stage_name) or {}
+        periods={}
+        for period in ("development","validation","diagnostic"):
+            if entry.get("status")=="EVALUATED":
+                trade_rows=_legacy_policy_stage(_period(legacy_choice_rows,period),stage_name,
+                    entry.get("params") or {})
+            else:
+                trade_rows=[]
+            periods[period]=[{"ticker":str(t.get("ticker")),"signal_date":str(t.get("signal_date")),
+                "entry_date":str(t.get("entry_date")),"exit_date":str(t.get("exit_date")),
+                "net_pct":t.get("net_pct"),"market_regime":t.get("market_regime")} for t in trade_rows]
+        stages[stage_name]={"status":entry.get("status","NOT_EVALUATED"),
+            "params":entry.get("params"),"periods":periods}
+    return stages
+
+
+def _focused_universe_ablation(cohorts,frames_by_cohort,policy_trades_by_cohort,policy_info,
+        policy_label="selected_policy"):
     rankings={}
     for cohort in ("KOSPI","KOSDAQ"):
         rankings[cohort]=_focused_liquidity_ranking(cohort,cohorts.get(cohort,[]),
@@ -1268,7 +1325,8 @@ def _focused_universe_ablation(cohorts,frames_by_cohort,policy_trades_by_cohort,
         "source":"63-symbol cohort development-only selected legacy policy; parameters frozen for all subsets"}
         for cohort in fixed}
     recommendation=_focused_recommendation(reports,reports["baseline_63"]["periods"]["development"])
-    return {"benchmark_unchanged":True,"sample_source":"already-loaded frozen 63 benchmark OHLCV only; no additional instrument fetches",
+    return {"policy_evaluated":policy_label,"benchmark_unchanged":True,
+        "sample_source":"already-loaded frozen 63 benchmark OHLCV only; no additional instrument fetches",
         "selection_rule":{"liquidity_rank":"descending median daily close×volume, development only; ticker ascending ties",
             "eligibility":{"development_window_start":FOCUSED_HISTORY_START,"development_end_exclusive":TRAIN_END,
                 "data_completeness_pct_min":FOCUSED_MIN_DATA_COMPLETENESS*100,
@@ -1276,7 +1334,7 @@ def _focused_universe_ablation(cohorts,frames_by_cohort,policy_trades_by_cohort,
                 "minimum_development_bars":FOCUSED_MIN_DEVELOPMENT_BARS},
             "universe_sizes_per_korean_cohort":list(FOCUSED_UNIVERSE_SIZES),
             "etf_soxl_always_retained":True,
-            "policy":"63-universe selected A-D policy and parameters frozen by cohort; no fitting or selection on validation/diagnostic"},
+            "policy":f"policy {policy_label} trades of the 63-symbol benchmark, filtered per subset; no refitting, no selection on validation/diagnostic"},
         "selected_policy_by_cohort":selection_info,"development_liquidity_evidence":rankings,
         "sets":reports,"recommended_universe":recommendation}
 
@@ -1305,6 +1363,7 @@ def run():
         "regime_distribution":{},"regime_performance":{},"ablation":{},
         "feature_coverage":{},"target_variants":{},"policy_comparison":{},"policy_ladder":{},
         "disclosure_coverage":{},"focused_universe_ablation":{},"recommended_universe":{},
+        "focused_universe_ablation_policy_b":{},"recommended_universe_policy_b":{},
         "direction3_role":"diagnostic_only; all buy decisions come exclusively from the legacy policy ladder",
         "frozen_audit_benchmark":{k:list(v) for k,v in AUDIT_63_BENCHMARK.items()},
         "feature_schema":{"version":"macro-relative-flow-v1","groups":{k:list(v) for k,v in FEATURE_GROUPS.items()},
@@ -1316,12 +1375,16 @@ def run():
         "portfolio":{"max_concurrent_positions":5,"weighting":"equal initial notional slots"},"cohorts":{}}
     all_flow_frames={};all_flow_sources={};all_development_feature_rows=[]
     focused_frames_by_cohort={};focused_policy_trades_by_cohort={};focused_policy_info={}
+    focused_policy_b_trades_by_cohort={};focused_policy_b_info={}
     disclosure_entries=[];seen_disclosure_tickers=set()
     for cohort in ("KOSPI","KOSDAQ"):
         for ticker,name,_,_ in cohorts[cohort]:
             if ticker not in seen_disclosure_tickers:
                 disclosure_entries.append((ticker,name));seen_disclosure_tickers.add(ticker)
     disclosure_by_ticker={}
+    disclosure_warmup= _run_disclosure_warmup_request()
+    if disclosure_warmup is not None:
+        out["disclosure_warmup_request"]=disclosure_warmup
     for ticker,name in disclosure_entries:
         result=get_cached_company_disclosures(ticker,name,start_date="2015-12-01",end_date=MIN_END_DATE)
         disclosure_by_ticker[ticker]=result
@@ -1601,6 +1664,15 @@ def run():
         focused_policy_trades_by_cohort[cohort]={period:_legacy_policy_stage(
             _period(legacy_choice_rows,period),selected_legacy_policy,selected_params_for_focus)
             for period in ("development","validation","diagnostic")}
+        # Policy B (legacy + RISK_OFF hard gate, no trend filter) keeps the validation
+        # sample alive, so the same universe sets are compared under it as well.
+        focused_policy_b_trades_by_cohort[cohort]={period:_legacy_policy_stage(
+            _period(legacy_choice_rows,period),"legacy_risk_off_hard_gate",{})
+            for period in ("development","validation","diagnostic")}
+        focused_policy_b_info[cohort]={"selected_policy":"legacy_risk_off_hard_gate",
+            "selected_parameters":{"rule":REGIME_RULE["risk_off"]}}
+        out.setdefault("policy_stage_trades",{})[cohort]=_policy_stage_trade_records(
+            ladder,legacy_choice_rows)
         out.setdefault("feature_coverage",{})[cohort]={"development_rows_n":len(development_rows),
             "by_feature":feature_coverage,"auto_excluded_constant_features":excluded_features,
             "exclusion_basis":"development candidates only; evaluation-period variation never affects feature inclusion"}
@@ -1717,6 +1789,11 @@ def run():
         focused_policy_trades_by_cohort,focused_policy_info)
     out["focused_universe_ablation"]={k:v for k,v in focused.items() if k!="recommended_universe"}
     out["recommended_universe"]=focused["recommended_universe"]
+    focused_policy_b=_focused_universe_ablation(cohorts,focused_frames_by_cohort,
+        focused_policy_b_trades_by_cohort,focused_policy_b_info,policy_label="legacy_risk_off_hard_gate")
+    out["focused_universe_ablation_policy_b"]={k:v for k,v in focused_policy_b.items()
+        if k!="recommended_universe"}
+    out["recommended_universe_policy_b"]=focused_policy_b["recommended_universe"]
     overall_flow_coverage,overall_flow_excluded=_feature_coverage(all_development_feature_rows)
     flow_feature_keys=[key for key in overall_flow_coverage if key in {
         "foreign_flow_5d_to_turnover","foreign_flow_20d_to_turnover",

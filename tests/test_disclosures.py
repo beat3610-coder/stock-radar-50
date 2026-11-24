@@ -12,11 +12,13 @@ from audit_63_fast import (_legacy_policy_stage,_not_evaluated_fundamental_stage
                            _risk_adjusted_policy_selection,
                            POLICY_SELECTION_METRIC,_focused_liquidity_ranking,
                            _focused_recommendation,_focused_universe_ablation,
-                           _disclosure_gate_input_coverage,_policy_ladder)
+                           _disclosure_gate_input_coverage,_policy_ladder,
+                           _policy_stage_trade_records)
 from universe import AUDIT_63_BENCHMARK
 from disclosures import (collect_company_disclosures,disclosure_features_for_signal,
                          get_cached_company_disclosures,get_company_disclosures,parse_disclosure_html,
                          bad_disclosure_keyword_matches)
+from disclosure_warmup import prioritize_benchmark_targets
 
 
 FIXTURE="""<table><tr><th>접수일자</th><th>공시대상회사</th><th>보고서명</th><th>제출인</th></tr>
@@ -76,6 +78,48 @@ class DisclosureTests(unittest.TestCase):
                          {cohort:list(tickers) for cohort,tickers in AUDIT_63_BENCHMARK.items()})
         self.assertEqual(result["sample_source"],
                          "already-loaded frozen 63 benchmark OHLCV only; no additional instrument fetches")
+        self.assertEqual(result["policy_evaluated"],"selected_policy")
+
+    def test_policy_b_universe_block_reuses_the_same_sets_under_another_policy(self):
+        cohorts={cohort:[(ticker,ticker,"US" if cohort=="SOXL" else "KR","")
+                         for ticker in tickers]
+                 for cohort,tickers in AUDIT_63_BENCHMARK.items()}
+        trade=lambda ticker,day:{"ticker":ticker,"signal_date":day,"entry_date":day,
+            "exit_date":"2024-01-05","net_pct":1.5,"model_expected_net_pct":0.1,
+            "market_regime":"NEUTRAL"}
+        trades={cohort:{period:[] for period in ("development","validation","diagnostic")}
+                for cohort in cohorts}
+        trades["KOSPI"]["development"]=[trade("005930","2024-01-02"),trade("000660","2024-01-02")]
+        trades["KOSPI"]["validation"]=[trade("005930","2025-12-02")]
+        priced={cohort:{ticker:pd.DataFrame({"Close":100.}
+                  ,index=pd.bdate_range("2016-01-04","2026-10-30"))
+                  for ticker in tickers} for cohort,tickers in cohorts.items()}
+        result=_focused_universe_ablation(cohorts,priced,trades,{},
+            policy_label="legacy_risk_off_hard_gate")
+        self.assertEqual(result["policy_evaluated"],"legacy_risk_off_hard_gate")
+        self.assertIn("policy legacy_risk_off_hard_gate",result["selection_rule"]["policy"])
+        self.assertEqual(result["sets"]["baseline_63"]["periods"]["development"]["trades"],2)
+        self.assertEqual(result["sets"]["baseline_63"]["periods"]["validation"]["trades"],1)
+        smaller=result["sets"]["liquidity_top_KOSPI10_KOSDAQ10"]["periods"]["validation"]
+        self.assertEqual(smaller["trades"],0)
+        self.assertFalse(result["recommended_universe"]["selection_used_validation_or_diagnostic"])
+
+    def test_policy_stage_trade_records_keep_stage_status_and_signal_time_fields(self):
+        rows=[{"ticker":"005930","signal_date":"2024-01-02","entry_date":"2024-01-02",
+               "exit_date":"2024-01-05","net_pct":1.5,"market_regime":"RISK_OFF"},
+              {"ticker":"000660","signal_date":"2024-01-02","entry_date":"2024-01-02",
+               "exit_date":"2024-01-05","net_pct":-0.5,"market_regime":"RISK_ON"}]
+        ladder={"legacy_only":{"status":"EVALUATED","params":{}},
+                "legacy_risk_off_hard_gate":{"status":"EVALUATED","params":{}},
+                "legacy_risk_off_trend_filter":{"status":"INSUFFICIENT_DEVELOPMENT_SAMPLE","params":None}}
+        records=_policy_stage_trade_records(ladder,rows)
+        development=records["legacy_only"]["periods"]["development"]
+        self.assertEqual(sorted(r["ticker"] for r in development),["000660","005930"])
+        self.assertEqual({r["signal_date"] for r in development},{"2024-01-02"})
+        self.assertEqual({r["market_regime"] for r in development},{"RISK_OFF","RISK_ON"})
+        self.assertEqual(records["legacy_risk_off_hard_gate"]["status"],"EVALUATED")
+        self.assertEqual(records["legacy_risk_off_trend_filter"]["status"],"INSUFFICIENT_DEVELOPMENT_SAMPLE")
+        self.assertEqual(records["legacy_risk_off_trend_filter"]["periods"]["development"],[])
 
     @staticmethod
     def _selection_stage(trades,mean,sequence_mdd,portfolio_mdd):
@@ -302,6 +346,27 @@ class DisclosureTests(unittest.TestCase):
         self.assertEqual([x["ticker"] for x in chosen],["B"])
         self.assertEqual(_not_evaluated_fundamental_stage()["status"],"NOT_EVALUATED")
         self.assertEqual(_not_evaluated_fundamental_stage()["periods"],{})
+
+    def test_warmup_prioritizes_the_frozen_korean_benchmark_names(self):
+        targets=[{"ticker":"999999","name":"other","cohort":"KOSPI"},
+                 {"ticker":"005930","name":"삼성전자","cohort":"KOSPI"},
+                 {"ticker":"000660","name":"SK하이닉스","cohort":"KOSPI"},
+                 {"ticker":"247540","name":"에코프로비엠","cohort":"KOSDAQ"}]
+        ordered=prioritize_benchmark_targets(targets,{"KOSPI":["000660","005930"],"KOSDAQ":["247540"]})
+        self.assertEqual([t["ticker"] for t in ordered],["000660","005930","247540","999999"])
+
+    def test_disclosure_warmup_request_stays_off_without_a_committed_request(self):
+        import audit_63_fast
+        missing=Path(tempfile.gettempdir())/"stock-radar-missing-warmup-request.json"
+        if missing.exists():missing.unlink()
+        with patch.object(audit_63_fast,"DISCLOSURE_WARMUP_REQUEST_PATH",missing):
+            self.assertIsNone(audit_63_fast._run_disclosure_warmup_request())
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"request.json"
+            path.write_text(json.dumps({"enabled":False}),encoding="utf-8")
+            with patch.object(audit_63_fast,"DISCLOSURE_WARMUP_REQUEST_PATH",path):
+                self.assertEqual(audit_63_fast._run_disclosure_warmup_request()["status"],"DISABLED")
+
 
 
 if __name__=="__main__":unittest.main()

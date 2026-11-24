@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "time_budget_seconds": 2400,
+  "workers": 2,
+  "priority_benchmark": true,
+  "reason": "PR #9 round 2026-11-24: fill the shared DART cache so policy stage D can be measured. Delete this file after the run to return the audit to cache-only behaviour."
+}

@@ -6,11 +6,29 @@ from pathlib import Path
 
 from expanded_direction_audit import _ticker_set,korean_flow_targets
 from disclosures import collect_company_disclosures,request_interval_seconds
+from universe import AUDIT_63_BENCHMARK
 
 
-def run_warmup(*,time_budget_seconds=3300,workers=2,universe=None,fetcher=None,clock=None,progress_printer=print):
+def prioritize_benchmark_targets(targets,benchmark=None):
+    """Put the frozen 63-instrument Korean benchmark names first so one short
+    warmup run can raise the coverage the audit actually reads."""
+    benchmark=AUDIT_63_BENCHMARK if benchmark is None else benchmark
+    order={}
+    for cohort in ("KOSPI","KOSDAQ"):
+        for code in benchmark.get(cohort,[]):
+            order.setdefault(str(code),len(order))
+    first=sorted((t for t in targets if t.get("ticker") in order),
+        key=lambda t:order[t["ticker"]])
+    rest=[t for t in targets if t.get("ticker") not in order]
+    return first+rest
+
+
+def run_warmup(*,time_budget_seconds=3300,workers=2,universe=None,fetcher=None,clock=None,
+        progress_printer=print,priority_benchmark=False):
     universe=_ticker_set() if universe is None else universe
     targets=korean_flow_targets(universe)
+    if priority_benchmark:
+        targets=prioritize_benchmark_targets(targets)
     entries=[(row["ticker"],row["name"]) for row in targets]
     def progress(done,total,ticker,result):
         diag=result.get("diagnostics",{});records=result.get("records",[])
@@ -28,6 +46,7 @@ def run_warmup(*,time_budget_seconds=3300,workers=2,universe=None,fetcher=None,c
         "request_interval_seconds":request_interval_seconds(),
         "collection_guidance":"Dispatch this warmup manually in smaller runs over several days. Completed years are cached; later runs retry missing years and failed pages. Avoid bulk disclosure fetching inside the full audit.",
         "requested_start":"2015-12-01","requested_end":"2026-11-13",
+        "priority_benchmark":bool(priority_benchmark),
         "uncompleted_tickers":collection.get("not_attempted",[]),
         "partial_completion_exits_successfully":True}
     Path("data").mkdir(exist_ok=True)
@@ -40,8 +59,11 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--time-budget-seconds",type=float,default=3300)
     parser.add_argument("--workers",type=int,default=2)
+    parser.add_argument("--priority-benchmark",action="store_true",
+        help="warm the frozen 63-instrument Korean benchmark names before the rest of the universe")
     args=parser.parse_args(argv)
-    run_warmup(time_budget_seconds=args.time_budget_seconds,workers=args.workers)
+    run_warmup(time_budget_seconds=args.time_budget_seconds,workers=args.workers,
+        priority_benchmark=args.priority_benchmark)
     return 0
 
 
