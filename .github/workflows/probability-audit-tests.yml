@@ -15,6 +15,8 @@ on:
       - market_breadth_gate.py
       - naver_api_universe.py
       - flow_warmup.py
+      - disclosure_warmup.py
+      - disclosures.py
       - providers.py
       - market_context.py
       - broad_candidates.py
@@ -34,6 +36,7 @@ on:
       - tests/test_market_breadth_gate.py
       - tests/test_naver_api_universe.py
       - tests/test_flow_warmup.py
+      - tests/test_disclosures.py
       - tests/test_audit_63_metrics.py
       - tests/test_expanded_direction_audit.py
       - tests/test_r_rank_model.py
@@ -44,6 +47,7 @@ on:
       - .github/workflows/probability-audit-tests.yml
       - .github/workflows/audit-63-instruments.yml
       - .github/workflows/flow-warmup.yml
+      - .github/workflows/disclosure-warmup.yml
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -63,10 +67,11 @@ jobs:
       - run: python -m unittest discover -s tests -p test_market_breadth_gate.py -v
       - run: python -m unittest discover -s tests -p test_naver_api_universe.py -v
       - run: python -m unittest tests.test_flow_warmup -v
+      - run: python -m unittest tests.test_disclosures -v
       - run: python -m unittest tests.test_audit_63_metrics tests.test_expanded_direction_audit test_predictive_model.py test_broad_candidates.py test_strategy_lab.py -v
       - run: python -m unittest tests.test_r_rank_model -v
       - run: python -m unittest tests.test_market_context -v
-      - run: python -m py_compile providers.py broad_candidates.py predictive_model.py audit_63_fast.py expanded_direction_audit.py flow_warmup.py r_rank_model.py market_context.py strategy_lab.py three_round_trade_model.py profit_selector51.py regime_selector60.py feature_selector60.py net_edge_model.py trend_guard_model.py market_breadth_gate.py universe.py naver_api_universe.py
+      - run: python -m py_compile providers.py broad_candidates.py predictive_model.py audit_63_fast.py expanded_direction_audit.py flow_warmup.py disclosures.py disclosure_warmup.py r_rank_model.py market_context.py strategy_lab.py three_round_trade_model.py profit_selector51.py regime_selector60.py feature_selector60.py net_edge_model.py trend_guard_model.py market_breadth_gate.py universe.py naver_api_universe.py
 
   historical_300:
     runs-on: ubuntu-latest

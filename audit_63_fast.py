@@ -20,6 +20,8 @@ from broad_candidates import broad_candidates_from_computed
 from predictive_model import CONFIGS, DEFAULT_CONFIG, prepare_snapshot, predict_from_snapshot
 from audit_300 import metrics
 from market_context import build_market_context, REGIME_RULE, INDEX_FOR_COHORT
+from disclosures import (collect_company_disclosures,disclosure_features_for_signal,
+                         BAD_KEYWORDS,POSITIVE_KEYWORDS,PERIODIC_KEYWORDS)
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from r_rank_model import (FEATURE_GROUPS, NUMERIC_FEATURES, CENTERS, SCALES, STRATEGIES,
                           MIN_TRAIN_SAMPLES_BY_COHORT, MODEL_CONFIGS, accepts as r_accepts,
@@ -33,6 +35,10 @@ PORTFOLIO_COST_PCT=0.35
 MIN_POLICY_TRADES=10
 MIN_DEVELOPMENT_EDGE=0.0
 EV_QUANTILES=(0.70,0.80,0.90)
+TREND_MARKET_MA200_GAPS=(-5.0,-3.0,0.0)
+TREND_VOLATILITY_QUANTILES=(0.80,0.90)
+DISCLOSURE_BAD_MAX_GRID=(0,1)
+DISCLOSURE_PERIODIC_DAYS_FLOOR_GRID=(0,20,60)
 
 def _period(trades,period):
     if period=="development":
@@ -637,6 +643,135 @@ def _legacy_policy_rows(legacy_rows,scored_rows,kind,threshold=None):
                              "realized_r":score.get("realized_r")})
     return _resolve_nonoverlapping(selected)
 
+
+def _risk_off_blocked(trade):
+    """The frozen market-context rule blocks every new entry in RISK_OFF."""
+    return trade.get("market_regime")=="RISK_OFF"
+
+
+def _legacy_policy_stage(rows,stage,params=None):
+    """Apply one legacy policy-ladder stage using only signal-time fields."""
+    params=params or {}
+    if stage=="legacy_only":return _resolve_nonoverlapping(rows)
+    selected=[]
+    for row in rows:
+        if _risk_off_blocked(row):continue
+        if stage=="legacy_risk_off_hard_gate":
+            selected.append(row);continue
+        try:
+            market_gap=float(row["market_ma200_gap_pct"])
+            stock_trend=float(row["signal_trend_200_pct"])
+            excess60=float(row["relative_strength_60d_pct"])
+            volatility=float(row["signal_volatility_20d_pct"])
+            if not all(np.isfinite(x) for x in (market_gap,stock_trend,excess60,volatility)):continue
+        except (KeyError,TypeError,ValueError):continue
+        if (market_gap<float(params.get("market_ma200_gap_min_pct",np.inf)) or stock_trend<=0
+                or excess60<=0 or volatility>float(params.get("volatility_cap_pct",-np.inf))):continue
+        if stage in ("legacy_risk_off_trend_disclosure","legacy_risk_off_trend_disclosure_short_fundamental"):
+            try:
+                bad=float(row["disclosure_bad_60d"]);periodic=float(row["disclosure_periodic_days_since"])
+                if not np.isfinite(bad) or not np.isfinite(periodic):continue
+            except (KeyError,TypeError,ValueError):continue
+            if bad>float(params.get("disclosure_bad_60d_max",0)):continue
+            if periodic<float(params.get("disclosure_periodic_days_since_floor",0)):continue
+        selected.append(row)
+    return _resolve_nonoverlapping(selected)
+
+
+def _not_evaluated_fundamental_stage():
+    return {"status":"NOT_EVALUATED","periods":{},"reason":{
+        "short_selling":"Unavailable from unauthenticated CI sources: KRX endpoints return HTTP 400 LOGOUT; Naver status uses the same blocked KRX iframe.",
+        "earnings_numeric_series":"Insufficient history: Naver has 3 annual years and 5 quarters; Yahoo has 4 annual years and 5 quarters, not the 2016-2025 development window.",
+        "opendart":"API key required; no key or fabricated zero values used."}}
+
+
+def _policy_ladder(legacy_rows,frames,requested,cohort,disclosures_available):
+    """Score A-D on all fixed periods; select parameters and policy on development only."""
+    period_names=("development","validation","diagnostic")
+    dev_a=_resolve_nonoverlapping(_period(legacy_rows,"development"))
+    base_dev=_trade_metrics(dev_a)
+    vol_values=[]
+    for row in dev_a:
+        try:
+            value=float(row["signal_volatility_20d_pct"])
+            if np.isfinite(value):vol_values.append(value)
+        except (KeyError,TypeError,ValueError):pass
+    vol_caps={f"p{int(q*100)}":float(np.quantile(vol_values,q)) for q in TREND_VOLATILITY_QUANTILES} if vol_values else {}
+    steps={}
+    def stage_periods(stage,params=None):
+        report={}
+        for period in period_names:
+            rows=_legacy_policy_stage(_period(legacy_rows,period),stage,params)
+            report[period]=_metrics_with_portfolio(rows,requested,frames,period)
+            report[period]["small_sample"]=period=="validation" and report[period].get("trades",0)<MIN_POLICY_TRADES
+        return report
+    steps["legacy_only"]={"status":"EVALUATED","params":{},"periods":stage_periods("legacy_only")}
+    steps["legacy_risk_off_hard_gate"]={"status":"EVALUATED","params":{"rule":REGIME_RULE["risk_off"]},
+        "periods":stage_periods("legacy_risk_off_hard_gate")}
+
+    trend_grid=[]
+    for gap_min in TREND_MARKET_MA200_GAPS:
+        for vol_name,vol_cap in vol_caps.items():
+            params={"market_ma200_gap_min_pct":gap_min,"stock_ma200_gap_gt_pct":0,
+                "relative_strength_60d_gt_pct":0,"volatility_cap_quantile":vol_name,
+                "volatility_cap_pct":vol_cap}
+            dev_rows=_legacy_policy_stage(dev_a,"legacy_risk_off_trend_filter",params)
+            met=_trade_metrics(dev_rows)
+            trend_grid.append({"params":params,"development":met})
+    valid_trend=[x for x in trend_grid if x["development"].get("trades",0)>=MIN_POLICY_TRADES]
+    selected_trend=max(valid_trend,key=lambda x:(x["development"].get("mean_net_pct",-np.inf),-x["development"].get("trades",0))) if valid_trend else None
+    if selected_trend:
+        steps["legacy_risk_off_trend_filter"]={"status":"EVALUATED","params":selected_trend["params"],
+            "selection_rule":"development net per trade maximized among predeclared settings with at least MIN_POLICY_TRADES",
+            "development_grid":trend_grid,"periods":stage_periods("legacy_risk_off_trend_filter",selected_trend["params"])}
+    else:
+        steps["legacy_risk_off_trend_filter"]={"status":"INSUFFICIENT_DEVELOPMENT_SAMPLE","params":None,
+            "development_grid":trend_grid,"periods":{p:_metrics_with_portfolio([],requested,frames,p) for p in period_names}}
+
+    dgrid=[]
+    if disclosures_available:
+        for trend in trend_grid:
+            for bad_max in DISCLOSURE_BAD_MAX_GRID:
+                for periodic_floor in DISCLOSURE_PERIODIC_DAYS_FLOOR_GRID:
+                    params={**trend["params"],"disclosure_bad_60d_max":bad_max,
+                        "disclosure_periodic_days_since_floor":periodic_floor}
+                    dev_rows=_legacy_policy_stage(dev_a,"legacy_risk_off_trend_disclosure",params)
+                    dgrid.append({"params":params,"development":_trade_metrics(dev_rows)})
+        valid_d=[x for x in dgrid if x["development"].get("trades",0)>=MIN_POLICY_TRADES]
+        selected_d=max(valid_d,key=lambda x:(x["development"].get("mean_net_pct",-np.inf),-x["development"].get("trades",0))) if valid_d else None
+        if selected_d:
+            steps["legacy_risk_off_trend_disclosure"]={"status":"EVALUATED","params":selected_d["params"],
+                "selection_rule":"development net per trade maximized among predeclared settings with at least MIN_POLICY_TRADES",
+                "development_grid":dgrid,"periods":stage_periods("legacy_risk_off_trend_disclosure",selected_d["params"])}
+        else:
+            steps["legacy_risk_off_trend_disclosure"]={"status":"INSUFFICIENT_DEVELOPMENT_SAMPLE","params":None,
+                "development_grid":dgrid,"periods":{p:_metrics_with_portfolio([],requested,frames,p) for p in period_names}}
+    else:
+        steps["legacy_risk_off_trend_disclosure"]={"status":"NOT_EVALUATED","params":None,"development_grid":[],
+            "periods":{},"reason":"DART disclosure data unavailable for this cohort; missing values remain NaN and no trades are added."}
+    steps["legacy_risk_off_trend_disclosure_short_fundamental"]=_not_evaluated_fundamental_stage()
+
+    selected="legacy_only";candidates=[]
+    for name in ("legacy_risk_off_hard_gate","legacy_risk_off_trend_filter","legacy_risk_off_trend_disclosure"):
+        step=steps[name]
+        dev=step.get("periods",{}).get("development",{})
+        metric=dev.get("selected_trades") or dev
+        if step.get("status")!="EVALUATED":continue
+        n=metric.get("trades",0);mean=metric.get("mean_net_pct")
+        if n>=MIN_POLICY_TRADES and mean is not None and base_dev.get("mean_net_pct") is not None and mean>base_dev["mean_net_pct"]:
+            candidates.append((mean,name))
+    if candidates:selected=max(candidates,key=lambda x:(x[0],x[1]))[1]
+    steps["selected_policy"]=selected
+    steps["selection_rule"]="legacy_only fallback; promote B/C/D only when development has at least MIN_POLICY_TRADES and mean net per trade exceeds A. Validation and diagnostic are report-only. E is never selectable while NOT_EVALUATED."
+    steps["development_volatility_caps_pct"]={k:round(v,8) for k,v in vol_caps.items()}
+    steps["grid_constants"]={"market_ma200_gap_min_pct":list(TREND_MARKET_MA200_GAPS),
+        "stock_ma200_gap_gt_pct":0,"relative_strength_60d_gt_pct":0,
+        "volatility_quantiles":list(TREND_VOLATILITY_QUANTILES),
+        "disclosure_bad_60d_max":list(DISCLOSURE_BAD_MAX_GRID),
+        "disclosure_periodic_days_since_floor":list(DISCLOSURE_PERIODIC_DAYS_FLOOR_GRID),
+        "min_policy_trades":MIN_POLICY_TRADES,"risk_off_rule":REGIME_RULE["risk_off"]}
+    return steps
+
 def _policy_candidate_metrics(legacy_by_period,scored_by_period,frames,requested,period,thresholds):
     specs={"legacy_only":{"kind":"legacy_only"}}
     specs.update({f"legacy_model_filter_{name}":{"kind":"model_filter","threshold":row.get("global")}
@@ -659,7 +794,7 @@ def _policy_candidate_metrics(legacy_by_period,scored_by_period,frames,requested
                       "datewise_rank_metrics":_rank_metrics(scored_rows) if scored_rows else None}
     return result
 
-def _decorate_features(trade,frame,computed,breadth,market_gap):
+def _decorate_features(trade,frame,computed,breadth,market_gap,market_return60=None):
     idx=frame.index.get_indexer([pd.Timestamp(trade["signal_date"])],method="pad")[0]
     if idx<0:return trade
     close=frame.Close.astype(float);vol=frame.Volume.astype(float)
@@ -683,7 +818,10 @@ def _decorate_features(trade,frame,computed,breadth,market_gap):
         "entry_net_rr":planned_rr,"entry_net_upside_pct":planned_upside,
         "entry_net_downside_pct":planned_downside,
         "market_breadth_pct":float(breadth.get(trade["signal_date"],50)),
-        "market_ma200_gap_pct":float(market_gap.get(trade["signal_date"],0))})
+        "market_ma200_gap_pct":float(market_gap.get(trade["signal_date"],np.nan)),
+        "market_return_60d_pct":float((market_return60 or {}).get(trade["signal_date"],np.nan)),
+        "relative_strength_60d_pct":(100*(px/c60-1)-float(market_return60[trade["signal_date"]])
+             if c60 and market_return60 is not None and trade["signal_date"] in market_return60 else np.nan)})
     return trade
 
 def _make_cohort_context(frames):
@@ -692,8 +830,10 @@ def _make_cohort_context(frames):
     breadth=(ret>0).mean(axis=1)*100
     proxy=close.median(axis=1,skipna=True);ma=proxy.rolling(200,min_periods=200).mean()
     gap=(proxy/ma-1)*100
+    market_ret60=proxy.pct_change(60)*100
     return ({str(pd.Timestamp(k).date()):float(v) for k,v in breadth.dropna().items()},
-            {str(pd.Timestamp(k).date()):float(v) for k,v in gap.dropna().items()})
+            {str(pd.Timestamp(k).date()):float(v) for k,v in gap.dropna().items()},
+            {str(pd.Timestamp(k).date()):float(v) for k,v in market_ret60.dropna().items()})
 
 def _select_r_policy(scored,thresholds,development_r_ic=None):
     dev=_period(scored,"development");table={}
@@ -727,8 +867,8 @@ def _r_policy_period(scored,policy,thresholds,period):
         "selected_rank_metrics":_rank_metrics(chosen)}
 
 def _broad_risk_off_blocked(trade):
-    """RISK_OFF blocks broad-market model entries only; legacy remains intact."""
-    return trade.get("strategy")=="broad_market_ml" and trade.get("market_regime")=="RISK_OFF"
+    """Frozen RISK_OFF hard gate for every new entry, including legacy candidates."""
+    return trade.get("market_regime")=="RISK_OFF"
 
 def _period_regime_counts(candidates,context,period):
     if period=="development":lo,hi=SAMPLE_START,TRAIN_END
@@ -772,7 +912,8 @@ def run():
             "macro_source_preference":"FinanceDataReader first; Yahoo Finance retries as fallback; source failures and partial coverage are recorded.",
             "fixed_scale":True,"evaluation_period_scaling":False},
         "regime_distribution":{},"regime_performance":{},"ablation":{},
-        "feature_coverage":{},"target_variants":{},"policy_comparison":{},
+        "feature_coverage":{},"target_variants":{},"policy_comparison":{},"policy_ladder":{},
+        "direction3_role":"diagnostic_only; all buy decisions come exclusively from the legacy policy ladder",
         "frozen_audit_benchmark":{k:list(v) for k,v in AUDIT_63_BENCHMARK.items()},
         "feature_schema":{"version":"macro-relative-flow-v1","groups":{k:list(v) for k,v in FEATURE_GROUPS.items()},
             "full_numeric_feature_count":len(NUMERIC_FEATURES),"strategy_flags":6,"strategy_interactions":6,
@@ -782,6 +923,29 @@ def run():
         "cec6d80_baseline_source":archived_baseline.get("source_run_id"),
         "portfolio":{"max_concurrent_positions":5,"weighting":"equal initial notional slots"},"cohorts":{}}
     all_flow_frames={};all_flow_sources={};all_development_feature_rows=[]
+    disclosure_entries=[];seen_disclosure_tickers=set()
+    for cohort in ("KOSPI","KOSDAQ"):
+        for ticker,name,_,_ in cohorts[cohort]:
+            if ticker not in seen_disclosure_tickers:
+                disclosure_entries.append((ticker,name));seen_disclosure_tickers.add(ticker)
+    disclosure_collection=collect_company_disclosures(disclosure_entries,
+        progress=lambda done,total,ticker,result:print(
+            f"DISCLOSURE_PROGRESS {done}/{total} ticker={ticker} rows={len(result.get('records',[]))} "
+            f"requests={result.get('diagnostics',{}).get('requests_n',0)} "
+            f"available={result.get('diagnostics',{}).get('available',False)}",flush=True))
+    disclosure_by_ticker=disclosure_collection.pop("results")
+    out["disclosure_collection"]={**disclosure_collection,"source":"DART public HTML detailSearch.ax",
+        "requested_start":"2015-12-01","requested_end":MIN_END_DATE,
+        "by_ticker":{code:{"first_date":v.get("diagnostics",{}).get("first_date"),
+            "last_date":v.get("diagnostics",{}).get("last_date"),"rows_n":len(v.get("records",[])),
+            "requests_n":v.get("diagnostics",{}).get("requests_n",0),
+            "available":v.get("diagnostics",{}).get("available",False),
+            "failures":v.get("diagnostics",{}).get("failures",[])}
+            for code,v in disclosure_by_ticker.items()},
+        "unavailable_tickers":sorted(code for code,v in disclosure_by_ticker.items()
+            if not v.get("diagnostics",{}).get("available",False)),
+        "not_applicable_tickers":{code:"ETF/US security outside the Korean ordinary-stock DART feature universe"
+            for cohort in ("TIGER_ETF","SOXL") for code,_,_,_ in cohorts[cohort]}}
     integrity=True
     for cohort,items in cohorts.items():
         legacy_by_variant={s:[] for s in PARAMS};broad=[];frames={};computed_by={};instruments=[];errors=[]
@@ -836,21 +1000,30 @@ def run():
         all_flow_sources.update(flow_sources)
         context=build_market_context(frames,macro_frames,cohort,flow_frames)
         for inst in instruments:inst["investor_flow_source"]=flow_sources.get(inst["ticker"],{})
-        breadth,gap=_make_cohort_context(frames)
+        breadth,gap,market_return60=_make_cohort_context(frames)
+        def attach_disclosure(row):
+            record=disclosure_by_ticker.get(row["ticker"],{})
+            diag=record.get("diagnostics",{});available=bool(diag.get("available",False) and diag.get("complete",False) and record.get("records"))
+            features=disclosure_features_for_signal(record.get("records",[]),row["signal_date"],
+                frames[row["ticker"]].index,available=available)
+            row.update(features);row["disclosure_data_available"]=available
+            return row
         legacy_all=[]
         for strategy,ts in legacy_by_variant.items():
             for t in ts:
                 frame=frames.get(t["ticker"]);comp=computed_by.get(t["ticker"])
                 if frame is not None:
-                    row=_decorate_features({**t,"candidate_family":"legacy","candidate_variant":strategy,"strategy":strategy},frame,comp,breadth,gap)
+                    row=_decorate_features({**t,"candidate_family":"legacy","candidate_variant":strategy,"strategy":strategy},frame,comp,breadth,gap,market_return60)
                     row.update(context["features"].get(t["ticker"],{}).get(t["signal_date"],{}))
+                    attach_disclosure(row)
                     legacy_all.append(row)
         broad_all=[]
         for t in broad:
             frame=frames.get(t["ticker"]);comp=computed_by.get(t["ticker"])
             if frame is not None:
-                row=_decorate_features({**t,"candidate_family":"broad","candidate_variant":"broad_market_ml","strategy":"broad_market_ml"},frame,comp,breadth,gap)
+                row=_decorate_features({**t,"candidate_family":"broad","candidate_variant":"broad_market_ml","strategy":"broad_market_ml"},frame,comp,breadth,gap,market_return60)
                 row.update(context["features"].get(t["ticker"],{}).get(t["signal_date"],{}))
+                attach_disclosure(row)
                 broad_all.append(row)
         combined=legacy_all+broad_all
         # Exclude symbols whose development history has too few completed candidates,
@@ -874,6 +1047,32 @@ def run():
         dev_variant={s:_trade_metrics(_period(ts,"development")) for s,ts in legacy_by_variant.items()}
         valid_variants=[s for s,m in dev_variant.items() if m["trades"]>=MIN_POLICY_TRADES and m.get("mean_net_pct") is not None]
         legacy_choice=max(valid_variants,key=lambda s:(dev_variant[s]["mean_net_pct"],s),default=None)
+        legacy_choice_rows=[r for r in legacy_all if r.get("strategy")==legacy_choice] if legacy_choice else []
+        disclosure_cohort_available=any(disclosure_by_ticker.get(ticker,{}).get("diagnostics",{}).get("available",False)
+            and disclosure_by_ticker.get(ticker,{}).get("records")
+            for ticker,_,_,_ in items)
+        ladder=_policy_ladder(legacy_choice_rows,frames,len(items),cohort,disclosure_cohort_available)
+        out["policy_ladder"][cohort]=ladder
+        missing_disclosure_tickers=sorted(ticker for ticker,_,_,_ in items
+            if not disclosure_by_ticker.get(ticker,{}).get("diagnostics",{}).get("available",False))
+        disclosure_fields=("disclosure_periodic_days_since","disclosure_bad_20d","disclosure_bad_60d",
+            "disclosure_positive_20d","disclosure_count_60d")
+        disclosure_coverage={}
+        for period_name in ("development","validation","diagnostic"):
+            period_candidates=_period(legacy_all+broad_all,period_name)
+            disclosure_coverage[period_name]={}
+            for feature in disclosure_fields:
+                observed=[]
+                for row in period_candidates:
+                    try:value=float(row.get(feature,np.nan))
+                    except (TypeError,ValueError):value=np.nan
+                    if np.isfinite(value):observed.append(value)
+                disclosure_coverage[period_name][feature]={"rows_n":len(period_candidates),
+                    "non_missing_n":len(observed),"non_missing_pct":round(100*len(observed)/len(period_candidates),2) if period_candidates else 0.0}
+        out.setdefault("disclosure_feature_coverage",{})[cohort]={
+            "periods":disclosure_coverage,"data_missing_tickers":missing_disclosure_tickers,
+            "available_symbols_n":len(items)-len(missing_disclosure_tickers),"requested_symbols_n":len(items),
+            "abstain_when_unavailable":True}
         development_rows=_period(eligible_rows,"development")
         all_development_feature_rows.extend(development_rows)
         feature_coverage,excluded_features=_feature_coverage(development_rows)
@@ -955,10 +1154,12 @@ def run():
                 "development datewise IC > 0" if rank_ic is not None and rank_ic>0 else "no development edge")
         eligible_legacy_policies=[(e["trades"].get("mean_net_pct"),name) for name,e in policy_comparison["periods"]["development"].items()
             if e.get("development_gate_passed") and e["trades"].get("mean_net_pct") is not None]
-        selected_legacy_policy=max(eligible_legacy_policies,key=lambda x:(x[0],x[1]))[1] if eligible_legacy_policies else "legacy_only"
-        policy_comparison["selected_policy"]=selected_legacy_policy
+        score_filter_diagnostic_choice=max(eligible_legacy_policies,key=lambda x:(x[0],x[1]))[1] if eligible_legacy_policies else None
+        policy_comparison["diagnostic_only_score_filter_choice"]=score_filter_diagnostic_choice
+        policy_comparison["selected_policy"]=None
         policy_comparison["development_gate"]={name:e.get("development_gate_passed") for name,e in policy_comparison["periods"]["development"].items()}
         out.setdefault("policy_comparison",{})[cohort]=policy_comparison
+        selected_legacy_policy=ladder["selected_policy"]
         out.setdefault("feature_coverage",{})[cohort]={"development_rows_n":len(development_rows),
             "by_feature":feature_coverage,"auto_excluded_constant_features":excluded_features,
             "exclusion_basis":"development candidates only; evaluation-period variation never affects feature inclusion"}
@@ -1017,17 +1218,8 @@ def run():
             # tag survives into the legacy-vs-model regime performance split.
             legacy_pool=_period([r for r in legacy_all if r.get("strategy")==legacy_choice],period) if legacy_choice else []
             legacy_chosen=_legacy_policy_rows(legacy_pool,_period(scored,period),"legacy_only")
-            selected_spec=policy_comparison["periods"][period].get(selected_legacy_policy,{})
-            if selected_legacy_policy=="legacy_only":legacy_policy_trades=legacy_chosen
-            elif selected_legacy_policy=="legacy_regime_gate":
-                legacy_policy_trades=_legacy_policy_rows(legacy_pool,_period(scored,period),"legacy_regime_gate")
-            else:
-                combined_gate=selected_legacy_policy.endswith("_and_risk_off_gate")
-                quantile_name=selected_legacy_policy.replace("legacy_model_filter_","")
-                if combined_gate:quantile_name=quantile_name.removesuffix("_and_risk_off_gate")
-                cutoff=policy_thresholds.get(quantile_name,{}).get("global")
-                kind="legacy_model_filter_and_regime_gate" if combined_gate else "model_filter"
-                legacy_policy_trades=_legacy_policy_rows(legacy_pool,_period(policy_scored,period),kind,cutoff) if cutoff is not None else []
+            selected_stage=ladder.get(selected_legacy_policy,{})
+            legacy_policy_trades=_legacy_policy_stage(legacy_pool,selected_legacy_policy,selected_stage.get("params") or {})
             model_pool=_period(model_trades,period)
             all_scored=_period(scored,period)
             accepted_before_gate=_datewise_selected(all_scored,model_policy,thresholds) if model_policy else []
@@ -1041,6 +1233,7 @@ def run():
             cec6=None
             cohort_result["periods"][period]={"legacy":legacy_m,"selected_legacy_policy":legacy_policy_m,
                 "selected_legacy_policy_name":selected_legacy_policy,"new_model":model_m,
+                "policy_ladder_selected_metrics":selected_stage.get("periods",{}).get(period),
                 "cec6d80_model":archived_baseline.get("cohorts",{}).get(cohort,{}).get("periods",{}).get(period,{}).get("model"),
                 "cec6d80_legacy":archived_baseline.get("cohorts",{}).get(cohort,{}).get("periods",{}).get(period,{}).get("legacy"),
                 "accepted_candidates_n":len(accepted_candidates),"scored_candidate_n":len(all_scored),
@@ -1048,7 +1241,7 @@ def run():
                 "regime_gate":{"accepted_before_gate_n":len(accepted_before_gate),
                     "accepted_after_gate_n":len(accepted_candidates),
                     "blocked_broad_risk_off_n":sum(_broad_risk_off_blocked(r) for r in accepted_before_gate),
-                    "hard_gate":"block broad_market_ml only on RISK_OFF; legacy candidates are unchanged"},
+                    "hard_gate":"RISK_OFF blocks every new-entry candidate, including legacy; only the legacy policy ladder can make buy decisions"},
                 "unselected_diagnostic":{"legacy_candidate_n":len(_period(legacy_all,period)),"broad_candidate_n":len(_period(broad_all,period)),
                     "legacy_realized":_trade_metrics(_period(legacy_all,period)),"broad_realized":_trade_metrics(_period(broad_all,period))}}
             regime_counts=_period_regime_counts(eligible_rows,context,period)
@@ -1057,7 +1250,7 @@ def run():
             out["regime_performance"].setdefault(cohort,{})[period]={
                 regime:{"distribution":regime_counts[regime],
                     "legacy":_trade_metrics([t for t in legacy_chosen if t.get("market_regime")==regime]),
-                    "legacy_with_broad_risk_off_gate":_trade_metrics([t for t in legacy_gate_trades if t.get("market_regime")==regime]),
+                    "legacy_with_risk_off_hard_gate":_trade_metrics([t for t in legacy_gate_trades if t.get("market_regime")==regime]),
                     "model_before_hard_gate":_trade_metrics([t for t in model_trades_before_gate if _period([t],period) and t.get("market_regime")==regime]),
                     "model_after_hard_gate":_trade_metrics([t for t in model_trades if _period([t],period) and t.get("market_regime")==regime]),
                     "accepted_candidates_before_gate_n":sum(r.get("market_regime")==regime for r in accepted_before_gate),

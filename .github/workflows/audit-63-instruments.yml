@@ -15,6 +15,9 @@ on:
       - 'market_context.py'
       - 'expanded_direction_audit.py'
       - 'flow_warmup.py'
+      - 'disclosures.py'
+      - 'disclosure_warmup.py'
+      - '.github/workflows/disclosure-warmup.yml'
       - 'data/cec6d80-baseline.json'
   pull_request:
     paths:
@@ -29,6 +32,9 @@ on:
       - 'market_context.py'
       - 'expanded_direction_audit.py'
       - 'flow_warmup.py'
+      - 'disclosures.py'
+      - 'disclosure_warmup.py'
+      - '.github/workflows/disclosure-warmup.yml'
       - 'data/cec6d80-baseline.json'
   workflow_dispatch:
 jobs:
@@ -58,6 +64,13 @@ jobs:
           key: stock-radar-pr9-flows-${{ runner.os }}-shared-v1-${{ github.run_id }}
           restore-keys: |
             stock-radar-pr9-flows-${{ runner.os }}-shared-v1-
+      - name: Restore company-disclosure cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/stock-radar/disclosures
+          key: stock-radar-pr9-disclosures-${{ runner.os }}-shared-v1-${{ github.run_id }}
+          restore-keys: |
+            stock-radar-pr9-disclosures-${{ runner.os }}-shared-v1-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -91,3 +104,9 @@ jobs:
         with:
           path: .cache/stock-radar/flows
           key: stock-radar-pr9-flows-${{ runner.os }}-shared-v1-${{ github.run_id }}
+      - name: Save company-disclosure cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/stock-radar/disclosures
+          key: stock-radar-pr9-disclosures-${{ runner.os }}-shared-v1-${{ github.run_id }}
