@@ -7,7 +7,8 @@ import numpy as np
 import pandas as pd
 
 from audit_63_fast import (_legacy_policy_stage,_not_evaluated_fundamental_stage,
-                           _disclosure_bad_title_counts)
+                           _disclosure_bad_title_counts,_risk_adjusted_policy_selection,
+                           POLICY_SELECTION_METRIC)
 from disclosures import (collect_company_disclosures,disclosure_features_for_signal,
                          get_company_disclosures,parse_disclosure_html,
                          bad_disclosure_keyword_matches)
@@ -19,6 +20,39 @@ FIXTURE="""<table><tr><th>접수일자</th><th>공시대상회사</th><th>보고
 
 
 class DisclosureTests(unittest.TestCase):
+    @staticmethod
+    def _selection_stage(trades,mean,sequence_mdd,portfolio_mdd):
+        return {"status":"EVALUATED","periods":{"development":{
+            "trades":trades,"mean_net_pct":mean,
+            "max_drawdown_sequence_pct":sequence_mdd,
+            "max_drawdown_portfolio_5_equal_pct":portfolio_mdd}}}
+
+    def test_risk_adjusted_selection_can_prefer_lower_return_with_much_lower_drawdown(self):
+        steps={"legacy_only":self._selection_stage(75,.787,28.48,3.2),
+               "legacy_risk_off_hard_gate":self._selection_stage(68,.598,8.0,2.1)}
+        selected,comparison=_risk_adjusted_policy_selection(steps)
+        self.assertEqual(selected,"legacy_risk_off_hard_gate")
+        self.assertEqual(comparison["selection_metric"],POLICY_SELECTION_METRIC)
+        self.assertGreater(steps["legacy_risk_off_hard_gate"]["development_risk_adjusted_score"],
+                           steps["legacy_only"]["development_risk_adjusted_score"])
+        self.assertEqual(comparison["stages"]["legacy_risk_off_hard_gate"]["development_5slot_portfolio_mdd_pct"],2.1)
+
+    def test_risk_adjusted_selection_excludes_stages_below_minimum_trades(self):
+        steps={"legacy_only":self._selection_stage(20,.5,20,5),
+               "legacy_risk_off_hard_gate":self._selection_stage(9,2.0,1,1)}
+        selected,comparison=_risk_adjusted_policy_selection(steps)
+        self.assertEqual(selected,"legacy_only")
+        self.assertFalse(comparison["stages"]["legacy_risk_off_hard_gate"]["candidate"])
+        self.assertEqual(comparison["stages"]["legacy_risk_off_hard_gate"]["exclusion_reason"],"BELOW_MIN_POLICY_TRADES")
+
+    def test_risk_adjusted_selection_falls_back_to_legacy_when_no_candidate_qualifies(self):
+        steps={"legacy_only":self._selection_stage(8,.5,20,5),
+               "legacy_risk_off_hard_gate":self._selection_stage(12,-.1,3,2)}
+        selected,comparison=_risk_adjusted_policy_selection(steps)
+        self.assertEqual(selected,"legacy_only")
+        self.assertEqual(comparison["fallback"],"legacy_only")
+        self.assertFalse(comparison["stages"]["legacy_only"]["candidate"])
+
     def test_html_parser_extracts_receipt_title_and_rcp_number(self):
         rows=parse_disclosure_html(FIXTURE)
         self.assertEqual(len(rows),2)

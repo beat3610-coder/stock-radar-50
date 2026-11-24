@@ -687,6 +687,50 @@ def _not_evaluated_fundamental_stage():
         "opendart":"API key required; no key or fabricated zero values used."}}
 
 
+POLICY_SELECTION_METRIC="development mean_net_pct / max(abs(sequence MDD),1)"
+
+
+def _risk_adjusted_policy_selection(steps):
+    """Select A-D using positive development return scaled by sequence MDD."""
+    comparison={};eligible=[]
+    stage_names=("legacy_only","legacy_risk_off_hard_gate","legacy_risk_off_trend_filter",
+                 "legacy_risk_off_trend_disclosure")
+    for name in stage_names:
+        step=steps.get(name,{})
+        dev=step.get("periods",{}).get("development",{})
+        metric=dev.get("selected_trades") or dev
+        try:n=int(metric.get("trades",0))
+        except (TypeError,ValueError):n=0
+        try:mean=float(metric.get("mean_net_pct"))
+        except (TypeError,ValueError):mean=float("nan")
+        try:mdd=float(metric.get("max_drawdown_sequence_pct"))
+        except (TypeError,ValueError):mdd=float("nan")
+        score=(mean/max(abs(mdd),1.0) if np.isfinite(mean) and np.isfinite(mdd) else None)
+        is_candidate=(step.get("status")=="EVALUATED" and n>=MIN_POLICY_TRADES
+                      and np.isfinite(mean) and mean>0 and score is not None)
+        if is_candidate:eligible.append((score,abs(mdd),name))
+        if not is_candidate:
+            if step.get("status")!="EVALUATED":reason=step.get("status","NOT_EVALUATED")
+            elif n<MIN_POLICY_TRADES:reason="BELOW_MIN_POLICY_TRADES"
+            elif not np.isfinite(mean) or mean<=0:reason="NONPOSITIVE_OR_MISSING_DEVELOPMENT_MEAN_NET"
+            else:reason="MISSING_DEVELOPMENT_SEQUENCE_MDD"
+        else:reason="ELIGIBLE"
+        step["development_risk_adjusted_score"]=round(float(score),10) if score is not None else None
+        comparison[name]={"status":step.get("status"),"development_trades":n,
+            "development_mean_net_pct":round(mean,8) if np.isfinite(mean) else None,
+            "development_sequence_mdd_pct":round(mdd,8) if np.isfinite(mdd) else None,
+            "development_5slot_portfolio_mdd_pct":metric.get("max_drawdown_portfolio_5_equal_pct"),
+            "development_risk_adjusted_score":step["development_risk_adjusted_score"],
+            "candidate":is_candidate,"exclusion_reason":reason}
+    selected=(sorted(eligible,key=lambda row:(-row[0],row[1],row[2]))[0][2]
+              if eligible else "legacy_only")
+    return selected,{"selection_metric":POLICY_SELECTION_METRIC,"stages":comparison,
+        "candidate_requirements":{"development_trades_min":MIN_POLICY_TRADES,
+            "development_mean_net_pct_gt":0},
+        "tie_break_order":["higher risk-adjusted score","lower absolute sequence MDD","stage name ascending"],
+        "fallback":"legacy_only","selected_policy":selected}
+
+
 def _policy_ladder(legacy_rows,frames,requested,cohort,disclosures_available):
     """Score A-D on all fixed periods; select parameters and policy on development only."""
     period_names=("development","validation","diagnostic")
@@ -753,18 +797,14 @@ def _policy_ladder(legacy_rows,frames,requested,cohort,disclosures_available):
             "periods":{},"reason":"DART disclosure data unavailable for this cohort; missing values remain NaN and no trades are added."}
     steps["legacy_risk_off_trend_disclosure_short_fundamental"]=_not_evaluated_fundamental_stage()
 
-    selected="legacy_only";candidates=[]
-    for name in ("legacy_risk_off_hard_gate","legacy_risk_off_trend_filter","legacy_risk_off_trend_disclosure"):
-        step=steps[name]
-        dev=step.get("periods",{}).get("development",{})
-        metric=dev.get("selected_trades") or dev
-        if step.get("status")!="EVALUATED":continue
-        n=metric.get("trades",0);mean=metric.get("mean_net_pct")
-        if n>=MIN_POLICY_TRADES and mean is not None and base_dev.get("mean_net_pct") is not None and mean>base_dev["mean_net_pct"]:
-            candidates.append((mean,name))
-    if candidates:selected=max(candidates,key=lambda x:(x[0],x[1]))[1]
+    selected,selection_comparison=_risk_adjusted_policy_selection(steps)
     steps["selected_policy"]=selected
-    steps["selection_rule"]="legacy_only fallback; promote B/C/D only when development has at least MIN_POLICY_TRADES and mean net per trade exceeds A. Validation and diagnostic are report-only. E is never selectable while NOT_EVALUATED."
+    steps["selection_metric"]=POLICY_SELECTION_METRIC
+    steps["development_selection_comparison"]=selection_comparison
+    steps["selection_rule"]=("Among A-D, select the development candidate with the highest mean_net_pct / "
+        "max(abs(sequence MDD),1), requiring at least MIN_POLICY_TRADES and positive development mean net; "
+        "ties use lower absolute sequence MDD then stage name ascending. A is scored on the same rule and is "
+        "the fallback when no candidate qualifies. Validation and diagnostic are report-only; E is NOT_EVALUATED.")
     steps["development_volatility_caps_pct"]={k:round(v,8) for k,v in vol_caps.items()}
     steps["grid_constants"]={"market_ma200_gap_min_pct":list(TREND_MARKET_MA200_GAPS),
         "stock_ma200_gap_gt_pct":0,"relative_strength_60d_gt_pct":0,
