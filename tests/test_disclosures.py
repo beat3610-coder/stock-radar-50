@@ -8,7 +8,9 @@ import pandas as pd
 
 from audit_63_fast import (_legacy_policy_stage,_not_evaluated_fundamental_stage,
                            _disclosure_bad_title_counts,_risk_adjusted_policy_selection,
-                           POLICY_SELECTION_METRIC)
+                           POLICY_SELECTION_METRIC,_focused_liquidity_ranking,
+                           _focused_recommendation,_focused_universe_ablation)
+from universe import AUDIT_63_BENCHMARK
 from disclosures import (collect_company_disclosures,disclosure_features_for_signal,
                          get_company_disclosures,parse_disclosure_html,
                          bad_disclosure_keyword_matches)
@@ -20,6 +22,58 @@ FIXTURE="""<table><tr><th>접수일자</th><th>공시대상회사</th><th>보고
 
 
 class DisclosureTests(unittest.TestCase):
+    def test_focused_liquidity_ranking_uses_development_turnover_and_quality_only(self):
+        dates=pd.bdate_range("2016-01-04","2026-10-30")
+        dev_end=pd.Timestamp("2025-11-01")
+        dev_mask=dates<dev_end
+        turnover_a=np.where(dev_mask,1_000.,1e12)
+        turnover_b=np.where(dev_mask,2_000.,1.)
+        frame=lambda turnover,index=dates:pd.DataFrame({"Close":100.,"Volume":turnover/100.},index=index)
+        delayed=dates[dates>=pd.Timestamp("2016-01-06")]
+        missing=dates[np.arange(len(dates))%10!=0]
+        items=[("A","A","KR","test"),("B","B","KR","test"),
+               ("C","C","KR","test"),("D","D","KR","test")]
+        result=_focused_liquidity_ranking("KOSPI",items,{
+            "A":frame(turnover_a),"B":frame(turnover_b),"C":frame(np.full(len(delayed),9_000.),delayed),
+            "D":frame(np.full(len(missing),8_000.),missing)})
+        self.assertEqual(result["eligible_tickers_by_liquidity"][:2],["B","A"])
+        by_code={r["ticker"]:r for r in result["symbols"]}
+        self.assertIn("FIRST_BAR_NOT_BEFORE_2016-01-05",by_code["C"]["exclusion_reasons"])
+        self.assertIn("DEVELOPMENT_BAR_COMPLETENESS_BELOW_95_PERCENT",by_code["D"]["exclusion_reasons"])
+        self.assertEqual(by_code["B"]["median_daily_turnover"],2000.0)
+
+    def test_focused_recommendation_uses_development_and_prefers_smallest_qualifying_set(self):
+        baseline={"trades":100,"mean_net_pct":1.0,"max_drawdown_sequence_pct":50.0}
+        sets={
+            "smaller":{"recommendation_candidate":True,"total_symbols_n":13,
+                "periods":{"development":{"trades":40,"mean_net_pct":.8,"max_drawdown_sequence_pct":20},
+                    "validation":{"trades":100,"mean_net_pct":1000,"max_drawdown_sequence_pct":1},
+                    "diagnostic":{"trades":100,"mean_net_pct":1000,"max_drawdown_sequence_pct":1}},
+                "selected_tickers":{"KOSPI":["a"],"KOSDAQ":["b"],"TIGER_ETF":[],"SOXL":[]}},
+            "larger":{"recommendation_candidate":True,"total_symbols_n":23,
+                "periods":{"development":{"trades":60,"mean_net_pct":1.5,"max_drawdown_sequence_pct":20},
+                    "validation":{"trades":0,"mean_net_pct":None,"max_drawdown_sequence_pct":None}},
+                "selected_tickers":{"KOSPI":["a"],"KOSDAQ":["b"],"TIGER_ETF":[],"SOXL":[]}}}
+        result=_focused_recommendation(sets,baseline)
+        self.assertEqual(result["selected_set"],"smaller")
+        self.assertFalse(result["selection_used_validation_or_diagnostic"])
+
+    def test_focused_universe_keeps_core_tickers_and_does_not_redefine_benchmark(self):
+        cohorts={cohort:[(ticker,ticker,"US" if cohort=="SOXL" else "KR","")
+                         for ticker in tickers]
+                 for cohort,tickers in AUDIT_63_BENCHMARK.items()}
+        result=_focused_universe_ablation(cohorts,{cohort:{} for cohort in cohorts},
+            {cohort:{period:[] for period in ("development","validation","diagnostic")}
+             for cohort in cohorts},{})
+        core=result["sets"]["core3_plus_liquidity_fill10"]
+        self.assertEqual(core["selected_tickers"]["KOSPI"][:3],
+                         ["005930","000660","035420"])
+        self.assertEqual(core["core_tickers_included"],["005930","000660","035420"])
+        self.assertEqual(result["sets"]["baseline_63"]["selected_tickers"],
+                         {cohort:list(tickers) for cohort,tickers in AUDIT_63_BENCHMARK.items()})
+        self.assertEqual(result["sample_source"],
+                         "already-loaded frozen 63 benchmark OHLCV only; no additional instrument fetches")
+
     @staticmethod
     def _selection_stage(trades,mean,sequence_mdd,portfolio_mdd):
         return {"status":"EVALUATED","periods":{"development":{

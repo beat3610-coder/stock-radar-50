@@ -41,6 +41,12 @@ TREND_MARKET_MA200_GAPS=(-5.0,-3.0,0.0)
 TREND_VOLATILITY_QUANTILES=(0.80,0.90)
 DISCLOSURE_BAD_MAX_GRID=(0,1)
 DISCLOSURE_PERIODIC_DAYS_FLOOR_GRID=(0,20,60)
+FOCUSED_HISTORY_START="2015-12-01"
+FOCUSED_FIRST_BAR_CUTOFF="2016-01-05"
+FOCUSED_MIN_DATA_COMPLETENESS=0.95
+FOCUSED_MIN_DEVELOPMENT_BARS=200
+FOCUSED_UNIVERSE_SIZES=(10,20,30)
+FOCUSED_CORE_KOSPI=("005930","000660","035420")
 
 def _period(trades,period):
     if period=="development":
@@ -946,6 +952,240 @@ def _disclosure_bad_title_counts(items,disclosure_by_ticker,limit=10):
     return [{"title":title,"count":count,"matched_keywords":matched_by_title[title]}
         for title,count in sorted(counts.items(),key=lambda item:(-item[1],item[0]))[:limit]]
 
+
+def _focused_liquidity_ranking(cohort,items,frames):
+    start=pd.Timestamp(FOCUSED_HISTORY_START);end=pd.Timestamp(TRAIN_END)
+    expected_dates=set()
+    normalized_indexes={}
+    for ticker,frame in frames.items():
+        idx=pd.DatetimeIndex(pd.to_datetime(frame.index))
+        if idx.tz is not None:idx=idx.tz_localize(None)
+        idx=idx.normalize();normalized_indexes[str(ticker)]=idx
+        expected_dates.update(idx[(idx>=start)&(idx<end)].tolist())
+    expected_n=len(expected_dates)
+    rows=[]
+    for ticker,name,market,sector in items:
+        ticker=str(ticker);frame=frames.get(ticker);reasons=[]
+        if frame is None:
+            rows.append({"ticker":ticker,"name":name,"median_daily_turnover":None,
+                "development_bars_n":0,"expected_development_sessions_n":expected_n,
+                "development_bar_completeness_pct":0.0,"first_development_bar":None,
+                "eligible":False,"liquidity_rank":None,"exclusion_reasons":["OHLCV_UNAVAILABLE"]})
+            continue
+        idx=normalized_indexes[ticker]
+        mask=(idx>=start)&(idx<end)
+        dev=frame.iloc[np.flatnonzero(mask)]
+        dev_n=int(idx[mask].nunique())
+        completeness=100.0*dev_n/expected_n if expected_n else 0.0
+        first_bar=str(idx[mask].min().date()) if dev_n else None
+        if first_bar is None:reasons.append("NO_DEVELOPMENT_BARS")
+        elif pd.Timestamp(first_bar)>=pd.Timestamp(FOCUSED_FIRST_BAR_CUTOFF):
+            reasons.append(f"FIRST_BAR_NOT_BEFORE_{FOCUSED_FIRST_BAR_CUTOFF}")
+        if completeness/100.0<FOCUSED_MIN_DATA_COMPLETENESS:
+            reasons.append("DEVELOPMENT_BAR_COMPLETENESS_BELOW_95_PERCENT")
+        if dev_n<FOCUSED_MIN_DEVELOPMENT_BARS:
+            reasons.append("INSUFFICIENT_DEVELOPMENT_LISTING_HISTORY")
+        try:
+            close=pd.to_numeric(dev["Close"],errors="coerce").to_numpy(dtype=float)
+            volume=pd.to_numeric(dev["Volume"],errors="coerce").to_numpy(dtype=float)
+            turnover=close*volume
+            valid=turnover[np.isfinite(turnover)&(turnover>0)]
+            median=float(np.median(valid)) if len(valid) else None
+        except (KeyError,TypeError,ValueError):median=None
+        if median is None:reasons.append("NO_VALID_DEVELOPMENT_TURNOVER")
+        rows.append({"ticker":ticker,"name":name,"market":market,"sector":sector,
+            "median_daily_turnover":round(median,2) if median is not None else None,
+            "development_bars_n":dev_n,"expected_development_sessions_n":expected_n,
+            "development_bar_completeness_pct":round(completeness,4),
+            "first_development_bar":first_bar,"eligible":not reasons,
+            "liquidity_rank":None,"exclusion_reasons":reasons})
+    eligible=sorted((r for r in rows if r["eligible"]),
+        key=lambda r:(-r["median_daily_turnover"],r["ticker"]))
+    for rank,row in enumerate(eligible,1):row["liquidity_rank"]=rank
+    return {"expected_development_sessions_n":expected_n,
+        "expected_session_source":"union of the already-loaded frozen-cohort OHLCV dates in the development window",
+        "selection_window_start":FOCUSED_HISTORY_START,"selection_window_end_exclusive":TRAIN_END,
+        "minimum_data_completeness_pct":FOCUSED_MIN_DATA_COMPLETENESS*100,
+        "first_bar_must_precede":FOCUSED_FIRST_BAR_CUTOFF,
+        "minimum_development_bars":FOCUSED_MIN_DEVELOPMENT_BARS,
+        "eligible_tickers_by_liquidity":[r["ticker"] for r in eligible],
+        "symbols":sorted(rows,key=lambda r:(r["liquidity_rank"] is None,
+                                              r["liquidity_rank"] or 10**9,r["ticker"]))}
+
+
+def _focused_recommendation(sets,baseline_dev):
+    def values(metric):
+        try:n=int(metric.get("trades",0))
+        except (TypeError,ValueError):n=0
+        try:mean=float(metric.get("mean_net_pct"))
+        except (TypeError,ValueError):mean=float("nan")
+        try:mdd=float(metric.get("max_drawdown_sequence_pct"))
+        except (TypeError,ValueError):mdd=float("nan")
+        score=mean/abs(mdd) if np.isfinite(mean) and np.isfinite(mdd) and abs(mdd)>1e-12 else None
+        return n,mean,mdd,score
+    base_n,base_mean,base_mdd,base_score=values(baseline_dev)
+    candidates=[]
+    table=[]
+    for name,row in sets.items():
+        if not row.get("recommendation_candidate"):continue
+        dev=row.get("periods",{}).get("development",{})
+        n,mean,mdd,score=values(dev)
+        qualifies=(n>=30 and np.isfinite(mean) and mean>0 and score is not None
+                   and base_score is not None and score>base_score)
+        reasons=[]
+        if n<30:reasons.append("DEVELOPMENT_TRADES_BELOW_30")
+        if not np.isfinite(mean) or mean<=0:reasons.append("DEVELOPMENT_MEAN_NET_NOT_POSITIVE")
+        if score is None:reasons.append("DEVELOPMENT_RISK_ADJUSTED_SCORE_UNAVAILABLE")
+        elif base_score is not None and score<=base_score:reasons.append("SCORE_NOT_ABOVE_63_SYMBOL_BASELINE")
+        elif base_score is None:reasons.append("63_SYMBOL_BASELINE_SCORE_UNAVAILABLE")
+        row["recommendation_check"]={"development_trades":n,
+            "development_mean_net_pct":round(mean,8) if np.isfinite(mean) else None,
+            "development_sequence_mdd_pct":round(mdd,8) if np.isfinite(mdd) else None,
+            "development_risk_adjusted_score":round(score,10) if score is not None else None,
+            "beats_63_symbol_development_score":bool(score is not None and base_score is not None and score>base_score),
+            "qualifies":bool(qualifies),"exclusion_reasons":reasons}
+        table.append({"set_name":name,"total_symbols_n":row["total_symbols_n"],
+            **row["recommendation_check"]})
+        if qualifies:candidates.append((row["total_symbols_n"],-score,name,row))
+    table.sort(key=lambda r:(r["total_symbols_n"],r["set_name"]))
+    baseline_info={"trades":base_n,"mean_net_pct":round(base_mean,8) if np.isfinite(base_mean) else None,
+        "sequence_mdd_pct":round(base_mdd,8) if np.isfinite(base_mdd) else None,
+        "risk_adjusted_score":round(base_score,10) if base_score is not None else None}
+    if not candidates:
+        return {"status":"KEEP_63_SYMBOL_BENCHMARK","selected_set":None,
+            "conclusion":"개발기간 기준으로는 63종목 벤치마크 유지를 권고합니다.",
+            "reason":"조건(개발 거래 30건 이상, 평균 순손익 양수, 개발 위험조정 점수가 63종목보다 큼)을 모두 만족한 축소 세트가 없습니다.",
+            "recommendation_score_formula":"mean_net_pct / abs(sequence MDD)",
+            "selection_used_validation_or_diagnostic":False,
+            "baseline_63_development":baseline_info,"candidate_development_table":table}
+    _,_,name,row=sorted(candidates,key=lambda c:(c[0],c[1],c[2]))[0]
+    selected=row["selected_tickers"]
+    conclusion=(f"개발기간 추천: 코스피 {len(selected['KOSPI'])} / 코스닥 {len(selected['KOSDAQ'])} "
+        f"/ TIGER ETF {len(selected['TIGER_ETF'])} / SOXL {len(selected['SOXL'])} "
+        f"(총 {row['total_symbols_n']}종목, {name}).")
+    return {"status":"FOCUSED_UNIVERSE_RECOMMENDED","selected_set":name,
+        "conclusion":conclusion,"reason":"개발기간 조건을 충족하고 63종목보다 높은 위험조정 점수를 낸 세트 중 실제 종목 수가 가장 작습니다.",
+        "recommendation_score_formula":"mean_net_pct / abs(sequence MDD)",
+        "selection_used_validation_or_diagnostic":False,"baseline_63_development":baseline_info,
+        "recommended_development":row["recommendation_check"],
+        "recommended_tickers":selected,"candidate_development_table":table}
+
+
+def _focused_universe_ablation(cohorts,frames_by_cohort,policy_trades_by_cohort,policy_info):
+    rankings={}
+    for cohort in ("KOSPI","KOSDAQ"):
+        rankings[cohort]=_focused_liquidity_ranking(cohort,cohorts.get(cohort,[]),
+            frames_by_cohort.get(cohort,{}))
+    liquid={cohort:list(row["eligible_tickers_by_liquidity"]) for cohort,row in rankings.items()}
+    fixed={cohort:list(AUDIT_63_BENCHMARK[cohort]) for cohort in ("KOSPI","KOSDAQ","TIGER_ETF","SOXL")}
+    specs={"baseline_63":{"selected":fixed,"kind":"frozen_63_baseline","recommendation_candidate":False}}
+    for kp in FOCUSED_UNIVERSE_SIZES:
+        for kq in FOCUSED_UNIVERSE_SIZES:
+            name=f"liquidity_top_KOSPI{kp}_KOSDAQ{kq}"
+            specs[name]={"selected":{"KOSPI":liquid["KOSPI"][:kp],"KOSDAQ":liquid["KOSDAQ"][:kq],
+                "TIGER_ETF":fixed["TIGER_ETF"],"SOXL":fixed["SOXL"]},
+                "kind":"liquidity_top_grid","requested_sizes":{"KOSPI":kp,"KOSDAQ":kq},
+                "recommendation_candidate":True}
+    specs["liquidity_top_only_10_each"]={"selected":{"KOSPI":liquid["KOSPI"][:10],
+        "KOSDAQ":liquid["KOSDAQ"][:10],"TIGER_ETF":fixed["TIGER_ETF"],"SOXL":fixed["SOXL"]},
+        "kind":"fixed_liquidity_top_only","requested_sizes":{"KOSPI":10,"KOSDAQ":10},
+        "recommendation_candidate":True}
+    # This named comparison is intentionally anchored on the three requested
+    # core holdings. Add only eligible development-liquidity names around them.
+    core=[t for t in FOCUSED_CORE_KOSPI if t in fixed["KOSPI"]]
+    core_eligible=[t for t in core if t in liquid["KOSPI"]]
+    core_set=core+ [t for t in liquid["KOSPI"] if t not in core][:max(0,10-len(core))]
+    specs["core3_plus_liquidity_fill10"]={"selected":{"KOSPI":core_set,
+        "KOSDAQ":liquid["KOSDAQ"][:10],"TIGER_ETF":fixed["TIGER_ETF"],"SOXL":fixed["SOXL"]},
+        "kind":"fixed_core_plus_development_liquidity","requested_sizes":{"KOSPI":10,"KOSDAQ":10},
+        "core_tickers_requested":list(FOCUSED_CORE_KOSPI),"core_tickers_eligible":core_eligible,
+        "core_tickers_included":core,
+        "recommendation_candidate":True}
+    specs["kospi_only_kosdaq_excluded"]={"selected":{"KOSPI":liquid["KOSPI"][:30],
+        "KOSDAQ":[],"TIGER_ETF":fixed["TIGER_ETF"],"SOXL":fixed["SOXL"]},
+        "kind":"fixed_kosdaq_excluded","requested_sizes":{"KOSPI":30,"KOSDAQ":0},
+        "recommendation_candidate":True}
+    all_frames={}
+    for frame_map in frames_by_cohort.values():all_frames.update(frame_map)
+    name_by_cohort={cohort:{str(row[0]):str(row[1]) for row in items}
+        for cohort,items in cohorts.items()}
+    all_items={cohort:list(AUDIT_63_BENCHMARK[cohort]) for cohort in fixed}
+    for cohort in fixed:
+        all_items[cohort]=list(fixed[cohort])
+    ranking_by_ticker={cohort:{r["ticker"]:r for r in ranking["symbols"]}
+        for cohort,ranking in rankings.items()}
+    baseline_periods={}
+    for period in ("development","validation","diagnostic"):
+        baseline_periods[period]=_resolve_nonoverlapping(
+            [trade for cohort in fixed for trade in policy_trades_by_cohort.get(cohort,{}).get(period,[])])
+    baseline_counts={p:len(rows) for p,rows in baseline_periods.items()}
+    reports={}
+    for name,spec in specs.items():
+        selected={cohort:list(spec["selected"].get(cohort,[])) for cohort in fixed}
+        selected_sets={cohort:set(codes) for cohort,codes in selected.items()}
+        requested=sum(len(codes) for codes in selected.values())
+        selected_all=set().union(*selected_sets.values())
+        exclusions={};evidence={}
+        for cohort in fixed:
+            exclusions[cohort]=[];evidence[cohort]=[]
+            selected_codes=selected_sets[cohort]
+            if cohort in ranking_by_ticker:
+                for ticker in selected[cohort]:
+                    evidence_row=ranking_by_ticker[cohort].get(ticker,{
+                        "ticker":ticker,"eligible":False,"exclusion_reasons":["NOT_IN_FROZEN_COHORT_METADATA"]})
+                    if (spec["kind"]=="fixed_core_plus_development_liquidity" and cohort=="KOSPI"
+                            and ticker in FOCUSED_CORE_KOSPI):
+                        evidence_row={**evidence_row,"inclusion_override":"PREDECLARED_CORE_TICKER"}
+                    evidence[cohort].append(evidence_row)
+            for ticker in all_items[cohort]:
+                if ticker in selected_codes:continue
+                rankrow=ranking_by_ticker.get(cohort,{}).get(ticker)
+                if rankrow and not rankrow["eligible"]:
+                    reason="DATA_QUALITY_FILTER:"+";".join(rankrow["exclusion_reasons"])
+                elif cohort=="KOSDAQ" and spec["kind"]=="fixed_kosdaq_excluded":
+                    reason="KOSDAQ_EXCLUDED_BY_PREDECLARED_FIXED_VARIANT"
+                elif cohort in ("KOSPI","KOSDAQ"):
+                    reason="LOWER_DEVELOPMENT_LIQUIDITY_THAN_SET_CUTOFF"
+                else:reason="OUTSIDE_SET_DEFINITION"
+                exclusions[cohort].append({"ticker":ticker,"name":name_by_cohort.get(cohort,{}).get(ticker,ticker),
+                    "reason":reason,"liquidity_rank":rankrow.get("liquidity_rank") if rankrow else None})
+        period_metrics={}
+        for period in ("development","validation","diagnostic"):
+            base_rows=baseline_periods[period]
+            selected_rows=_resolve_nonoverlapping([t for t in base_rows if t.get("ticker") in selected_all])
+            metric=_metrics_with_portfolio(selected_rows,requested,all_frames,period)
+            metric["policy_entry_acceptance_rate_pct"]=(round(100*len(selected_rows)/baseline_counts[period],4)
+                if baseline_counts[period] else 0.0)
+            metric["policy_entries_in_63_baseline_n"]=baseline_counts[period]
+            metric["small_sample"]=period=="validation" and metric.get("trades",0)<MIN_POLICY_TRADES
+            period_metrics[period]=metric
+        item={"kind":spec["kind"],"requested_sizes":spec.get("requested_sizes"),
+            "recommendation_candidate":spec.get("recommendation_candidate",False),
+            "total_symbols_n":requested,"selected_tickers":selected,
+            "selection_evidence":evidence,"excluded_tickers_by_cohort":exclusions,
+            "periods":period_metrics}
+        if "core_tickers_requested" in spec:
+            item["core_tickers_requested"]=spec["core_tickers_requested"]
+            item["core_tickers_eligible"]=spec["core_tickers_eligible"]
+            item["core_tickers_included"]=spec["core_tickers_included"]
+        reports[name]=item
+    selection_info={cohort:{"selected_policy":policy_info.get(cohort,{}).get("selected_policy"),
+        "selected_parameters":policy_info.get(cohort,{}).get("selected_parameters"),
+        "source":"63-symbol cohort development-only selected legacy policy; parameters frozen for all subsets"}
+        for cohort in fixed}
+    recommendation=_focused_recommendation(reports,reports["baseline_63"]["periods"]["development"])
+    return {"benchmark_unchanged":True,"sample_source":"already-loaded frozen 63 benchmark OHLCV only; no additional instrument fetches",
+        "selection_rule":{"liquidity_rank":"descending median daily close×volume, development only; ticker ascending ties",
+            "eligibility":{"development_window_start":FOCUSED_HISTORY_START,"development_end_exclusive":TRAIN_END,
+                "data_completeness_pct_min":FOCUSED_MIN_DATA_COMPLETENESS*100,
+                "first_development_bar_before":FOCUSED_FIRST_BAR_CUTOFF,
+                "minimum_development_bars":FOCUSED_MIN_DEVELOPMENT_BARS},
+            "universe_sizes_per_korean_cohort":list(FOCUSED_UNIVERSE_SIZES),
+            "etf_soxl_always_retained":True,
+            "policy":"63-universe selected A-D policy and parameters frozen by cohort; no fitting or selection on validation/diagnostic"},
+        "selected_policy_by_cohort":selection_info,"development_liquidity_evidence":rankings,
+        "sets":reports,"recommended_universe":recommendation}
+
 def _model_diagnostics(rows):
     return {"r_rank_metrics":_rank_metrics(rows),"auroc":_auc(rows),
             "brier":_brier(rows,"model_probability"),"ece":_calibration(rows).get("ece"),
@@ -970,7 +1210,7 @@ def run():
             "fixed_scale":True,"evaluation_period_scaling":False},
         "regime_distribution":{},"regime_performance":{},"ablation":{},
         "feature_coverage":{},"target_variants":{},"policy_comparison":{},"policy_ladder":{},
-        "disclosure_coverage":{},
+        "disclosure_coverage":{},"focused_universe_ablation":{},"recommended_universe":{},
         "direction3_role":"diagnostic_only; all buy decisions come exclusively from the legacy policy ladder",
         "frozen_audit_benchmark":{k:list(v) for k,v in AUDIT_63_BENCHMARK.items()},
         "feature_schema":{"version":"macro-relative-flow-v1","groups":{k:list(v) for k,v in FEATURE_GROUPS.items()},
@@ -981,6 +1221,7 @@ def run():
         "cec6d80_baseline_source":archived_baseline.get("source_run_id"),
         "portfolio":{"max_concurrent_positions":5,"weighting":"equal initial notional slots"},"cohorts":{}}
     all_flow_frames={};all_flow_sources={};all_development_feature_rows=[]
+    focused_frames_by_cohort={};focused_policy_trades_by_cohort={};focused_policy_info={}
     disclosure_entries=[];seen_disclosure_tickers=set()
     for cohort in ("KOSPI","KOSDAQ"):
         for ticker,name,_,_ in cohorts[cohort]:
@@ -1222,6 +1463,14 @@ def run():
         policy_comparison["development_gate"]={name:e.get("development_gate_passed") for name,e in policy_comparison["periods"]["development"].items()}
         out.setdefault("policy_comparison",{})[cohort]=policy_comparison
         selected_legacy_policy=ladder["selected_policy"]
+        selected_stage_for_focus=ladder.get(selected_legacy_policy,{})
+        selected_params_for_focus=selected_stage_for_focus.get("params") or {}
+        focused_frames_by_cohort[cohort]=frames
+        focused_policy_info[cohort]={"selected_policy":selected_legacy_policy,
+            "selected_parameters":selected_params_for_focus}
+        focused_policy_trades_by_cohort[cohort]={period:_legacy_policy_stage(
+            _period(legacy_choice_rows,period),selected_legacy_policy,selected_params_for_focus)
+            for period in ("development","validation","diagnostic")}
         out.setdefault("feature_coverage",{})[cohort]={"development_rows_n":len(development_rows),
             "by_feature":feature_coverage,"auto_excluded_constant_features":excluded_features,
             "exclusion_basis":"development candidates only; evaluation-period variation never affects feature inclusion"}
@@ -1334,6 +1583,10 @@ def run():
             "model":selected_config,"target":selected_target,"status":model_policy_status,
             "legacy_policy":selected_legacy_policy,"validation":cohort_result["periods"]["validation"],
             "diagnostic":cohort_result["periods"]["diagnostic"]},ensure_ascii=False),flush=True)
+    focused= _focused_universe_ablation(cohorts,focused_frames_by_cohort,
+        focused_policy_trades_by_cohort,focused_policy_info)
+    out["focused_universe_ablation"]={k:v for k,v in focused.items() if k!="recommended_universe"}
+    out["recommended_universe"]=focused["recommended_universe"]
     overall_flow_coverage,overall_flow_excluded=_feature_coverage(all_development_feature_rows)
     flow_feature_keys=[key for key in overall_flow_coverage if key in {
         "foreign_flow_5d_to_turnover","foreign_flow_20d_to_turnover",
