@@ -8,7 +8,8 @@ import numpy as np
 import pandas as pd
 
 from audit_63_fast import (_legacy_policy_stage,_not_evaluated_fundamental_stage,
-                           _disclosure_bad_title_counts,_risk_adjusted_policy_selection,
+                           _disclosure_bad_title_counts,_disclosure_failure_reasons_top,
+                           _risk_adjusted_policy_selection,
                            POLICY_SELECTION_METRIC,_focused_liquidity_ranking,
                            _focused_recommendation,_focused_universe_ablation,
                            _disclosure_gate_input_coverage,_policy_ladder)
@@ -278,6 +279,12 @@ class DisclosureTests(unittest.TestCase):
         self.assertFalse(result["diagnostics"]["attempted"])
         self.assertEqual(result["diagnostics"]["requests_n"],0)
         self.assertIn("manual disclosure-warmup workflow",result["diagnostics"]["reason"])
+        self.assertEqual(_disclosure_failure_reasons_top({"005930":result}),[])
+        self.assertEqual(_disclosure_failure_reasons_top({}),[])
+        failed=dict(result)
+        failed["diagnostics"]={**result["diagnostics"],"failures":["RuntimeError: cache read"]}
+        self.assertEqual(_disclosure_failure_reasons_top({"005930":failed}),
+                         [{"reason":"RuntimeError","count":1}])
 
     def test_risk_off_gate_removes_legacy_entries_and_fundamentals_are_not_evaluated(self):
         rows=[{"ticker":"A","entry_date":"2025-01-02","exit_date":"2025-01-05","market_regime":"RISK_OFF"},
