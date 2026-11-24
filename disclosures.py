@@ -102,20 +102,40 @@ def _read_cache(path):
     return None
 
 
-def get_cached_company_disclosures(ticker,name,start_date="2015-12-01",end_date="2026-11-13",*,cache_dir=None):
+def coverage_anchor(start, first_trading_date=None):
+    """Return the first year the instrument existed for the disclosure denominator.
+
+    A company that listed long after the requested start cannot have filings for
+    the years before it traded. When the first price bar is more than 90 days after
+    the requested start, year coverage is measured from that bar's year; otherwise
+    the full requested window is kept. The 80% threshold itself never changes.
+    """
+    if first_trading_date is None:return start
+    try:first=pd.Timestamp(first_trading_date).normalize()
+    except (TypeError,ValueError):return start
+    return max(start,first) if (first-start).days>90 else start
+
+
+def get_cached_company_disclosures(ticker,name,start_date="2015-12-01",end_date="2026-11-13",*,
+        cache_dir=None,first_trading_date=None):
     """Read the resumable cache without making network requests during an audit."""
     ticker=str(ticker).strip();name=str(name).strip()
     start=pd.Timestamp(start_date).normalize();end=pd.Timestamp(end_date).normalize()
     root=Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE
     cached=_read_cache(root/f"{ticker}.json")
     years=list(range(start.year,end.year+1))
+    anchor=coverage_anchor(start,first_trading_date)
+    covered_years=[year for year in years if year>=anchor.year]
     if not cached:
         reason="No warmup cache; use the manual disclosure-warmup workflow."
         return {"records":[],"diagnostics":{"ticker":ticker,"company_name":name,
             "source":"DART public HTML detailSearch.ax cache-only","requested_start":str(start.date()),
             "requested_end":str(end.date()),"first_date":None,"last_date":None,"rows_n":0,
             "requests_n":0,"pages_n":0,"attempted":False,"available":False,"partial":False,
-            "year_coverage_pct":0.0,"available_years_n":0,"requested_years_n":len(years),
+            "year_coverage_pct":0.0,"coverage_years_basis":"post_listing" if anchor>start else "requested_window",
+            "coverage_years_n":len(covered_years),"coverage_anchor_date":str(anchor.date()),
+            "fixed_window_coverage_pct":0.0,
+            "available_years_n":0,"requested_years_n":len(years),
             "years_with_records":[],"complete":False,"cache_hit":False,
             "request_interval_seconds":request_interval_seconds(),"failures":[reason],"reason":reason}}
     cached_diag=cached.get("diagnostics",{})
@@ -123,8 +143,9 @@ def get_cached_company_disclosures(ticker,name,start_date="2015-12-01",end_date=
         str(start.date())<=str(row["receipt_date"])<=str(end.date())]
     record_years=sorted({int(str(row["receipt_date"])[:4]) for row in rows
                          if str(row.get("receipt_date",""))[:4].isdigit()})
-    available_years=sum(year in record_years for year in years)
-    coverage=100.0*available_years/len(years) if years else 0.0
+    available_years=sum(year in record_years for year in covered_years)
+    coverage=100.0*available_years/len(covered_years) if covered_years else 0.0
+    fixed_coverage=100.0*sum(year in record_years for year in years)/len(years) if years else 0.0
     year_status=cached_diag.get("year_status",{})
     if year_status:
         complete=all(bool(year_status.get(str(year),{}).get("complete")) for year in years)
@@ -133,7 +154,12 @@ def get_cached_company_disclosures(ticker,name,start_date="2015-12-01",end_date=
             cached_diag.get("requested_start","9999-12-31")<=str(start.date()) and
             cached_diag.get("requested_end","0000-01-01")>=str(end.date()))
     available=bool(rows) and coverage>=80.0
-    partial=bool(rows) and (not complete or available_years<len(years))
+    if anchor>start and year_status:
+        # Narrowing the denominator must not hide an unfinished collection: a
+        # post-listing symbol is only usable when every covered year is complete.
+        available=available and all(bool(year_status.get(str(year),{}).get("complete"))
+            for year in covered_years)
+    partial=bool(rows) and (not complete or available_years<len(covered_years))
     failures=list(cached_diag.get("failures",[]))
     if not complete and not failures:failures=["Incomplete cached history; warmup will resume missing years/pages."]
     diag={**cached_diag,"ticker":ticker,"company_name":name,
@@ -142,6 +168,10 @@ def get_cached_company_disclosures(ticker,name,start_date="2015-12-01",end_date=
         "first_date":rows[0]["receipt_date"] if rows else None,
         "last_date":rows[-1]["receipt_date"] if rows else None,"rows_n":len(rows),
         "available":available,"partial":partial,"year_coverage_pct":round(coverage,2),
+        "coverage_years_basis":"post_listing" if anchor>start else "requested_window",
+        "coverage_years_n":len(covered_years),
+        "coverage_anchor_date":str(anchor.date()),
+        "fixed_window_coverage_pct":round(fixed_coverage,2),
         "available_years_n":available_years,"requested_years_n":len(years),
         "years_with_records":record_years,"complete":complete,"cache_hit":True,
         "attempted":False,"request_interval_seconds":request_interval_seconds(),"failures":failures}

@@ -18,7 +18,7 @@ from audit_63_fast import (_legacy_policy_stage,_not_evaluated_fundamental_stage
 from universe import AUDIT_63_BENCHMARK
 from disclosures import (collect_company_disclosures,disclosure_features_for_signal,
                          get_cached_company_disclosures,get_company_disclosures,parse_disclosure_html,
-                         bad_disclosure_keyword_matches,search_term_for)
+                         bad_disclosure_keyword_matches,search_term_for,coverage_anchor)
 from disclosure_warmup import prioritize_benchmark_targets
 
 
@@ -367,6 +367,33 @@ class DisclosureTests(unittest.TestCase):
             path.write_text(json.dumps({"enabled":False}),encoding="utf-8")
             with patch.object(audit_63_fast,"DISCLOSURE_WARMUP_REQUEST_PATH",path):
                 self.assertEqual(audit_63_fast._run_disclosure_warmup_request()["status"],"DISABLED")
+
+    def test_coverage_denominator_skips_years_before_a_late_listing(self):
+        records=[{"receipt_date":f"{year}-05-01","title":"사업보고서","rcpNo":f"{year}0501000001"}
+                 for year in range(2019,2027)]
+        cached={"records":records,"diagnostics":{"requested_start":"2015-12-01",
+            "requested_end":"2026-11-13","complete":True,
+            "year_status":{str(year):{"complete":True,"completed_pages":[1],"failed_pages":[],
+                "next_page":None,"window_start":f"{year}-01-01","window_end":f"{year}-12-31"}
+                for year in range(2015,2027)}}}
+        start=pd.Timestamp("2015-12-01")
+        self.assertEqual(coverage_anchor(start,"2016-01-04"),start)
+        self.assertEqual(coverage_anchor(start,None),start)
+        with tempfile.TemporaryDirectory() as d:
+            Path(d,"316140.json").write_text(json.dumps(cached),encoding="utf-8")
+            late=get_cached_company_disclosures("316140","우리금융지주","2015-12-01","2026-11-13",
+                cache_dir=d,first_trading_date="2019-02-13")
+            early=get_cached_company_disclosures("316140","우리금융지주","2015-12-01","2026-11-13",
+                cache_dir=d,first_trading_date="2016-01-04")
+        self.assertTrue(late["diagnostics"]["available"])
+        self.assertEqual(late["diagnostics"]["year_coverage_pct"],100.0)
+        self.assertEqual(late["diagnostics"]["coverage_years_basis"],"post_listing")
+        self.assertEqual(late["diagnostics"]["fixed_window_coverage_pct"],66.67)
+        self.assertFalse(late["diagnostics"]["partial"])
+        # A symbol that traded from the window start keeps the full requested window.
+        self.assertEqual(early["diagnostics"]["coverage_years_basis"],"requested_window")
+        self.assertEqual(early["diagnostics"]["year_coverage_pct"],66.67)
+        self.assertFalse(early["diagnostics"]["available"])
 
     def test_dart_search_uses_the_stock_code_and_recollects_an_empty_legacy_cache(self):
         self.assertEqual(search_term_for("000810","삼성화재"),("000810","stock_code"))

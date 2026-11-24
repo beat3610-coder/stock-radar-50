@@ -1516,52 +1516,10 @@ def run():
     disclosure_warmup= _run_disclosure_warmup_request()
     if disclosure_warmup is not None:
         out["disclosure_warmup_request"]=disclosure_warmup
-    for ticker,name in disclosure_entries:
-        result=get_cached_company_disclosures(ticker,name,start_date="2015-12-01",end_date=MIN_END_DATE)
-        disclosure_by_ticker[ticker]=result
-        diag=result.get("diagnostics",{})
-        print(f"DISCLOSURE_CACHE ticker={ticker} rows={len(result.get('records',[]))} "
-            f"available={diag.get('available',False)} partial={diag.get('partial',False)} "
-            f"year_coverage={diag.get('year_coverage_pct')}",flush=True)
-    available_disclosure_symbols=sum(bool(v.get("diagnostics",{}).get("available"))
-        for v in disclosure_by_ticker.values())
-    partial_disclosure_symbols=[{"ticker":ticker,
-        "year_coverage_pct":v.get("diagnostics",{}).get("year_coverage_pct"),
-        "available":bool(v.get("diagnostics",{}).get("available")),
-        "failures":v.get("diagnostics",{}).get("failures",[])}
-        for ticker,v in disclosure_by_ticker.items() if v.get("diagnostics",{}).get("partial",False)]
-    disclosure_collection={"requested_symbols":len(disclosure_entries),"attempted_symbols":0,
-        "available_symbols":available_disclosure_symbols,"partial_symbols":partial_disclosure_symbols,
-        "request_interval_seconds":request_interval_seconds(),"budget_seconds":0,
-        "budget_used_seconds":0.0,"budget_exhausted":False,"workers":0,
-        "cache_only":True,"network_requests_in_audit":0,
-        "collection_guidance":"DART search text is the six-digit stock code for Korean common shares, so a short company name cannot silently return zero filings. Cached completed years are reused and failed/missing year-pages resume later.",
-        "failures":[{"ticker":ticker,"error":"unavailable cached disclosure history",
-            "failures":v.get("diagnostics",{}).get("failures",[])}
-            for ticker,v in disclosure_by_ticker.items() if not v.get("diagnostics",{}).get("available",False)]}
-    out["disclosure_collection"]={**disclosure_collection,"source":"DART public HTML detailSearch.ax",
-        "requested_start":"2015-12-01","requested_end":MIN_END_DATE,
-        "throttling":"DART HTTP 503 under bulk collection; cache resumes failed year-pages on later runs",
-        "partial_symbols_n":len(disclosure_collection.get("partial_symbols",[])),
-        **_disclosure_failure_reasons_top(disclosure_by_ticker,limit=5),
-        "by_ticker":{code:{"first_date":v.get("diagnostics",{}).get("first_date"),
-            "last_date":v.get("diagnostics",{}).get("last_date"),"rows_n":len(v.get("records",[])),
-            "search_term":v.get("diagnostics",{}).get("search_term"),
-            "requests_n":v.get("diagnostics",{}).get("requests_n",0),
-            "year_coverage_pct":v.get("diagnostics",{}).get("year_coverage_pct"),
-            "available_years_n":v.get("diagnostics",{}).get("available_years_n"),
-            "requested_years_n":v.get("diagnostics",{}).get("requested_years_n"),
-            "available":v.get("diagnostics",{}).get("available",False),
-            "partial":v.get("diagnostics",{}).get("partial",False),
-            "complete":v.get("diagnostics",{}).get("complete",False),
-            "failures":v.get("diagnostics",{}).get("failures",[])}
-            for code,v in disclosure_by_ticker.items()},
-        "unavailable_tickers":sorted(code for code,v in disclosure_by_ticker.items()
-            if not v.get("diagnostics",{}).get("available",False)),
-        "partial_tickers":sorted(code for code,v in disclosure_by_ticker.items()
-            if v.get("diagnostics",{}).get("partial",False)),
-        "not_applicable_tickers":{code:"ETF/US security outside the Korean ordinary-stock DART feature universe"
-            for cohort in ("TIGER_ETF","SOXL") for code,_,_,_ in cohorts[cohort]}}
+    # The cache is read once per instrument after its OHLCV history is loaded, so a
+    # symbol that listed after 2015-12-01 can be measured against the years it
+    # actually existed instead of failing a fixed 12-year denominator.
+    disclosure_requested={ticker for ticker,_ in disclosure_entries}
     integrity=True
     for cohort,items in cohorts.items():
         legacy_by_variant={s:[] for s in PARAMS};broad=[];frames={};computed_by={};instruments=[];errors=[]
@@ -1580,6 +1538,16 @@ def run():
                 instruments.append({"ticker":ticker,"name":name,"source":source,"first_date":first,"last_date":last,"bars":len(prices),"variants":variants})
             except Exception as exc:errors.append({"ticker":ticker,"name":name,"error":str(exc)[:220]})
             print(f"AUDIT_PROGRESS {cohort} {i}/{len(items)} loaded={len(instruments)}",flush=True)
+        first_trading_dates={inst["ticker"]:inst["first_date"] for inst in instruments}
+        for ticker,name,_,_ in items:
+            if ticker not in disclosure_requested or ticker in disclosure_by_ticker:continue
+            result=get_cached_company_disclosures(ticker,name,start_date="2015-12-01",end_date=MIN_END_DATE,
+                first_trading_date=first_trading_dates.get(ticker))
+            disclosure_by_ticker[ticker]=result
+            diag=result.get("diagnostics",{})
+            print(f"DISCLOSURE_CACHE ticker={ticker} rows={len(result.get('records',[]))} "
+                f"available={diag.get('available',False)} partial={diag.get('partial',False)} "
+                f"year_coverage={diag.get('year_coverage_pct')} basis={diag.get('coverage_years_basis')}",flush=True)
         flow_frames={};flow_sources={}
         if cohort=="SOXL":
             flow_sources={"SOXL":{"status":"not_applicable","source":None,
@@ -1927,6 +1895,51 @@ def run():
             "model":selected_config,"target":selected_target,"status":model_policy_status,
             "legacy_policy":selected_legacy_policy,"validation":cohort_result["periods"]["validation"],
             "diagnostic":cohort_result["periods"]["diagnostic"]},ensure_ascii=False),flush=True)
+    available_disclosure_symbols=sum(bool(v.get("diagnostics",{}).get("available"))
+        for v in disclosure_by_ticker.values())
+    partial_disclosure_symbols=[{"ticker":ticker,
+        "year_coverage_pct":v.get("diagnostics",{}).get("year_coverage_pct"),
+        "available":bool(v.get("diagnostics",{}).get("available")),
+        "failures":v.get("diagnostics",{}).get("failures",[])}
+        for ticker,v in disclosure_by_ticker.items() if v.get("diagnostics",{}).get("partial",False)]
+    disclosure_collection={"requested_symbols":len(disclosure_entries),"attempted_symbols":0,
+        "available_symbols":available_disclosure_symbols,"partial_symbols":partial_disclosure_symbols,
+        "request_interval_seconds":request_interval_seconds(),"budget_seconds":0,
+        "budget_used_seconds":0.0,"budget_exhausted":False,"workers":0,
+        "cache_only":True,"network_requests_in_audit":0,
+        "collection_guidance":"DART search text is the six-digit stock code for Korean common shares, so a short company name cannot silently return zero filings. Cached completed years are reused and failed/missing year-pages resume later.",
+        "failures":[{"ticker":ticker,"error":"unavailable cached disclosure history",
+            "failures":v.get("diagnostics",{}).get("failures",[])}
+            for ticker,v in disclosure_by_ticker.items() if not v.get("diagnostics",{}).get("available",False)]}
+    out["disclosure_collection"]={**disclosure_collection,"source":"DART public HTML detailSearch.ax",
+        "requested_start":"2015-12-01","requested_end":MIN_END_DATE,
+        "throttling":"DART HTTP 503 under bulk collection; cache resumes failed year-pages on later runs",
+        "partial_symbols_n":len(disclosure_collection.get("partial_symbols",[])),
+        **_disclosure_failure_reasons_top(disclosure_by_ticker,limit=5),
+        "by_ticker":{code:{"first_date":v.get("diagnostics",{}).get("first_date"),
+            "last_date":v.get("diagnostics",{}).get("last_date"),"rows_n":len(v.get("records",[])),
+            "search_term":v.get("diagnostics",{}).get("search_term"),
+            "requests_n":v.get("diagnostics",{}).get("requests_n",0),
+            "year_coverage_pct":v.get("diagnostics",{}).get("year_coverage_pct"),
+            "coverage_years_basis":v.get("diagnostics",{}).get("coverage_years_basis"),
+            "coverage_years_n":v.get("diagnostics",{}).get("coverage_years_n"),
+            "first_trading_date":v.get("diagnostics",{}).get("coverage_anchor_date"),
+            "fixed_window_coverage_pct":v.get("diagnostics",{}).get("fixed_window_coverage_pct"),
+            "available_years_n":v.get("diagnostics",{}).get("available_years_n"),
+            "requested_years_n":v.get("diagnostics",{}).get("requested_years_n"),
+            "available":v.get("diagnostics",{}).get("available",False),
+            "partial":v.get("diagnostics",{}).get("partial",False),
+            "complete":v.get("diagnostics",{}).get("complete",False),
+            "failures":v.get("diagnostics",{}).get("failures",[])}
+            for code,v in disclosure_by_ticker.items()},
+        "unavailable_tickers":sorted(code for code,v in disclosure_by_ticker.items()
+            if not v.get("diagnostics",{}).get("available",False)),
+        "partial_tickers":sorted(code for code,v in disclosure_by_ticker.items()
+            if v.get("diagnostics",{}).get("partial",False)),
+        "not_applicable_tickers":{code:"ETF/US security outside the Korean ordinary-stock DART feature universe"
+            for cohort in ("TIGER_ETF","SOXL") for code,_,_,_ in cohorts[cohort]},
+        "coverage_years_rule":"Years before the instrument's first OHLCV bar are excluded from the year-coverage denominator only when that bar is more than 90 days after the requested start; the 80% threshold and record requirements are unchanged. fixed_window_coverage_pct keeps the 12-year result for comparison."}
+
     focused= _focused_universe_ablation(cohorts,focused_frames_by_cohort,
         focused_policy_trades_by_cohort,focused_policy_info)
     out["focused_universe_ablation"]={k:v for k,v in focused.items() if k!="recommended_universe"}
