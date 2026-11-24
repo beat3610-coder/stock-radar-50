@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "time_budget_seconds": 1800,
+  "workers": 2,
+  "priority_benchmark": true,
+  "reason": "PR #9 round 2 2026-11-24: finish the frozen 63-instrument DART cache (remaining benchmark symbols resume missing years; previously empty caches are re-queried by stock code). Delete this file after the run to return the audit to cache-only behaviour."
+}

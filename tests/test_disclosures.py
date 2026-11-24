@@ -13,11 +13,12 @@ from audit_63_fast import (_legacy_policy_stage,_not_evaluated_fundamental_stage
                            POLICY_SELECTION_METRIC,_focused_liquidity_ranking,
                            _focused_recommendation,_focused_universe_ablation,
                            _disclosure_gate_input_coverage,_policy_ladder,
-                           _policy_stage_trade_records)
+                           _policy_stage_trade_records,_disclosure_rejection,
+                           _stage_gate_rejection,_recent_signal_gate,STAGE_LABELS)
 from universe import AUDIT_63_BENCHMARK
 from disclosures import (collect_company_disclosures,disclosure_features_for_signal,
                          get_cached_company_disclosures,get_company_disclosures,parse_disclosure_html,
-                         bad_disclosure_keyword_matches)
+                         bad_disclosure_keyword_matches,search_term_for)
 from disclosure_warmup import prioritize_benchmark_targets
 
 
@@ -366,6 +367,138 @@ class DisclosureTests(unittest.TestCase):
             path.write_text(json.dumps({"enabled":False}),encoding="utf-8")
             with patch.object(audit_63_fast,"DISCLOSURE_WARMUP_REQUEST_PATH",path):
                 self.assertEqual(audit_63_fast._run_disclosure_warmup_request()["status"],"DISABLED")
+
+    def test_dart_search_uses_the_stock_code_and_recollects_an_empty_legacy_cache(self):
+        self.assertEqual(search_term_for("000810","삼성화재"),("000810","stock_code"))
+        self.assertEqual(search_term_for("SOXL","SOXL"),("SOXL","company_name"))
+
+        class Response:
+            status_code=200
+            def __init__(self,text):self.text=text
+            def raise_for_status(self):pass
+        class Session:
+            def __init__(self):self.headers={};self.terms=[]
+            def get(self,url,params,timeout):
+                self.terms.append(params["textCrpNm"])
+                year=params["startDate"][:4]
+                if params["textCrpNm"]!="000810":return Response("<html></html>")
+                return Response(f"<table><tr><td>{year}.03.01</td><td>삼성화재해상보험</td>"
+                    f"<td><a href='?rcpNo={year}0301000001'>사업보고서</a></td><td>삼성화재해상보험</td></tr></table>")
+        session=Session()
+        legacy={"records":[],"diagnostics":{"requested_start":"2015-12-01","requested_end":"2026-11-13",
+            "complete":True,"available":False,"failures":[],
+            "year_status":{"2015":{"complete":True,"completed_pages":[1],"failed_pages":[],
+                "next_page":None,"window_start":"2015-12-01","window_end":"2015-12-31"}}}}
+        with tempfile.TemporaryDirectory() as d,patch("disclosures.time.sleep"):
+            Path(d,"000810.json").write_text(json.dumps(legacy),encoding="utf-8")
+            result=get_company_disclosures("000810","삼성화재","2015-12-01","2016-12-31",
+                session=session,cache_dir=d)
+            cached=json.loads(Path(d,"000810.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(session.terms),{"000810"})
+        self.assertEqual(len(result["records"]),2)
+        self.assertTrue(result["diagnostics"]["available"])
+        self.assertEqual(result["diagnostics"]["search_term"],"000810")
+        self.assertEqual(result["diagnostics"]["search_term_kind"],"stock_code")
+        self.assertEqual(cached["diagnostics"]["search_term"],"000810")
+
+    def test_b_plus_d_stage_uses_risk_off_and_disclosure_only(self):
+        base={"ticker":"A","signal_date":"2024-01-02","entry_date":"2024-01-03",
+              "exit_date":"2024-01-10","net_pct":1.0,"market_ma200_gap_pct":0.0,
+              "signal_trend_200_pct":5.0,"relative_strength_60d_pct":5.0,
+              "signal_volatility_20d_pct":2.0,"disclosure_bad_60d":0.0,
+              "disclosure_periodic_days_since":100.0}
+        risk_off={**base,"ticker":"R","market_regime":"RISK_OFF"}
+        bad_disclosure={**base,"ticker":"B","market_regime":"NEUTRAL","disclosure_bad_60d":2.0,
+            "signal_trend_200_pct":float("nan")}
+        stale_periodic={**base,"ticker":"P","market_regime":"NEUTRAL",
+            "disclosure_periodic_days_since":5.0}
+        missing_trend={**base,"ticker":"T","market_regime":"NEUTRAL",
+            "signal_trend_200_pct":float("nan")}
+        clean={**base,"ticker":"C","market_regime":"NEUTRAL"}
+        rows=[risk_off,bad_disclosure,stale_periodic,missing_trend,clean]
+        params={"disclosure_bad_60d_max":0,"disclosure_periodic_days_since_floor":20}
+        selected=_legacy_policy_stage(rows,"legacy_risk_off_disclosure",params)
+        # B+D keeps rows whose trend fields are missing: the trend filter is not part
+        # of this stage, so only RISK_OFF and the disclosure gate can reject.
+        self.assertEqual([r["ticker"] for r in selected],["C","T"])
+        self.assertEqual(_disclosure_rejection(bad_disclosure,params),"BAD_TITLE_WITHIN_60_DAYS")
+        self.assertEqual(_disclosure_rejection(stale_periodic,params),"PERIODIC_REPORT_TOO_RECENT")
+        self.assertEqual(_disclosure_rejection(missing_trend,params),None)
+        self.assertEqual(_stage_gate_rejection(risk_off,"legacy_risk_off_disclosure",params),
+                         "MARKET_REGIME_RISK_OFF")
+        self.assertEqual(_stage_gate_rejection(missing_trend,"legacy_risk_off_trend_disclosure",params),
+                         "MISSING_TREND_FEATURES")
+        # The trend stages keep the same gate chain: disclosure is evaluated only
+        # after the trend filter, so a missing trend value still wins first.
+        self.assertEqual([r["ticker"] for r in _legacy_policy_stage(rows,"legacy_risk_off_trend_filter",
+            {"market_ma200_gap_min_pct":-5.0,"volatility_cap_pct":10.0})],["C","P"])
+
+    def _ladder_rows(self,count=12):
+        rows=[]
+        for i in range(count):
+            rows.append({"ticker":f"T{i:02d}","signal_date":f"2024-01-{i+1:02d}",
+                "entry_date":f"2024-01-{i+2:02d}","exit_date":f"2024-01-{i+10:02d}",
+                "net_pct":-1.0 if i==count-1 else 2.0,"market_regime":"NEUTRAL",
+                "market_ma200_gap_pct":0.0,"signal_trend_200_pct":5.0,
+                "relative_strength_60d_pct":5.0,"signal_volatility_20d_pct":2.0,
+                "disclosure_bad_60d":3.0 if i==count-1 else 0.0,
+                "disclosure_periodic_days_since":100.0})
+        return rows
+
+    def test_policy_ladder_scores_b_plus_d_on_disclosure_settings_only(self):
+        rows=self._ladder_rows()
+        ladder=_policy_ladder(rows,{},30,"KOSPI",{"available_symbols_n":30,
+            "requested_symbols_n":30,"coverage_pct":100.0})
+        bd=ladder["legacy_risk_off_disclosure"]
+        self.assertEqual(bd["status"],"EVALUATED")
+        self.assertEqual(set(bd["params"]),{"disclosure_bad_60d_max",
+            "disclosure_periodic_days_since_floor"})
+        self.assertEqual(len(bd["development_grid"]),6)
+        self.assertIn("trend filter deliberately excluded",bd["stage_definition"])
+        self.assertEqual(bd["periods"]["development"]["trades"],11)
+        self.assertEqual(bd["disclosure_coverage"]["development_candidate_rows"]
+            ["disclosure_coverage_basis"],"after B-stage RISK_OFF filter; no selected C parameters")
+        self.assertTrue(bd["disclosure_coverage"]["selection_eligible"])
+        self.assertEqual(ladder["stage_ladder"]["B+D"],"legacy_risk_off_disclosure")
+        self.assertTrue(ladder["development_selection_comparison"]["stages"]
+            ["legacy_risk_off_disclosure"]["candidate"])
+        # B+D keeps the B-stage trades that pass the disclosure gate, so its
+        # development sample is never larger than B's.
+        self.assertLessEqual(bd["periods"]["development"]["trades"],
+            ladder["legacy_risk_off_hard_gate"]["periods"]["development"]["trades"])
+
+    def test_policy_ladder_does_not_promote_b_plus_d_when_coverage_is_low(self):
+        ladder=_policy_ladder(self._ladder_rows(),{},30,"KOSPI",{"available_symbols_n":9,
+            "requested_symbols_n":30,"coverage_pct":30.0})
+        bd=ladder["legacy_risk_off_disclosure"]
+        self.assertEqual(bd["status"],"INSUFFICIENT_DEVELOPMENT_SAMPLE")
+        self.assertIsNone(bd["params"])
+        self.assertEqual(bd["periods"]["development"]["trades"],0)
+        self.assertTrue(bd["disclosure_coverage"]["coverage_limited"])
+
+    def test_recent_signal_gate_reports_which_symbols_the_disclosure_filter_drops(self):
+        rows=self._ladder_rows()
+        bd_params={"disclosure_bad_60d_max":0,"disclosure_periodic_days_since_floor":0}
+        ladder={"legacy_only":{"status":"EVALUATED","params":{}},
+                "legacy_risk_off_hard_gate":{"status":"EVALUATED","params":{}},
+                "legacy_risk_off_disclosure":{"status":"EVALUATED","params":bd_params},
+                "legacy_risk_off_trend_filter":{"status":"INSUFFICIENT_DEVELOPMENT_SAMPLE","params":None},
+                "legacy_risk_off_trend_disclosure":{"status":"INSUFFICIENT_DEVELOPMENT_SAMPLE","params":None}}
+        result=_recent_signal_gate(rows,ladder,window_days=365)
+        self.assertEqual(result["status"],"EVALUATED")
+        self.assertEqual(result["latest_signal_date"],"2024-01-12")
+        self.assertEqual(result["accepted_n_by_stage"]["A"],12)
+        self.assertEqual(result["accepted_n_by_stage"]["B+D"],11)
+        self.assertEqual(result["b_plus_d_filter"]["dropped_symbols"],["T11"])
+        self.assertEqual(result["b_plus_d_filter"]["dropped"][0]["reason"],"BAD_TITLE_WITHIN_60_DAYS")
+        self.assertEqual(result["stage_status"]["legacy_risk_off_trend_filter"],
+            "INSUFFICIENT_DEVELOPMENT_SAMPLE")
+        dropped_signal=next(s for s in result["signals"] if s["ticker"]=="T11")
+        self.assertFalse(dropped_signal["stages"]["A"]["accepted"] and
+            dropped_signal["stages"]["B+D"]["accepted"])
+        self.assertEqual(dropped_signal["stages"]["B+D"]["reason"],"BAD_TITLE_WITHIN_60_DAYS")
+        self.assertEqual(dropped_signal["stages"]["C"]["reason"],"STAGE_NOT_EVALUATED")
+        self.assertEqual(STAGE_LABELS["legacy_risk_off_disclosure"],"B+D")
 
 
 

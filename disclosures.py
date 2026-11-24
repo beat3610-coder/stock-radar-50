@@ -136,7 +136,8 @@ def get_cached_company_disclosures(ticker,name,start_date="2015-12-01",end_date=
     partial=bool(rows) and (not complete or available_years<len(years))
     failures=list(cached_diag.get("failures",[]))
     if not complete and not failures:failures=["Incomplete cached history; warmup will resume missing years/pages."]
-    diag={**cached_diag,"ticker":ticker,"company_name":name,"source":"DART public HTML detailSearch.ax cache-only",
+    diag={**cached_diag,"ticker":ticker,"company_name":name,
+        "search_term":cached_diag.get("search_term"),"source":"DART public HTML detailSearch.ax cache-only",
         "requested_start":str(start.date()),"requested_end":str(end.date()),
         "first_date":rows[0]["receipt_date"] if rows else None,
         "last_date":rows[-1]["receipt_date"] if rows else None,"rows_n":len(rows),
@@ -159,6 +160,19 @@ def _paced_get(session,params):
     return session.get(DISCLOSURE_URL,params=params,timeout=20)
 
 
+def search_term_for(ticker,name):
+    """Return the DART search text and which identifier it came from.
+
+    DART's public search accepts the six-digit stock code, which is stable, while
+    a company-name string may differ from the registered name (``현대차`` vs
+    ``현대자동차``) and then silently returns no filings. Korean common shares are
+    therefore looked up by code; anything else falls back to the given name.
+    """
+    code=str(ticker or "").strip()
+    if re.fullmatch(r"\d{6}",code):return code,"stock_code"
+    return str(name or "").strip(),"company_name"
+
+
 def get_company_disclosures(ticker,name,start_date="2015-12-01",end_date=None,*,session=None,
                             cache_dir=None,force_refresh=False):
     """Return ``{"records": [...], "diagnostics": {...}}`` for one company.
@@ -169,11 +183,17 @@ def get_company_disclosures(ticker,name,start_date="2015-12-01",end_date=None,*,
     """
     import requests
     ticker=str(ticker).strip();name=str(name).strip()
+    search_term,search_term_kind=search_term_for(ticker,name)
     start=pd.Timestamp(start_date).normalize();end=(pd.Timestamp(date.today()) if end_date is None else pd.Timestamp(end_date)).normalize()
     root=Path(cache_dir) if cache_dir is not None else DEFAULT_CACHE
     root.mkdir(parents=True,exist_ok=True);path=root/f"{ticker}.json"
     cached=None if force_refresh else _read_cache(path)
     cached_diag=(cached or {}).get("diagnostics",{})
+    if cached and not (cached.get("records") or []) and cached_diag.get("search_term")!=search_term:
+        # An older cache that completed every year with zero rows was queried with
+        # an identifier DART does not resolve (typically a short company name).
+        # Re-collect it with the canonical term instead of trusting the empty result.
+        cached=None;cached_diag={}
     if cached:
         if (cached_diag.get("complete") and cached_diag.get("requested_start","9999-12-31")<=str(start.date())
                 and cached_diag.get("requested_end","0000-01-01")>=str(end.date())):
@@ -188,6 +208,7 @@ def get_company_disclosures(ticker,name,start_date="2015-12-01",end_date=None,*,
                 "available":available,"partial":bool(records) and available_years<len(years),
                 "year_coverage_pct":round(coverage,2),"available_years_n":available_years,
                 "requested_years_n":len(years),"years_with_records":record_years,
+                "search_term":search_term,"search_term_kind":search_term_kind,
                 "request_interval_seconds":request_interval_seconds()}}
 
     if session is None:session=requests.Session()
@@ -234,7 +255,7 @@ def get_company_disclosures(ticker,name,start_date="2015-12-01",end_date=None,*,
         year_failure_pages=[];year_complete=False;next_page=start_page;year_requests_n=0
         for page in range(start_page,MAX_PAGES_PER_COMPANY_YEAR+1):
             params={"currentPage":page,"maxResults":MAX_RESULTS,"sort":"date","series":0,
-                "textCrpNm":name,"startDate":lo.strftime("%Y%m%d"),"endDate":hi.strftime("%Y%m%d")}
+                "textCrpNm":search_term,"startDate":lo.strftime("%Y%m%d"),"endDate":hi.strftime("%Y%m%d")}
             html=None
             for attempt in range(1,5):
                 requests_n+=1;year_requests_n+=1
@@ -284,6 +305,7 @@ def get_company_disclosures(ticker,name,start_date="2015-12-01",end_date=None,*,
     available=bool(rows) and year_coverage_pct>=80.0
     partial=bool(rows) and (not complete or available_years_n<requested_years_n)
     diag={"ticker":ticker,"company_name":name,"source":"DART public HTML detailSearch.ax",
+        "search_term":search_term,"search_term_kind":search_term_kind,
         "requested_start":str(start.date()),"requested_end":str(end.date()),"first_date":rows[0]["receipt_date"] if rows else None,
         "last_date":rows[-1]["receipt_date"] if rows else None,"rows_n":len(rows),"requests_n":requests_n,
         "pages_n":pages_n,"attempted":requests_n>0,"available":available,"partial":partial,

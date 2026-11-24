@@ -703,6 +703,11 @@ def _legacy_policy_stage(rows,stage,params=None):
         if _risk_off_blocked(row):continue
         if stage=="legacy_risk_off_hard_gate":
             selected.append(row);continue
+        if stage=="legacy_risk_off_disclosure":
+            # B+D: the RISK_OFF hard gate plus the disclosure filter, deliberately
+            # without the trend filter so the validation sample C/D lose is kept.
+            if _disclosure_rejection(row,params) is not None:continue
+            selected.append(row);continue
         try:
             market_gap=float(row["market_ma200_gap_pct"])
             stock_trend=float(row["signal_trend_200_pct"])
@@ -713,14 +718,22 @@ def _legacy_policy_stage(rows,stage,params=None):
         if (market_gap<float(params.get("market_ma200_gap_min_pct",np.inf)) or stock_trend<=0
                 or excess60<=0 or volatility>float(params.get("volatility_cap_pct",-np.inf))):continue
         if stage in ("legacy_risk_off_trend_disclosure","legacy_risk_off_trend_disclosure_short_fundamental"):
-            try:
-                bad=float(row["disclosure_bad_60d"]);periodic=float(row["disclosure_periodic_days_since"])
-                if not np.isfinite(bad) or not np.isfinite(periodic):continue
-            except (KeyError,TypeError,ValueError):continue
-            if bad>float(params.get("disclosure_bad_60d_max",0)):continue
-            if periodic<float(params.get("disclosure_periodic_days_since_floor",0)):continue
+            if _disclosure_rejection(row,params) is not None:continue
         selected.append(row)
     return _resolve_nonoverlapping(selected)
+
+
+def _disclosure_rejection(row,params=None):
+    """Return why the disclosure gate rejects a signal row, or None when it passes."""
+    params=params or {}
+    try:
+        bad=float(row["disclosure_bad_60d"]);periodic=float(row["disclosure_periodic_days_since"])
+    except (KeyError,TypeError,ValueError):return "MISSING_DISCLOSURE_FEATURES"
+    if not np.isfinite(bad) or not np.isfinite(periodic):return "MISSING_DISCLOSURE_FEATURES"
+    if bad>float(params.get("disclosure_bad_60d_max",0)):return "BAD_TITLE_WITHIN_60_DAYS"
+    if periodic<float(params.get("disclosure_periodic_days_since_floor",0)):
+        return "PERIODIC_REPORT_TOO_RECENT"
+    return None
 
 
 def _disclosure_gate_input_coverage(rows,trend_params=None):
@@ -758,10 +771,10 @@ POLICY_SELECTION_METRIC="development mean_net_pct / max(abs(sequence MDD),1)"
 
 
 def _risk_adjusted_policy_selection(steps):
-    """Select A-D using positive development return scaled by sequence MDD."""
+    """Select among A, B, B+D, C and D using positive development return scaled by sequence MDD."""
     comparison={};eligible=[]
-    stage_names=("legacy_only","legacy_risk_off_hard_gate","legacy_risk_off_trend_filter",
-                 "legacy_risk_off_trend_disclosure")
+    stage_names=("legacy_only","legacy_risk_off_hard_gate","legacy_risk_off_disclosure",
+                 "legacy_risk_off_trend_filter","legacy_risk_off_trend_disclosure")
     for name in stage_names:
         step=steps.get(name,{})
         dev=step.get("periods",{}).get("development",{})
@@ -819,19 +832,79 @@ def _policy_ladder(legacy_rows,frames,requested,cohort,disclosures_available):
         disclosure_available_symbols=1 if disclosures_available else 0
         disclosure_requested_symbols=max(1,requested)
         symbol_coverage_pct=100.0 if disclosures_available else 0.0
-    def stage_periods(stage,params=None):
+    def stage_periods(stage,params=None,disclosure_upstream=None):
         report={}
         for period in period_names:
             source_rows=_period(legacy_rows,period)
             rows=_legacy_policy_stage(source_rows,stage,params)
             report[period]=_metrics_with_portfolio(rows,requested,frames,period)
             report[period]["small_sample"]=period=="validation" and report[period].get("trades",0)<MIN_POLICY_TRADES
-            if stage=="legacy_risk_off_trend_disclosure":
-                report[period].update(_disclosure_gate_input_coverage(source_rows,params))
+            if stage in ("legacy_risk_off_disclosure","legacy_risk_off_trend_disclosure"):
+                report[period].update(_disclosure_gate_input_coverage(source_rows,disclosure_upstream))
         return report
+
+    def empty_disclosure_periods(disclosure_upstream=None):
+        periods={}
+        for period in period_names:
+            periods[period]=_metrics_with_portfolio([],requested,frames,period)
+            periods[period].update(_disclosure_gate_input_coverage(
+                _period(legacy_rows,period),disclosure_upstream))
+            periods[period]["small_sample"]=period=="validation" and periods[period].get("trades",0)<MIN_POLICY_TRADES
+        return periods
+
+    def disclosure_stage(stage_name,coverage_upstream,base_params_iter,definition,status_label):
+        """Score one disclosure stage on predeclared settings, development only."""
+        grid=[]
+        dev_coverage=_disclosure_gate_input_coverage(dev_a,coverage_upstream)
+        row_coverage_low=(dev_coverage["disclosure_coverage_applicable"] and
+            dev_coverage["disclosure_coverage_pct"]<50.0)
+        partial=(symbol_coverage_pct<50.0 or row_coverage_low)
+        if disclosure_available_symbols>0:
+            for base_params in base_params_iter:
+                for bad_max in DISCLOSURE_BAD_MAX_GRID:
+                    for periodic_floor in DISCLOSURE_PERIODIC_DAYS_FLOOR_GRID:
+                        params={**base_params,"disclosure_bad_60d_max":bad_max,
+                            "disclosure_periodic_days_since_floor":periodic_floor}
+                        dev_rows=_legacy_policy_stage(dev_a,stage_name,params)
+                        grid.append({"params":params,"development":_trade_metrics(dev_rows)})
+            valid=[x for x in grid if x["development"].get("trades",0)>=MIN_POLICY_TRADES]
+            selected=max(valid,key=lambda x:(x["development"].get("mean_net_pct",-np.inf),
+                -x["development"].get("trades",0))) if valid else None
+            if selected:
+                step={"status":"INSUFFICIENT_DEVELOPMENT_SAMPLE" if partial else "EVALUATED",
+                    "params":None if partial else selected["params"],
+                    "selection_rule":"development net per trade maximized among predeclared settings with at least MIN_POLICY_TRADES",
+                    "development_grid":grid,
+                    "periods":empty_disclosure_periods(coverage_upstream) if partial else
+                        stage_periods(stage_name,selected["params"],disclosure_upstream=coverage_upstream)}
+            else:
+                step={"status":"INSUFFICIENT_DEVELOPMENT_SAMPLE","params":None,
+                    "development_grid":grid,"periods":empty_disclosure_periods(coverage_upstream)}
+        else:
+            step={"status":"NOT_EVALUATED","params":None,"development_grid":[],
+                "periods":empty_disclosure_periods(coverage_upstream),
+                "reason":"No symbol met the 80% requested-year availability rule; missing disclosure fields remain NaN and do not add trades."}
+        step["stage_definition"]=definition
+        step["disclosure_coverage"]={"available_symbols_n":disclosure_available_symbols,
+            "requested_symbols_n":disclosure_requested_symbols,
+            "symbol_coverage_pct":round(symbol_coverage_pct,2),
+            "minimum_coverage_for_full_evaluation_pct":50.0,
+            "development_candidate_rows":dev_coverage,
+            "coverage_limited":bool(partial),
+            "status_reason":f"Available coverage below 50%; {status_label} is not promoted and no trades are added."
+                if partial else None,
+            "selection_eligible":step.get("status")=="EVALUATED"}
+        return step
+
     steps["legacy_only"]={"status":"EVALUATED","params":{},"periods":stage_periods("legacy_only")}
     steps["legacy_risk_off_hard_gate"]={"status":"EVALUATED","params":{"rule":REGIME_RULE["risk_off"]},
         "periods":stage_periods("legacy_risk_off_hard_gate")}
+    # B+D isolates the disclosure filter above the RISK_OFF gate: it keeps the
+    # validation sample that the trend filter of C/D removes, so the disclosure
+    # contribution can be judged without a sample-size confound.
+    steps["legacy_risk_off_disclosure"]=disclosure_stage("legacy_risk_off_disclosure",
+        None,[{}],"B + D: RISK_OFF hard gate plus the DART disclosure filter, with the trend filter deliberately excluded.",
+        "B+D")
 
     trend_grid=[]
     for gap_min in TREND_MARKET_MA200_GAPS:
@@ -852,64 +925,25 @@ def _policy_ladder(legacy_rows,frames,requested,cohort,disclosures_available):
         steps["legacy_risk_off_trend_filter"]={"status":"INSUFFICIENT_DEVELOPMENT_SAMPLE","params":None,
             "development_grid":trend_grid,"periods":{p:_metrics_with_portfolio([],requested,frames,p) for p in period_names}}
 
-    dgrid=[]
     disclosure_params_for_coverage=selected_trend["params"] if selected_trend else None
-    dev_disclosure_coverage=_disclosure_gate_input_coverage(dev_a,disclosure_params_for_coverage)
-    row_coverage_low=(dev_disclosure_coverage["disclosure_coverage_applicable"] and
-        dev_disclosure_coverage["disclosure_coverage_pct"]<50.0)
-    partial_coverage=(symbol_coverage_pct<50.0 or row_coverage_low)
-    def empty_disclosure_periods():
-        periods={}
-        for period in period_names:
-            periods[period]=_metrics_with_portfolio([],requested,frames,period)
-            periods[period].update(_disclosure_gate_input_coverage(
-                _period(legacy_rows,period),disclosure_params_for_coverage))
-            periods[period]["small_sample"]=period=="validation" and periods[period].get("trades",0)<MIN_POLICY_TRADES
-        return periods
-    if disclosure_available_symbols>0:
-        for trend in trend_grid:
-            for bad_max in DISCLOSURE_BAD_MAX_GRID:
-                for periodic_floor in DISCLOSURE_PERIODIC_DAYS_FLOOR_GRID:
-                    params={**trend["params"],"disclosure_bad_60d_max":bad_max,
-                        "disclosure_periodic_days_since_floor":periodic_floor}
-                    dev_rows=_legacy_policy_stage(dev_a,"legacy_risk_off_trend_disclosure",params)
-                    dgrid.append({"params":params,"development":_trade_metrics(dev_rows)})
-        valid_d=[x for x in dgrid if x["development"].get("trades",0)>=MIN_POLICY_TRADES]
-        selected_d=max(valid_d,key=lambda x:(x["development"].get("mean_net_pct",-np.inf),-x["development"].get("trades",0))) if valid_d else None
-        if selected_d:
-            steps["legacy_risk_off_trend_disclosure"]={
-                "status":"INSUFFICIENT_DEVELOPMENT_SAMPLE" if partial_coverage else "EVALUATED",
-                "params":None if partial_coverage else selected_d["params"],
-                "selection_rule":"development net per trade maximized among predeclared settings with at least MIN_POLICY_TRADES",
-                "development_grid":dgrid,
-                "periods":empty_disclosure_periods() if partial_coverage else
-                    stage_periods("legacy_risk_off_trend_disclosure",selected_d["params"])}
-        else:
-            steps["legacy_risk_off_trend_disclosure"]={
-                "status":"INSUFFICIENT_DEVELOPMENT_SAMPLE",
-                "params":None,"development_grid":dgrid,"periods":empty_disclosure_periods()}
-    else:
-        steps["legacy_risk_off_trend_disclosure"]={"status":"NOT_EVALUATED","params":None,
-            "development_grid":[],"periods":empty_disclosure_periods(),
-            "reason":"No symbol met the 80% requested-year availability rule; missing disclosure fields remain NaN and do not add trades."}
-    d_step=steps["legacy_risk_off_trend_disclosure"]
-    d_step["disclosure_coverage"]={"available_symbols_n":disclosure_available_symbols,
-        "requested_symbols_n":disclosure_requested_symbols,"symbol_coverage_pct":round(symbol_coverage_pct,2),
-        "minimum_coverage_for_full_evaluation_pct":50.0,
-        "development_candidate_rows":dev_disclosure_coverage,
-        "coverage_limited":bool(partial_coverage),
-        "status_reason":"Available coverage below 50%; D is not promoted and no trades are added." if partial_coverage else None,
-        "selection_eligible":d_step.get("status")=="EVALUATED"}
+    steps["legacy_risk_off_trend_disclosure"]=disclosure_stage("legacy_risk_off_trend_disclosure",
+        disclosure_params_for_coverage,[x["params"] for x in trend_grid],
+        "C + D: RISK_OFF hard gate, selected trend filter and the DART disclosure filter.",
+        "D")
     steps["legacy_risk_off_trend_disclosure_short_fundamental"]=_not_evaluated_fundamental_stage()
 
     selected,selection_comparison=_risk_adjusted_policy_selection(steps)
     steps["selected_policy"]=selected
     steps["selection_metric"]=POLICY_SELECTION_METRIC
     steps["development_selection_comparison"]=selection_comparison
-    steps["selection_rule"]=("Among A-D, select the development candidate with the highest mean_net_pct / "
+    steps["selection_rule"]=("Among A, B, B+D, C and D, select the development candidate with the highest mean_net_pct / "
         "max(abs(sequence MDD),1), requiring at least MIN_POLICY_TRADES and positive development mean net; "
         "ties use lower absolute sequence MDD then stage name ascending. A is scored on the same rule and is "
         "the fallback when no candidate qualifies. Validation and diagnostic are report-only; E is NOT_EVALUATED.")
+    steps["stage_ladder"]={"A":"legacy_only","B":"legacy_risk_off_hard_gate",
+        "B+D":"legacy_risk_off_disclosure","C":"legacy_risk_off_trend_filter",
+        "D":"legacy_risk_off_trend_disclosure",
+        "note":"B+D adds only the disclosure filter to B; C adds only the trend filter; D combines trend and disclosure."}
     steps["development_volatility_caps_pct"]={k:round(v,8) for k,v in vol_caps.items()}
     steps["grid_constants"]={"market_ma200_gap_min_pct":list(TREND_MARKET_MA200_GAPS),
         "stock_ma200_gap_gt_pct":0,"relative_strength_60d_gt_pct":0,
@@ -1204,7 +1238,8 @@ def _focused_recommendation(sets,baseline_dev):
 def _policy_stage_trade_records(ladder,legacy_choice_rows):
     """Compact per-stage trade rows so the universe tables can be re-checked offline."""
     stages={}
-    for stage_name in ("legacy_only","legacy_risk_off_hard_gate","legacy_risk_off_trend_filter"):
+    for stage_name in ("legacy_only","legacy_risk_off_hard_gate","legacy_risk_off_disclosure",
+            "legacy_risk_off_trend_filter","legacy_risk_off_trend_disclosure"):
         entry=ladder.get(stage_name) or {}
         periods={}
         for period in ("development","validation","diagnostic"):
@@ -1215,10 +1250,103 @@ def _policy_stage_trade_records(ladder,legacy_choice_rows):
                 trade_rows=[]
             periods[period]=[{"ticker":str(t.get("ticker")),"signal_date":str(t.get("signal_date")),
                 "entry_date":str(t.get("entry_date")),"exit_date":str(t.get("exit_date")),
-                "net_pct":t.get("net_pct"),"market_regime":t.get("market_regime")} for t in trade_rows]
+                "net_pct":t.get("net_pct"),"market_regime":t.get("market_regime"),
+                "disclosure_bad_60d":t.get("disclosure_bad_60d"),
+                "disclosure_periodic_days_since":t.get("disclosure_periodic_days_since")} for t in trade_rows]
         stages[stage_name]={"status":entry.get("status","NOT_EVALUATED"),
             "params":entry.get("params"),"periods":periods}
     return stages
+
+
+def _stage_gate_rejection(row,stage,params=None):
+    """Reason a signal row fails a stage's entry gate, or None when it passes.
+
+    Non-overlap resolution is not part of the gate; a row that passes here can
+    still be dropped because an earlier accepted trade holds the same window.
+    """
+    if stage=="legacy_only":return None
+    if _risk_off_blocked(row):return "MARKET_REGIME_RISK_OFF"
+    if stage=="legacy_risk_off_hard_gate":return None
+    params=params or {}
+    if stage=="legacy_risk_off_disclosure":return _disclosure_rejection(row,params)
+    try:
+        market_gap=float(row["market_ma200_gap_pct"]);stock_trend=float(row["signal_trend_200_pct"])
+        excess60=float(row["relative_strength_60d_pct"]);volatility=float(row["signal_volatility_20d_pct"])
+    except (KeyError,TypeError,ValueError):return "MISSING_TREND_FEATURES"
+    if not all(np.isfinite(x) for x in (market_gap,stock_trend,excess60,volatility)):
+        return "MISSING_TREND_FEATURES"
+    if market_gap<float(params.get("market_ma200_gap_min_pct",np.inf)):return "MARKET_MA200_GAP_BELOW_FLOOR"
+    if stock_trend<=0:return "STOCK_TREND_200_NOT_POSITIVE"
+    if excess60<=0:return "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+    if volatility>float(params.get("volatility_cap_pct",-np.inf)):return "VOLATILITY_ABOVE_CAP"
+    if stage=="legacy_risk_off_trend_disclosure":return _disclosure_rejection(row,params)
+    return None
+
+
+RECENT_SIGNAL_WINDOW_DAYS=14
+STAGE_LABELS={"legacy_only":"A","legacy_risk_off_hard_gate":"B",
+    "legacy_risk_off_disclosure":"B+D","legacy_risk_off_trend_filter":"C",
+    "legacy_risk_off_trend_disclosure":"D"}
+
+
+def _recent_signal_gate(legacy_rows,ladder,window_days=RECENT_SIGNAL_WINDOW_DAYS):
+    """Show which of the latest signals each stage keeps and why the disclosure gate drops the rest.
+
+    This reports the audit's own last signal dates; the fixed holdout window is not
+    extended and no future price is used.
+    """
+    rows=[r for r in legacy_rows if r.get("signal_date")]
+    if not rows:return {"status":"NO_SIGNALS","stage_labels":STAGE_LABELS}
+    latest=max(str(r["signal_date"]) for r in rows)
+    cutoff=(date.fromisoformat(latest)-timedelta(days=int(window_days))).isoformat()
+    recent=[r for r in rows if str(r["signal_date"])>=cutoff]
+    accepted={};gate_passed={};status={};params_used={}
+    for name in STAGE_LABELS:
+        entry=ladder.get(name) or {}
+        status[name]=entry.get("status","NOT_EVALUATED");params_used[name]=entry.get("params")
+        if status[name]!="EVALUATED":
+            accepted[name]=[];gate_passed[name]=[];continue
+        gate_passed[name]=[r for r in recent if _stage_gate_rejection(r,name,entry.get("params")) is None]
+        accepted[name]=_legacy_policy_stage(recent,name,entry.get("params") or {})
+    def key(row):return f"{row.get('ticker')}|{row.get('signal_date')}"
+    accepted_keys={name:{key(r) for r in trade_rows} for name,trade_rows in accepted.items()}
+    signals=[]
+    for row in sorted(recent,key=lambda r:(str(r["signal_date"]),str(r.get("ticker"))),reverse=True):
+        decisions={}
+        for name,label in STAGE_LABELS.items():
+            if status[name]!="EVALUATED":
+                decisions[label]={"accepted":False,"reason":"STAGE_NOT_EVALUATED"};continue
+            rejection=_stage_gate_rejection(row,name,params_used[name])
+            if rejection is not None:decisions[label]={"accepted":False,"reason":rejection}
+            elif key(row) in accepted_keys[name]:decisions[label]={"accepted":True,"reason":None}
+            else:decisions[label]={"accepted":False,"reason":"OVERLAP_WITH_AN_ACCEPTED_TRADE"}
+        signals.append({"ticker":str(row.get("ticker")),"signal_date":str(row.get("signal_date")),
+            "market_regime":row.get("market_regime"),
+            "disclosure_bad_60d":row.get("disclosure_bad_60d"),
+            "disclosure_periodic_days_since":row.get("disclosure_periodic_days_since"),
+            "stages":decisions})
+    bd_params=params_used.get("legacy_risk_off_disclosure") or {}
+    bd_dropped=[]
+    for row in recent:
+        if _risk_off_blocked(row):continue
+        rejection=_disclosure_rejection(row,bd_params)
+        if rejection is not None:
+            bd_dropped.append({"ticker":str(row.get("ticker")),"signal_date":str(row.get("signal_date")),
+                "reason":rejection,"disclosure_bad_60d":row.get("disclosure_bad_60d"),
+                "disclosure_periodic_days_since":row.get("disclosure_periodic_days_since")})
+    return {"status":"EVALUATED","window_days":window_days,"latest_signal_date":latest,
+        "window_start":cutoff,"signals_n":len(signals),"stage_labels":STAGE_LABELS,
+        "stage_status":status,
+        "accepted_n_by_stage":{STAGE_LABELS[name]:len(accepted[name]) for name in STAGE_LABELS},
+        "gate_passed_n_by_stage":{STAGE_LABELS[name]:len(gate_passed[name]) for name in STAGE_LABELS},
+        "b_plus_d_filter":{"parameters":bd_params,
+            "gate_passed_symbols":sorted({str(r.get('ticker')) for r in
+                [row for row in recent if not _risk_off_blocked(row) and
+                 _disclosure_rejection(row,bd_params) is None]}),
+            "dropped":bd_dropped,
+            "dropped_symbols":sorted({row["ticker"] for row in bd_dropped})},
+        "signals":signals,
+        "note":"Latest audit signal dates only; the fixed holdout end is unchanged and no future price is used. Acceptance is after non-overlapping trade resolution."}
 
 
 def _focused_universe_ablation(cohorts,frames_by_cohort,policy_trades_by_cohort,policy_info,
@@ -1362,8 +1490,10 @@ def run():
             "fixed_scale":True,"evaluation_period_scaling":False},
         "regime_distribution":{},"regime_performance":{},"ablation":{},
         "feature_coverage":{},"target_variants":{},"policy_comparison":{},"policy_ladder":{},
+        "recent_signal_gate":{},
         "disclosure_coverage":{},"focused_universe_ablation":{},"recommended_universe":{},
         "focused_universe_ablation_policy_b":{},"recommended_universe_policy_b":{},
+        "focused_universe_ablation_policy_b_plus_d":{},"recommended_universe_policy_b_plus_d":{},
         "direction3_role":"diagnostic_only; all buy decisions come exclusively from the legacy policy ladder",
         "frozen_audit_benchmark":{k:list(v) for k,v in AUDIT_63_BENCHMARK.items()},
         "feature_schema":{"version":"macro-relative-flow-v1","groups":{k:list(v) for k,v in FEATURE_GROUPS.items()},
@@ -1376,6 +1506,7 @@ def run():
     all_flow_frames={};all_flow_sources={};all_development_feature_rows=[]
     focused_frames_by_cohort={};focused_policy_trades_by_cohort={};focused_policy_info={}
     focused_policy_b_trades_by_cohort={};focused_policy_b_info={}
+    focused_policy_bd_trades_by_cohort={};focused_policy_bd_info={}
     disclosure_entries=[];seen_disclosure_tickers=set()
     for cohort in ("KOSPI","KOSDAQ"):
         for ticker,name,_,_ in cohorts[cohort]:
@@ -1404,7 +1535,7 @@ def run():
         "request_interval_seconds":request_interval_seconds(),"budget_seconds":0,
         "budget_used_seconds":0.0,"budget_exhausted":False,"workers":0,
         "cache_only":True,"network_requests_in_audit":0,
-        "collection_guidance":"Run disclosure-warmup manually in smaller batches over several days; cached completed years are reused and failed/missing year-pages resume later.",
+        "collection_guidance":"DART search text is the six-digit stock code for Korean common shares, so a short company name cannot silently return zero filings. Cached completed years are reused and failed/missing year-pages resume later.",
         "failures":[{"ticker":ticker,"error":"unavailable cached disclosure history",
             "failures":v.get("diagnostics",{}).get("failures",[])}
             for ticker,v in disclosure_by_ticker.items() if not v.get("diagnostics",{}).get("available",False)]}
@@ -1415,6 +1546,7 @@ def run():
         **_disclosure_failure_reasons_top(disclosure_by_ticker,limit=5),
         "by_ticker":{code:{"first_date":v.get("diagnostics",{}).get("first_date"),
             "last_date":v.get("diagnostics",{}).get("last_date"),"rows_n":len(v.get("records",[])),
+            "search_term":v.get("diagnostics",{}).get("search_term"),
             "requests_n":v.get("diagnostics",{}).get("requests_n",0),
             "year_coverage_pct":v.get("diagnostics",{}).get("year_coverage_pct"),
             "available_years_n":v.get("diagnostics",{}).get("available_years_n"),
@@ -1671,8 +1803,18 @@ def run():
             for period in ("development","validation","diagnostic")}
         focused_policy_b_info[cohort]={"selected_policy":"legacy_risk_off_hard_gate",
             "selected_parameters":{"rule":REGIME_RULE["risk_off"]}}
+        # The same sets under B+D (RISK_OFF plus disclosure, no trend filter) so the
+        # universe decision does not depend on which policy stage is selected.
+        policy_bd=ladder.get("legacy_risk_off_disclosure") or {}
+        focused_policy_bd_trades_by_cohort[cohort]={period:_legacy_policy_stage(
+            _period(legacy_choice_rows,period),"legacy_risk_off_disclosure",policy_bd.get("params") or {})
+            for period in ("development","validation","diagnostic")} if policy_bd.get("status")=="EVALUATED" else {
+                period:[] for period in ("development","validation","diagnostic")}
+        focused_policy_bd_info[cohort]={"selected_policy":"legacy_risk_off_disclosure",
+            "selected_parameters":policy_bd.get("params") or {},"stage_status":policy_bd.get("status")}
         out.setdefault("policy_stage_trades",{})[cohort]=_policy_stage_trade_records(
             ladder,legacy_choice_rows)
+        out.setdefault("recent_signal_gate",{})[cohort]=_recent_signal_gate(legacy_choice_rows,ladder)
         out.setdefault("feature_coverage",{})[cohort]={"development_rows_n":len(development_rows),
             "by_feature":feature_coverage,"auto_excluded_constant_features":excluded_features,
             "exclusion_basis":"development candidates only; evaluation-period variation never affects feature inclusion"}
@@ -1794,6 +1936,11 @@ def run():
     out["focused_universe_ablation_policy_b"]={k:v for k,v in focused_policy_b.items()
         if k!="recommended_universe"}
     out["recommended_universe_policy_b"]=focused_policy_b["recommended_universe"]
+    focused_policy_bd=_focused_universe_ablation(cohorts,focused_frames_by_cohort,
+        focused_policy_bd_trades_by_cohort,focused_policy_bd_info,policy_label="legacy_risk_off_disclosure")
+    out["focused_universe_ablation_policy_b_plus_d"]={k:v for k,v in focused_policy_bd.items()
+        if k!="recommended_universe"}
+    out["recommended_universe_policy_b_plus_d"]=focused_policy_bd["recommended_universe"]
     overall_flow_coverage,overall_flow_excluded=_feature_coverage(all_development_feature_rows)
     flow_feature_keys=[key for key in overall_flow_coverage if key in {
         "foreign_flow_5d_to_turnover","foreign_flow_20d_to_turnover",
