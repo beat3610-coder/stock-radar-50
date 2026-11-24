@@ -1284,6 +1284,7 @@ def _stage_gate_rejection(row,stage,params=None):
 
 
 RECENT_SIGNAL_WINDOW_DAYS=14
+RECENT_SIGNAL_LIST_SIZE=10
 STAGE_LABELS={"legacy_only":"A","legacy_risk_off_hard_gate":"B",
     "legacy_risk_off_disclosure":"B+D","legacy_risk_off_trend_filter":"C",
     "legacy_risk_off_trend_disclosure":"D"}
@@ -1309,9 +1310,10 @@ def _recent_signal_gate(legacy_rows,ladder,window_days=RECENT_SIGNAL_WINDOW_DAYS
         gate_passed[name]=[r for r in recent if _stage_gate_rejection(r,name,entry.get("params")) is None]
         accepted[name]=_legacy_policy_stage(recent,name,entry.get("params") or {})
     def key(row):return f"{row.get('ticker')}|{row.get('signal_date')}"
-    accepted_keys={name:{key(r) for r in trade_rows} for name,trade_rows in accepted.items()}
-    signals=[]
-    for row in sorted(recent,key=lambda r:(str(r["signal_date"]),str(r.get("ticker"))),reverse=True):
+    accepted_all={name:_legacy_policy_stage(rows,name,(ladder.get(name) or {}).get("params") or {})
+        for name in STAGE_LABELS if status[name]=="EVALUATED"}
+    accepted_keys={name:{key(r) for r in trade_rows} for name,trade_rows in accepted_all.items()}
+    def decision_row(row):
         decisions={}
         for name,label in STAGE_LABELS.items():
             if status[name]!="EVALUATED":
@@ -1319,12 +1321,17 @@ def _recent_signal_gate(legacy_rows,ladder,window_days=RECENT_SIGNAL_WINDOW_DAYS
             rejection=_stage_gate_rejection(row,name,params_used[name])
             if rejection is not None:decisions[label]={"accepted":False,"reason":rejection}
             elif key(row) in accepted_keys[name]:decisions[label]={"accepted":True,"reason":None}
-            else:decisions[label]={"accepted":False,"reason":"OVERLAP_WITH_AN_ACCEPTED_TRADE"}
-        signals.append({"ticker":str(row.get("ticker")),"signal_date":str(row.get("signal_date")),
+            else:decisions[label]={"accepted":False,"reason":"OVERLAP_WITH_AN_EARLIER_ACCEPTED_TRADE"}
+        return {"ticker":str(row.get("ticker")),"signal_date":str(row.get("signal_date")),
             "market_regime":row.get("market_regime"),
             "disclosure_bad_60d":row.get("disclosure_bad_60d"),
             "disclosure_periodic_days_since":row.get("disclosure_periodic_days_since"),
-            "stages":decisions})
+            "stages":decisions}
+    signals=[decision_row(row) for row in
+        sorted(recent,key=lambda r:(str(r["signal_date"]),str(r.get("ticker"))),reverse=True)]
+    latest_overall=[decision_row(row) for row in
+        sorted(rows,key=lambda r:(str(r["signal_date"]),str(r.get("ticker"))),reverse=True)
+        [:RECENT_SIGNAL_LIST_SIZE]]
     bd_params=params_used.get("legacy_risk_off_disclosure") or {}
     bd_dropped=[]
     for row in recent:
@@ -1345,8 +1352,9 @@ def _recent_signal_gate(legacy_rows,ladder,window_days=RECENT_SIGNAL_WINDOW_DAYS
                  _disclosure_rejection(row,bd_params) is None]}),
             "dropped":bd_dropped,
             "dropped_symbols":sorted({row["ticker"] for row in bd_dropped})},
-        "signals":signals,
-        "note":"Latest audit signal dates only; the fixed holdout end is unchanged and no future price is used. Acceptance is after non-overlapping trade resolution."}
+        "signals":signals,"latest_signals":latest_overall,
+        "latest_signals_note":"The last RECENT_SIGNAL_LIST_SIZE candidate signals of the selected legacy variant regardless of date, with the same stage decisions.",
+        "note":"Window counts are computed on the window alone; each signal's stage decision shows whether the full-period stage trade set contains it (OVERLAP means an earlier accepted trade holds that ticker). The fixed holdout end is unchanged and no future price is used."}
 
 
 def _focused_universe_ablation(cohorts,frames_by_cohort,policy_trades_by_cohort,policy_info,

@@ -526,6 +526,12 @@ class DisclosureTests(unittest.TestCase):
         self.assertEqual(dropped_signal["stages"]["B+D"]["reason"],"BAD_TITLE_WITHIN_60_DAYS")
         self.assertEqual(dropped_signal["stages"]["C"]["reason"],"STAGE_NOT_EVALUATED")
         self.assertEqual(STAGE_LABELS["legacy_risk_off_disclosure"],"B+D")
+        self.assertEqual(len(result["latest_signals"]),10)
+        self.assertEqual(result["latest_signals"][0]["signal_date"],"2024-01-12")
+        self.assertEqual(sum(1 for s in result["latest_signals"]
+            if s["stages"]["B+D"]["accepted"]),9)
+        self.assertEqual(next(s for s in result["latest_signals"] if s["ticker"]=="T11")
+            ["stages"]["B+D"]["reason"],"BAD_TITLE_WITHIN_60_DAYS")
 
 
 
