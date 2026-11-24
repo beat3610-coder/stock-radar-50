@@ -5,10 +5,10 @@ import json
 from pathlib import Path
 
 from expanded_direction_audit import _ticker_set,korean_flow_targets
-from disclosures import collect_company_disclosures
+from disclosures import collect_company_disclosures,request_interval_seconds
 
 
-def run_warmup(*,time_budget_seconds=3300,workers=6,universe=None,fetcher=None,clock=None,progress_printer=print):
+def run_warmup(*,time_budget_seconds=3300,workers=2,universe=None,fetcher=None,clock=None,progress_printer=print):
     universe=_ticker_set() if universe is None else universe
     targets=korean_flow_targets(universe)
     entries=[(row["ticker"],row["name"]) for row in targets]
@@ -25,6 +25,8 @@ def run_warmup(*,time_budget_seconds=3300,workers=6,universe=None,fetcher=None,c
             "available":diag.get("available",False),"complete":diag.get("complete",False),
             "failures":diag.get("failures",[])}
     report={**collection,"by_ticker":by_ticker,"source":"DART public HTML detailSearch.ax",
+        "request_interval_seconds":request_interval_seconds(),
+        "collection_guidance":"Dispatch this warmup manually in smaller runs over several days. Completed years are cached; later runs retry missing years and failed pages. Avoid bulk disclosure fetching inside the full audit.",
         "requested_start":"2015-12-01","requested_end":"2026-11-13",
         "uncompleted_tickers":collection.get("not_attempted",[]),
         "partial_completion_exits_successfully":True}
@@ -37,7 +39,7 @@ def run_warmup(*,time_budget_seconds=3300,workers=6,universe=None,fetcher=None,c
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--time-budget-seconds",type=float,default=3300)
-    parser.add_argument("--workers",type=int,default=6)
+    parser.add_argument("--workers",type=int,default=2)
     args=parser.parse_args(argv)
     run_warmup(time_budget_seconds=args.time_budget_seconds,workers=args.workers)
     return 0

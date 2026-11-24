@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,10 +10,11 @@ import pandas as pd
 from audit_63_fast import (_legacy_policy_stage,_not_evaluated_fundamental_stage,
                            _disclosure_bad_title_counts,_risk_adjusted_policy_selection,
                            POLICY_SELECTION_METRIC,_focused_liquidity_ranking,
-                           _focused_recommendation,_focused_universe_ablation)
+                           _focused_recommendation,_focused_universe_ablation,
+                           _disclosure_gate_input_coverage,_policy_ladder)
 from universe import AUDIT_63_BENCHMARK
 from disclosures import (collect_company_disclosures,disclosure_features_for_signal,
-                         get_company_disclosures,parse_disclosure_html,
+                         get_cached_company_disclosures,get_company_disclosures,parse_disclosure_html,
                          bad_disclosure_keyword_matches)
 
 
@@ -165,6 +167,76 @@ class DisclosureTests(unittest.TestCase):
         self.assertTrue(all(x["maxResults"]==100 and "publicType" not in x for x in session.params))
         self.assertEqual(result["diagnostics"]["requests_n"],3)
 
+    def test_availability_accepts_eighty_percent_year_coverage_and_marks_partial(self):
+        class Response:
+            status_code=200
+            def __init__(self,text):self.text=text
+            def raise_for_status(self):pass
+        class Session:
+            def __init__(self):self.headers={};self.years=[]
+            def get(self,url,params,timeout):
+                year=int(params["startDate"][:4]);self.years.append(year)
+                if year==2019:return Response("<html></html>")
+                rcp=f"{year}0101000001"
+                return Response(f"<table><tr><td>{year}.01.01</td><td>회사</td><td><a href='?rcpNo={rcp}'>사업보고서</a></td><td>회사</td></tr></table>")
+        session=Session()
+        with tempfile.TemporaryDirectory() as d,patch("disclosures.time.sleep"):
+            result=get_company_disclosures("005930","회사","2015-12-01","2019-12-31",
+                session=session,cache_dir=d)
+        diag=result["diagnostics"]
+        self.assertEqual(session.years,[2015,2016,2017,2018,2019])
+        self.assertEqual(diag["available_years_n"],4)
+        self.assertEqual(diag["year_coverage_pct"],80.0)
+        self.assertTrue(diag["available"])
+        self.assertTrue(diag["partial"])
+        self.assertTrue(diag["complete"])
+
+    def test_partial_cache_retries_only_failed_page_and_preserves_completed_years(self):
+        class Response:
+            status_code=200
+            text="<table><tr><td>2016.10.01</td><td>회사</td><td><a href='?rcpNo=20161001000001'>분기보고서</a></td><td>회사</td></tr></table>"
+            def raise_for_status(self):pass
+        class Session:
+            def __init__(self):self.headers={};self.pages=[]
+            def get(self,url,params,timeout):self.pages.append((params["startDate"][:4],params["currentPage"]));return Response()
+        session=Session()
+        cached={"records":[
+            {"receipt_date":"2015-12-15","title":"사업보고서","rcpNo":"20151215000001"},
+            {"receipt_date":"2016-03-01","title":"분기보고서","rcpNo":"20160301000001"}],
+            "diagnostics":{"requested_start":"2015-12-01","requested_end":"2016-12-31",
+                "complete":False,"failures":["year=2016 page=2 try=4: ConnectionError"],
+                "year_status":{"2015":{"complete":True,"completed_pages":[1],"failed_pages":[],
+                    "next_page":None,"window_start":"2015-12-01","window_end":"2015-12-31"},
+                    "2016":{"complete":False,"completed_pages":[1],"failed_pages":[2],"next_page":2,
+                    "window_start":"2016-01-01","window_end":"2016-12-31"}}}}
+        with tempfile.TemporaryDirectory() as d,patch("disclosures.time.sleep"):
+            Path(d,"005930.json").write_text(json.dumps(cached),encoding="utf-8")
+            result=get_company_disclosures("005930","회사","2015-12-01","2016-12-31",
+                session=session,cache_dir=d)
+        self.assertEqual(session.pages,[("2016",2)])
+        self.assertEqual(result["diagnostics"]["requests_n"],1)
+        self.assertEqual(len(result["records"]),3)
+        self.assertTrue(result["diagnostics"]["complete"])
+        self.assertTrue(result["diagnostics"]["available"])
+
+    def test_four_attempts_use_one_two_four_second_backoff(self):
+        class Response:
+            status_code=200;text="<html></html>"
+            def raise_for_status(self):pass
+        class Session:
+            def __init__(self):self.headers={};self.calls=0
+            def get(self,url,params,timeout):
+                self.calls+=1
+                if self.calls<4:raise ConnectionError("temporary disconnect")
+                return Response()
+        session=Session()
+        with tempfile.TemporaryDirectory() as d,patch("disclosures.time.sleep") as sleeper:
+            result=get_company_disclosures("005930","회사","2016-01-01","2016-12-31",
+                session=session,cache_dir=d)
+        self.assertEqual(result["diagnostics"]["requests_n"],4)
+        backoffs=[call.args[0] for call in sleeper.call_args_list if call.args[0]>=1.0]
+        self.assertEqual(backoffs,[1.0,2.0,4.0])
+
     def test_budget_expiry_is_partial_and_missing_features_stay_nan(self):
         result=collect_company_disclosures([("005930","삼성전자"),("247540","에코프로비엠")],
             time_budget_seconds=0,workers=1,fetcher=lambda *a,**k:self.fail("must not fetch"))
@@ -172,6 +244,40 @@ class DisclosureTests(unittest.TestCase):
         self.assertEqual(result["not_attempted"],["005930","247540"])
         features=disclosure_features_for_signal([],"2026-01-05",pd.bdate_range("2025-01-01",periods=300),available=False)
         self.assertTrue(all(np.isnan(v) for v in features.values()))
+
+    def test_disclosure_collection_clamps_workers_and_counts_unavailable_results(self):
+        fetcher=lambda ticker,name,**kwargs:{"records":[],"diagnostics":{"available":False,
+            "complete":False,"year_coverage_pct":0.0,"failures":["temporary failure"]}}
+        result=collect_company_disclosures([(str(i),str(i)) for i in range(5)],
+            time_budget_seconds=10,workers=8,fetcher=fetcher)
+        self.assertEqual(result["workers"],3)
+        self.assertEqual(result["attempted_symbols"],5)
+        self.assertEqual(len(result["failures"]),5)
+
+    def test_d_stage_counts_missing_input_rows_and_marks_low_symbol_coverage_partial(self):
+        rows=[{"ticker":"A","signal_date":"2025-01-01","entry_date":"2025-01-02",
+            "exit_date":"2025-01-05","market_regime":"NEUTRAL","market_ma200_gap_pct":0,
+            "signal_trend_200_pct":1,"relative_strength_60d_pct":1,"signal_volatility_20d_pct":2,
+            "disclosure_bad_60d":float("nan"),"disclosure_periodic_days_since":float("nan")}]
+        coverage=_disclosure_gate_input_coverage(rows,{
+            "market_ma200_gap_min_pct":-5,"volatility_cap_pct":10})
+        self.assertEqual(coverage["candidate_rows_before_disclosure_gate_n"],1)
+        self.assertEqual(coverage["excluded_missing_disclosure_n"],1)
+        ladder=_policy_ladder([],{},30,"KOSPI",{"available_symbols_n":10,
+            "requested_symbols_n":30,"coverage_pct":33.33})
+        self.assertEqual(ladder["legacy_risk_off_trend_disclosure"]["status"],"INSUFFICIENT_DEVELOPMENT_SAMPLE")
+        self.assertEqual(ladder["legacy_risk_off_trend_disclosure"]["disclosure_coverage"]["symbol_coverage_pct"],33.33)
+        empty=_policy_ladder([],{},30,"KOSDAQ",{"available_symbols_n":0,
+            "requested_symbols_n":30,"coverage_pct":0.0})
+        self.assertEqual(empty["legacy_risk_off_trend_disclosure"]["status"],"NOT_EVALUATED")
+
+    def test_audit_cache_reader_never_makes_network_requests_for_missing_cache(self):
+        with tempfile.TemporaryDirectory() as d:
+            result=get_cached_company_disclosures("005930","삼성전자",cache_dir=d)
+        self.assertFalse(result["diagnostics"]["available"])
+        self.assertFalse(result["diagnostics"]["attempted"])
+        self.assertEqual(result["diagnostics"]["requests_n"],0)
+        self.assertIn("manual disclosure-warmup workflow",result["diagnostics"]["reason"])
 
     def test_risk_off_gate_removes_legacy_entries_and_fundamentals_are_not_evaluated(self):
         rows=[{"ticker":"A","entry_date":"2025-01-02","exit_date":"2025-01-05","market_regime":"RISK_OFF"},

@@ -21,7 +21,7 @@ from broad_candidates import broad_candidates_from_computed
 from predictive_model import CONFIGS, DEFAULT_CONFIG, prepare_snapshot, predict_from_snapshot
 from audit_300 import metrics
 from market_context import build_market_context, REGIME_RULE, INDEX_FOR_COHORT
-from disclosures import (collect_company_disclosures,disclosure_features_for_signal,
+from disclosures import (get_cached_company_disclosures,request_interval_seconds,disclosure_features_for_signal,
                          BAD_KEYWORDS,BAD_TITLE_EXCLUSIONS,bad_disclosure_keyword_matches,
                          POSITIVE_KEYWORDS,PERIODIC_KEYWORDS)
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -686,6 +686,30 @@ def _legacy_policy_stage(rows,stage,params=None):
     return _resolve_nonoverlapping(selected)
 
 
+def _disclosure_gate_input_coverage(rows,trend_params=None):
+    """Count D-stage rows omitted solely because required disclosure fields are missing."""
+    if trend_params:
+        upstream=_legacy_policy_stage(rows,"legacy_risk_off_trend_filter",trend_params)
+        basis="after selected C-stage RISK_OFF/trend filters"
+    else:
+        upstream=_legacy_policy_stage(rows,"legacy_risk_off_hard_gate",{})
+        basis="after B-stage RISK_OFF filter; no selected C parameters"
+    usable=[]
+    for row in upstream:
+        try:
+            bad=float(row.get("disclosure_bad_60d",np.nan))
+            periodic=float(row.get("disclosure_periodic_days_since",np.nan))
+        except (TypeError,ValueError):continue
+        if np.isfinite(bad) and np.isfinite(periodic):usable.append(row)
+    denominator=len(upstream)
+    return {"candidate_rows_before_disclosure_gate_n":denominator,
+        "rows_with_disclosure_data_n":len(usable),
+        "excluded_missing_disclosure_n":denominator-len(usable),
+        "disclosure_coverage_pct":round(100*len(usable)/denominator,2) if denominator else 0.0,
+        "disclosure_coverage_applicable":bool(denominator),
+        "disclosure_coverage_basis":basis}
+
+
 def _not_evaluated_fundamental_stage():
     return {"status":"NOT_EVALUATED","periods":{},"reason":{
         "short_selling":"Unavailable from unauthenticated CI sources: KRX endpoints return HTTP 400 LOGOUT; Naver status uses the same blocked KRX iframe.",
@@ -750,12 +774,23 @@ def _policy_ladder(legacy_rows,frames,requested,cohort,disclosures_available):
         except (KeyError,TypeError,ValueError):pass
     vol_caps={f"p{int(q*100)}":float(np.quantile(vol_values,q)) for q in TREND_VOLATILITY_QUANTILES} if vol_values else {}
     steps={}
+    if isinstance(disclosures_available,dict):
+        disclosure_available_symbols=int(disclosures_available.get("available_symbols_n",0))
+        disclosure_requested_symbols=int(disclosures_available.get("requested_symbols_n",requested))
+        symbol_coverage_pct=float(disclosures_available.get("coverage_pct",0.0))
+    else:
+        disclosure_available_symbols=1 if disclosures_available else 0
+        disclosure_requested_symbols=max(1,requested)
+        symbol_coverage_pct=100.0 if disclosures_available else 0.0
     def stage_periods(stage,params=None):
         report={}
         for period in period_names:
-            rows=_legacy_policy_stage(_period(legacy_rows,period),stage,params)
+            source_rows=_period(legacy_rows,period)
+            rows=_legacy_policy_stage(source_rows,stage,params)
             report[period]=_metrics_with_portfolio(rows,requested,frames,period)
             report[period]["small_sample"]=period=="validation" and report[period].get("trades",0)<MIN_POLICY_TRADES
+            if stage=="legacy_risk_off_trend_disclosure":
+                report[period].update(_disclosure_gate_input_coverage(source_rows,params))
         return report
     steps["legacy_only"]={"status":"EVALUATED","params":{},"periods":stage_periods("legacy_only")}
     steps["legacy_risk_off_hard_gate"]={"status":"EVALUATED","params":{"rule":REGIME_RULE["risk_off"]},
@@ -781,7 +816,20 @@ def _policy_ladder(legacy_rows,frames,requested,cohort,disclosures_available):
             "development_grid":trend_grid,"periods":{p:_metrics_with_portfolio([],requested,frames,p) for p in period_names}}
 
     dgrid=[]
-    if disclosures_available:
+    disclosure_params_for_coverage=selected_trend["params"] if selected_trend else None
+    dev_disclosure_coverage=_disclosure_gate_input_coverage(dev_a,disclosure_params_for_coverage)
+    row_coverage_low=(dev_disclosure_coverage["disclosure_coverage_applicable"] and
+        dev_disclosure_coverage["disclosure_coverage_pct"]<50.0)
+    partial_coverage=(symbol_coverage_pct<50.0 or row_coverage_low)
+    def empty_disclosure_periods():
+        periods={}
+        for period in period_names:
+            periods[period]=_metrics_with_portfolio([],requested,frames,period)
+            periods[period].update(_disclosure_gate_input_coverage(
+                _period(legacy_rows,period),disclosure_params_for_coverage))
+            periods[period]["small_sample"]=period=="validation" and periods[period].get("trades",0)<MIN_POLICY_TRADES
+        return periods
+    if disclosure_available_symbols>0:
         for trend in trend_grid:
             for bad_max in DISCLOSURE_BAD_MAX_GRID:
                 for periodic_floor in DISCLOSURE_PERIODIC_DAYS_FLOOR_GRID:
@@ -792,15 +840,29 @@ def _policy_ladder(legacy_rows,frames,requested,cohort,disclosures_available):
         valid_d=[x for x in dgrid if x["development"].get("trades",0)>=MIN_POLICY_TRADES]
         selected_d=max(valid_d,key=lambda x:(x["development"].get("mean_net_pct",-np.inf),-x["development"].get("trades",0))) if valid_d else None
         if selected_d:
-            steps["legacy_risk_off_trend_disclosure"]={"status":"EVALUATED","params":selected_d["params"],
+            steps["legacy_risk_off_trend_disclosure"]={
+                "status":"INSUFFICIENT_DEVELOPMENT_SAMPLE" if partial_coverage else "EVALUATED",
+                "params":None if partial_coverage else selected_d["params"],
                 "selection_rule":"development net per trade maximized among predeclared settings with at least MIN_POLICY_TRADES",
-                "development_grid":dgrid,"periods":stage_periods("legacy_risk_off_trend_disclosure",selected_d["params"])}
+                "development_grid":dgrid,
+                "periods":empty_disclosure_periods() if partial_coverage else
+                    stage_periods("legacy_risk_off_trend_disclosure",selected_d["params"])}
         else:
-            steps["legacy_risk_off_trend_disclosure"]={"status":"INSUFFICIENT_DEVELOPMENT_SAMPLE","params":None,
-                "development_grid":dgrid,"periods":{p:_metrics_with_portfolio([],requested,frames,p) for p in period_names}}
+            steps["legacy_risk_off_trend_disclosure"]={
+                "status":"INSUFFICIENT_DEVELOPMENT_SAMPLE",
+                "params":None,"development_grid":dgrid,"periods":empty_disclosure_periods()}
     else:
-        steps["legacy_risk_off_trend_disclosure"]={"status":"NOT_EVALUATED","params":None,"development_grid":[],
-            "periods":{},"reason":"DART disclosure data unavailable for this cohort; missing values remain NaN and no trades are added."}
+        steps["legacy_risk_off_trend_disclosure"]={"status":"NOT_EVALUATED","params":None,
+            "development_grid":[],"periods":empty_disclosure_periods(),
+            "reason":"No symbol met the 80% requested-year availability rule; missing disclosure fields remain NaN and do not add trades."}
+    d_step=steps["legacy_risk_off_trend_disclosure"]
+    d_step["disclosure_coverage"]={"available_symbols_n":disclosure_available_symbols,
+        "requested_symbols_n":disclosure_requested_symbols,"symbol_coverage_pct":round(symbol_coverage_pct,2),
+        "minimum_coverage_for_full_evaluation_pct":50.0,
+        "development_candidate_rows":dev_disclosure_coverage,
+        "coverage_limited":bool(partial_coverage),
+        "status_reason":"Available coverage below 50%; D is not promoted and no trades are added." if partial_coverage else None,
+        "selection_eligible":d_step.get("status")=="EVALUATED"}
     steps["legacy_risk_off_trend_disclosure_short_fundamental"]=_not_evaluated_fundamental_stage()
 
     selected,selection_comparison=_risk_adjusted_policy_selection(steps)
@@ -951,6 +1013,24 @@ def _disclosure_bad_title_counts(items,disclosure_by_ticker,limit=10):
                 matched_by_title[title]=list(matches)
     return [{"title":title,"count":count,"matched_keywords":matched_by_title[title]}
         for title,count in sorted(counts.items(),key=lambda item:(-item[1],item[0]))[:limit]]
+
+
+def _disclosure_failure_reasons_top(disclosure_by_ticker,limit=5):
+    counts=Counter()
+    for result in disclosure_by_ticker.values():
+        for failure in result.get("diagnostics",{}).get("failures",[]):
+            message=str(failure)
+            status=re.search(r"HTTP(?:Error)?:\s*HTTP\s*(\d{3})",message,re.I)
+            if status:reason=f"HTTP {status.group(1)}"
+            elif "SSLError" in message:reason="SSLError"
+            elif "ConnectionError" in message or "RemoteDisconnected" in message:reason="ConnectionError/RemoteDisconnected"
+            elif "Timeout" in message:reason="Timeout"
+            elif "duplicate page/no pagination progress" in message:reason="Duplicate page/no pagination progress"
+            elif "reached page cap" in message:reason="Page cap reached"
+            else:reason=message.split(":",1)[0][:100] or "Unknown failure"
+            counts[reason]+=1
+    return [{"reason":reason,"count":count}
+        for reason,count in sorted(counts.items(),key=lambda item:(-item[1],item[0]))[:limit]]
 
 
 def _focused_liquidity_ranking(cohort,items,frames):
@@ -1227,22 +1307,50 @@ def run():
         for ticker,name,_,_ in cohorts[cohort]:
             if ticker not in seen_disclosure_tickers:
                 disclosure_entries.append((ticker,name));seen_disclosure_tickers.add(ticker)
-    disclosure_collection=collect_company_disclosures(disclosure_entries,
-        progress=lambda done,total,ticker,result:print(
-            f"DISCLOSURE_PROGRESS {done}/{total} ticker={ticker} rows={len(result.get('records',[]))} "
-            f"requests={result.get('diagnostics',{}).get('requests_n',0)} "
-            f"available={result.get('diagnostics',{}).get('available',False)}",flush=True))
-    disclosure_by_ticker=disclosure_collection.pop("results")
+    disclosure_by_ticker={}
+    for ticker,name in disclosure_entries:
+        result=get_cached_company_disclosures(ticker,name,start_date="2015-12-01",end_date=MIN_END_DATE)
+        disclosure_by_ticker[ticker]=result
+        diag=result.get("diagnostics",{})
+        print(f"DISCLOSURE_CACHE ticker={ticker} rows={len(result.get('records',[]))} "
+            f"available={diag.get('available',False)} partial={diag.get('partial',False)} "
+            f"year_coverage={diag.get('year_coverage_pct')}",flush=True)
+    available_disclosure_symbols=sum(bool(v.get("diagnostics",{}).get("available"))
+        for v in disclosure_by_ticker.values())
+    partial_disclosure_symbols=[{"ticker":ticker,
+        "year_coverage_pct":v.get("diagnostics",{}).get("year_coverage_pct"),
+        "available":bool(v.get("diagnostics",{}).get("available")),
+        "failures":v.get("diagnostics",{}).get("failures",[])}
+        for ticker,v in disclosure_by_ticker.items() if v.get("diagnostics",{}).get("partial",False)]
+    disclosure_collection={"requested_symbols":len(disclosure_entries),"attempted_symbols":0,
+        "available_symbols":available_disclosure_symbols,"partial_symbols":partial_disclosure_symbols,
+        "request_interval_seconds":request_interval_seconds(),"budget_seconds":0,
+        "budget_used_seconds":0.0,"budget_exhausted":False,"workers":0,
+        "cache_only":True,"network_requests_in_audit":0,
+        "collection_guidance":"Run disclosure-warmup manually in smaller batches over several days; cached completed years are reused and failed/missing year-pages resume later.",
+        "failures":[{"ticker":ticker,"error":"unavailable cached disclosure history",
+            "failures":v.get("diagnostics",{}).get("failures",[])}
+            for ticker,v in disclosure_by_ticker.items() if not v.get("diagnostics",{}).get("available",False)]}
     out["disclosure_collection"]={**disclosure_collection,"source":"DART public HTML detailSearch.ax",
         "requested_start":"2015-12-01","requested_end":MIN_END_DATE,
+        "throttling":"DART HTTP 503 under bulk collection; cache resumes failed year-pages on later runs",
+        "partial_symbols_n":len(disclosure_collection.get("partial_symbols",[])),
+        "failure_reasons_top5":_disclosure_failure_reasons_top(disclosure_by_ticker,limit=5),
         "by_ticker":{code:{"first_date":v.get("diagnostics",{}).get("first_date"),
             "last_date":v.get("diagnostics",{}).get("last_date"),"rows_n":len(v.get("records",[])),
             "requests_n":v.get("diagnostics",{}).get("requests_n",0),
+            "year_coverage_pct":v.get("diagnostics",{}).get("year_coverage_pct"),
+            "available_years_n":v.get("diagnostics",{}).get("available_years_n"),
+            "requested_years_n":v.get("diagnostics",{}).get("requested_years_n"),
             "available":v.get("diagnostics",{}).get("available",False),
+            "partial":v.get("diagnostics",{}).get("partial",False),
+            "complete":v.get("diagnostics",{}).get("complete",False),
             "failures":v.get("diagnostics",{}).get("failures",[])}
             for code,v in disclosure_by_ticker.items()},
         "unavailable_tickers":sorted(code for code,v in disclosure_by_ticker.items()
             if not v.get("diagnostics",{}).get("available",False)),
+        "partial_tickers":sorted(code for code,v in disclosure_by_ticker.items()
+            if v.get("diagnostics",{}).get("partial",False)),
         "not_applicable_tickers":{code:"ETF/US security outside the Korean ordinary-stock DART feature universe"
             for cohort in ("TIGER_ETF","SOXL") for code,_,_,_ in cohorts[cohort]}}
     integrity=True
@@ -1302,10 +1410,11 @@ def run():
         breadth,gap,market_return60=_make_cohort_context(frames)
         def attach_disclosure(row):
             record=disclosure_by_ticker.get(row["ticker"],{})
-            diag=record.get("diagnostics",{});available=bool(diag.get("available",False) and diag.get("complete",False) and record.get("records"))
+            diag=record.get("diagnostics",{});available=bool(diag.get("available",False) and record.get("records"))
             features=disclosure_features_for_signal(record.get("records",[]),row["signal_date"],
                 frames[row["ticker"]].index,available=available)
             row.update(features);row["disclosure_data_available"]=available
+            row["disclosure_data_partial"]=bool(diag.get("partial",False))
             return row
         legacy_all=[]
         for strategy,ts in legacy_by_variant.items():
@@ -1347,13 +1456,17 @@ def run():
         valid_variants=[s for s,m in dev_variant.items() if m["trades"]>=MIN_POLICY_TRADES and m.get("mean_net_pct") is not None]
         legacy_choice=max(valid_variants,key=lambda s:(dev_variant[s]["mean_net_pct"],s),default=None)
         legacy_choice_rows=[r for r in legacy_all if r.get("strategy")==legacy_choice] if legacy_choice else []
-        disclosure_cohort_available=any(disclosure_by_ticker.get(ticker,{}).get("diagnostics",{}).get("available",False)
-            and disclosure_by_ticker.get(ticker,{}).get("records")
-            for ticker,_,_,_ in items)
-        ladder=_policy_ladder(legacy_choice_rows,frames,len(items),cohort,disclosure_cohort_available)
-        out["policy_ladder"][cohort]=ladder
         missing_disclosure_tickers=sorted(ticker for ticker,_,_,_ in items
             if not disclosure_by_ticker.get(ticker,{}).get("diagnostics",{}).get("available",False))
+        partial_disclosure_tickers=sorted(ticker for ticker,_,_,_ in items
+            if disclosure_by_ticker.get(ticker,{}).get("diagnostics",{}).get("partial",False))
+        available_disclosure_n=len(items)-len(missing_disclosure_tickers)
+        cohort_disclosure_coverage={"available_symbols_n":available_disclosure_n,
+            "requested_symbols_n":len(items),
+            "coverage_pct":100.0*available_disclosure_n/len(items) if items else 0.0,
+            "partial_symbols_n":len(partial_disclosure_tickers)}
+        ladder=_policy_ladder(legacy_choice_rows,frames,len(items),cohort,cohort_disclosure_coverage)
+        out["policy_ladder"][cohort]=ladder
         disclosure_fields=("disclosure_periodic_days_since","disclosure_bad_20d","disclosure_bad_60d",
             "disclosure_positive_20d","disclosure_count_60d")
         disclosure_coverage={}
@@ -1370,7 +1483,10 @@ def run():
                     "non_missing_n":len(observed),"non_missing_pct":round(100*len(observed)/len(period_candidates),2) if period_candidates else 0.0}
         disclosure_coverage_summary={
             "periods":disclosure_coverage,"data_missing_tickers":missing_disclosure_tickers,
-            "available_symbols_n":len(items)-len(missing_disclosure_tickers),"requested_symbols_n":len(items),
+            "partial_tickers":partial_disclosure_tickers,
+            "available_symbols_n":available_disclosure_n,"requested_symbols_n":len(items),
+            "available_symbol_coverage_pct":round(cohort_disclosure_coverage["coverage_pct"],2),
+            "partial_symbols_n":len(partial_disclosure_tickers),
             "abstain_when_unavailable":True,
             "bad_title_keywords":list(BAD_KEYWORDS),"bad_title_exclusions":list(BAD_TITLE_EXCLUSIONS),
             "disclosure_bad_title_counts":_disclosure_bad_title_counts(items,disclosure_by_ticker,limit=10)}
