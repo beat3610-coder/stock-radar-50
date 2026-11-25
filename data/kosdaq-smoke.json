@@ -1,17 +1,12 @@
 {
-  "time": "2026-11-18T01:45:21.698081+00:00",
+  "time": "2026-11-25T08:45:09.590008+00:00",
   "kosdaq": {
     "count": 100,
-    "source": "Naver stock API KOSDAQ marketSum current ranking / 2026-11-18 / research-only snapshot (not PIT) / FDR 오류: 코스닥 상위 100개 조회 실패: KOSDAQ: 종목 수 부족: 0 | KRX: 종목 수 부족: 0",
+    "source": "Naver stock API KOSDAQ marketSum current ranking / 2026-11-25 / research-only snapshot (not PIT)",
     "sample": [
       [
         "196170",
         "알테오젠",
-        "업종 확인 불가"
-      ],
-      [
-        "086520",
-        "에코프로",
         "업종 확인 불가"
       ],
       [
@@ -25,6 +20,11 @@
         "업종 확인 불가"
       ],
       [
+        "086520",
+        "에코프로",
+        "업종 확인 불가"
+      ],
+      [
         "036930",
         "주성엔지니어링",
         "업종 확인 불가"
@@ -35,49 +35,49 @@
     {
       "code": "196170",
       "name": "알테오젠",
-      "source": "FinanceDataReader NAVER:196170",
-      "close": 170900.0,
+      "source": "FinanceDataReader NAVER:196170 (565 bars)",
+      "close": 166600.0,
       "signal": "하락 추세·매수 보류",
       "score": 0,
-      "target": 199260.0,
-      "upside": 8.215274505183778,
-      "rr": 0.4997099361230931,
-      "gate": "기술적 추세·위험 경고 우선"
-    },
-    {
-      "code": "086520",
-      "name": "에코프로",
-      "source": "FinanceDataReader NAVER:086520",
-      "close": 67100.0,
-      "signal": "매수 보류",
-      "score": 12,
-      "target": 71350.0,
-      "upside": 6.491896385155249,
-      "rr": 0.38153090255649136,
+      "target": 185715.0,
+      "upside": 8.379034561553844,
+      "rr": 0.5200399118729423,
       "gate": "기술적 추세·위험 경고 우선"
     },
     {
       "code": "247540",
       "name": "에코프로비엠",
-      "source": "FinanceDataReader NAVER:247540",
+      "source": "FinanceDataReader NAVER:247540 (565 bars)",
       "close": 84000.0,
       "signal": "매수 보류",
       "score": 12,
-      "target": 89730.0,
-      "upside": 10.148375414948196,
-      "rr": 0.5728074150384512,
+      "target": 87050.0,
+      "upside": 9.978580608310716,
+      "rr": 0.5985359609065434,
       "gate": "기술적 추세·위험 경고 우선"
     },
     {
       "code": "277810",
       "name": "레인보우로보틱스",
-      "source": "FinanceDataReader NAVER:277810",
-      "close": 389500.0,
+      "source": "FinanceDataReader NAVER:277810 (565 bars)",
+      "close": 463000.0,
       "signal": "매수 보류",
-      "score": 38,
-      "target": 402816.6666666667,
-      "upside": 21.781299228366212,
-      "rr": 1.4096220918234974,
+      "score": 50,
+      "target": 472500.0,
+      "upside": 21.625437214642346,
+      "rr": 1.0836122760150868,
+      "gate": "기술적 추세·위험 경고 우선"
+    },
+    {
+      "code": "086520",
+      "name": "에코프로",
+      "source": "FinanceDataReader NAVER:086520 (565 bars)",
+      "close": 66100.0,
+      "signal": "매수 보류",
+      "score": 12,
+      "target": 69380.0,
+      "upside": 6.418485237483962,
+      "rr": 0.39311356339490505,
       "gate": "기술적 추세·위험 경고 우선"
     }
   ]
