@@ -5,7 +5,10 @@ are scored prequentially, and model configuration/policy selection uses only
 development observations. This file is research-only and never approves live use.
 """
 import json
+import math
+import os
 import re
+import time
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -26,9 +29,15 @@ from disclosures import (get_cached_company_disclosures,request_interval_seconds
                          BAD_KEYWORDS,BAD_TITLE_EXCLUSIONS,bad_disclosure_keyword_matches,
                          POSITIVE_KEYWORDS,PERIODIC_KEYWORDS)
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from r_rank_model import (FEATURE_GROUPS, NUMERIC_FEATURES, CENTERS, SCALES, STRATEGIES,
+from r_rank_model import (FEATURE_GROUPS, NUMERIC_FEATURES, ALL_NUMERIC_FEATURES,
+                          CENTERS, SCALES, STRATEGIES,
                           MIN_TRAIN_SAMPLES_BY_COHORT, MODEL_CONFIGS, accepts as r_accepts,
                           make_variant_thresholds, walk_forward_scores)
+from opendart import (DEFAULT_CACHE_ROOT as OPENDART_CACHE_ROOT, EARNINGS_FEATURES,
+    OpenDartClient, RunRequestBudget, earnings_features_for_signal, earnings_gate_status,
+    warmup_workers_from_env,
+    request_interval_seconds as opendart_request_interval_seconds)
+from slb import DEFAULT_CACHE_ROOT as SLB_CACHE_ROOT, isin_for_stock_code
 
 SAMPLE_START="2024-07-01"
 MIN_HISTORY_BARS=250
@@ -50,6 +59,8 @@ FOCUSED_UNIVERSE_SIZES=(10,20,30)
 FOCUSED_CORE_KOSPI=("005930","000660","035420")
 DISCLOSURE_WARMUP_REQUEST_PATH=Path("data/disclosure-warmup-request.json")
 DISCLOSURE_WARMUP_MAX_BUDGET_SECONDS=2400.0
+OPENDART_AUDIT_BUDGET_SECONDS_DEFAULT=1500.0
+EARNINGS_POLICY_THRESHOLD_VALUES=(None,0)
 
 
 def _run_disclosure_warmup_request():
@@ -83,6 +94,298 @@ def _run_disclosure_warmup_request():
         "budget_used_seconds":report.get("budget_used_seconds"),
         "budget_exhausted":report.get("budget_exhausted"),
         "failures_n":len(report.get("failures") or [])}
+
+
+def _earnings_budget_seconds():
+    try:
+        value=float(os.environ.get("OPENDART_AUDIT_BUDGET_SECONDS",
+            str(OPENDART_AUDIT_BUDGET_SECONDS_DEFAULT)))
+    except (TypeError,ValueError):
+        value=OPENDART_AUDIT_BUDGET_SECONDS_DEFAULT
+    return max(0.0,value)
+
+
+def _collect_earnings_history(entries,*,client_factory=OpenDartClient,
+        budget_seconds=None,clock=time.monotonic,progress=print):
+    """Load frozen Korean histories concurrently, under one time and request budget."""
+    budget=_earnings_budget_seconds() if budget_seconds is None else max(0.0,float(budget_seconds))
+    workers=warmup_workers_from_env();request_budget=RunRequestBudget()
+    client=client_factory();key_present=bool(client.key_present);started=clock();by_ticker={}
+    if not key_present:
+        for ticker,_ in entries:
+            by_ticker[ticker]={"records":[],"diagnostics":{"stock_code":ticker,
+                "corp_code":None,"status":"ABSTAIN_NO_API_KEY","available":False,
+                "attempted":False,"key_present":False,"requests_n":0,"failures":[],
+                "reason":"OPENDART_API_KEY is absent; no network request was made."}}
+        return by_ticker,{"key_present":False,"requested_symbols_n":len(entries),
+            "attempted_symbols_n":0,"available_symbols_n":0,"total_requests_n":0,
+            "budget_seconds":budget,"budget_used_seconds":round(clock()-started,3),
+            "budget_exhausted":False,"cap_reached":False,
+            "request_limit":request_budget.limit,"workers":workers,"corp_code_map_n":0,
+            "reason":"Keyless abstain mode; no network call was issued."}
+
+    if hasattr(client,"set_request_budget"):client.set_request_budget(request_budget)
+    if hasattr(client,"set_time_budget"):client.set_time_budget(budget)
+    try:corp_codes=client.get_corp_codes()
+    except Exception as exc:
+        corp_codes={};corp_error=type(exc).__name__
+    else:corp_error=None
+    corp_code_map_n=int(getattr(client,"_requests_n",0))
+
+    def collect(index,item):
+        ticker,name=item;corp_code=corp_codes.get(str(ticker).zfill(6))
+        remaining=max(0.0,budget-(clock()-started))
+        if remaining<=0:
+            result={"records":[],"diagnostics":{"stock_code":ticker,"corp_code":corp_code,
+                "status":"SKIPPED_BUDGET","available":False,"attempted":False,
+                "key_present":True,"requests_n":0,"failures":[],
+                "reason":"OpenDART collection time budget exhausted before this ticker."}}
+        elif request_budget.cap_reached:
+            result={"records":[],"diagnostics":{"stock_code":ticker,"corp_code":corp_code,
+                "status":"SKIPPED_REQUEST_CAP","available":False,"attempted":False,
+                "key_present":True,"requests_n":0,"failures":[],"cap_reached":True,
+                "reason":"OpenDART per-run request cap was reached before this ticker."}}
+        elif not corp_code:
+            result={"records":[],"diagnostics":{"stock_code":ticker,"corp_code":None,
+                "status":"NO_CORP_CODE","available":False,"attempted":False,
+                "key_present":True,"requests_n":0,"failures":[],
+                "reason":corp_error or "No stock_code to corp_code mapping."}}
+        else:
+            try:
+                worker=client_factory()
+                if hasattr(worker,"set_request_budget"):worker.set_request_budget(request_budget)
+                if hasattr(worker,"set_time_budget"):worker.set_time_budget(remaining)
+                result=worker.company_financials(ticker,corp_code=corp_code,
+                    start_year=2015,end_year=int(MIN_END_DATE[:4]))
+            except Exception as exc:
+                result={"records":[],"diagnostics":{"stock_code":ticker,"corp_code":corp_code,
+                    "status":"COLLECTION_ERROR","available":False,"attempted":True,
+                    "key_present":True,"requests_n":0,"failures":[type(exc).__name__],
+                    "reason":"Ticker collection failed; other companies continue."}}
+        return index,ticker,result
+
+    completed=0;attempted_n=0;available_n=0;budget_exhausted=False
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures=[executor.submit(collect,index,item) for index,item in enumerate(entries,1)]
+        for future in as_completed(futures):
+            index,ticker,result=future.result();by_ticker[ticker]=result;completed+=1
+            diag=result.get("diagnostics",{});records=result.get("records",[])
+            attempted_n+=int(bool(diag.get("attempted")))
+            available_n+=int(bool(diag.get("available") and records))
+            budget_exhausted|=bool(diag.get("budget_exhausted")) or diag.get("status")=="SKIPPED_BUDGET"
+            progress(f"OPENDART_AUDIT ticker={completed}/{len(entries)} code={ticker} "
+                f"rows={len(records)} requests={diag.get('requests_n',0)} "
+                f"status={diag.get('status')} budget_exhausted={budget_exhausted}",flush=True)
+    requests_n=sum(int(result.get("diagnostics",{}).get("requests_n",0))
+        for result in by_ticker.values())
+    return by_ticker,{"key_present":True,"requested_symbols_n":len(entries),
+        "attempted_symbols_n":attempted_n,"available_symbols_n":available_n,
+        "total_requests_n":request_budget.requests_n,"requests_n":request_budget.requests_n,
+        "financial_requests_n":requests_n,
+        "corp_code_map_requests_n":corp_code_map_n,"budget_seconds":budget,
+        "budget_used_seconds":round(clock()-started,3),"budget_exhausted":budget_exhausted,
+        "cap_reached":request_budget.cap_reached,"request_limit":request_budget.limit,
+        "workers":workers,"request_interval_seconds":opendart_request_interval_seconds(),
+        "reason":"Per-ticker failures and budget exhaustion are recorded; missing values remain NaN."}
+
+
+def _earnings_period_coverage(rows):
+    report={}
+    for feature in EARNINGS_FEATURES:
+        observed=[]
+        for row in rows:
+            try:value=float(row.get(feature,np.nan))
+            except (TypeError,ValueError):value=np.nan
+            if np.isfinite(value):observed.append(value)
+        report[feature]={"rows_n":len(rows),"non_missing_n":len(observed),
+            "non_missing_pct":round(100*len(observed)/len(rows),2) if rows else 0.0}
+    return report
+
+
+def _cohort_earnings_coverage(cohort,items,earnings_by_ticker,rows,period_names):
+    """Report data availability separately from feature non-missingness."""
+    applicable=cohort in ("KOSPI","KOSDAQ")
+    tickers=[str(item[0]).zfill(6) for item in items]
+    available=[];missing=[]
+    for ticker in tickers:
+        value=earnings_by_ticker.get(ticker,{})
+        diagnostics=value.get("diagnostics",{})
+        if diagnostics.get("available") and value.get("records"):
+            available.append(ticker)
+        else:
+            missing.append(ticker)
+    periods={period:_earnings_period_coverage(_period(rows,period)) for period in period_names}
+    not_applicable=[] if applicable else tickers
+    return {"requested_symbols_n":len(tickers) if applicable else 0,
+        "available_symbols_n":len(available) if applicable else 0,
+        "coverage_pct":round(100*len(available)/len(tickers),2) if applicable and tickers else None,
+        "missing_tickers":missing if applicable else [],
+        "not_applicable_tickers":not_applicable,
+        "periods":periods}
+
+
+def _earnings_policy_stage(legacy_rows,frames,requested,disclosure_stage,coverage):
+    """Add B+D+E; only E thresholds are searched, using development outcomes."""
+    period_names=("development","validation","diagnostic")
+    base_params=disclosure_stage.get("params") if disclosure_stage.get("status")=="EVALUATED" else None
+    empty={p:_metrics_with_portfolio([],requested,frames,p) for p in period_names}
+    metadata={"stage_definition":"B + D + E: frozen RISK_OFF gate, selected existing disclosure gate, and development-selected earnings thresholds.",
+        "upstream_disclosure_policy":"legacy_risk_off_disclosure",
+        "earnings_available_symbols_n":coverage.get("available_symbols_n",0),
+        "earnings_requested_symbols_n":coverage.get("requested_symbols_n",0),
+        "earnings_coverage_pct":coverage.get("coverage_pct",0.0),
+        "missing_feature_action":"ABSTAIN; unavailable earnings do not reject a legacy entry."}
+    if base_params is None:
+        return {**metadata,"status":"UPSTREAM_DISCLOSURE_NOT_EVALUATED","params":None,
+            "periods":empty,"development_grid":[],
+            "reason":"Existing B+D stage has no development-selected parameters; this B+D+E stage is not evaluated."}
+    if int(coverage.get("available_symbols_n",0))<=0:
+        return {**metadata,"status":"NOT_EVALUATED","params":None,"periods":empty,
+            "development_grid":[],"reason":"No OpenDART records are available; earnings features remain NaN and the gate abstains."}
+
+    def choose_rows(rows,params):
+        upstream=_legacy_policy_stage(rows,"legacy_risk_off_disclosure",base_params)
+        accepted=[row for row in upstream if earnings_gate_status(row,
+            earnings_momentum_min=params["earnings_momentum_min"],
+            op_yoy_min=params["op_yoy_min"],opm_min=params["opm_min"])!="REJECT"]
+        return _resolve_nonoverlapping(accepted)
+
+    dev_rows=_period(legacy_rows,"development");grid=[]
+    from itertools import product
+    for momentum,op_yoy,opm in product(EARNINGS_POLICY_THRESHOLD_VALUES,repeat=3):
+        params={"earnings_momentum_min":momentum,"op_yoy_min":op_yoy,"opm_min":opm}
+        selected=choose_rows(dev_rows,params);metric=_trade_metrics(selected)
+        gate_counts=Counter(earnings_gate_status(row,**params) for row in
+            _legacy_policy_stage(dev_rows,"legacy_risk_off_disclosure",base_params))
+        grid.append({"params":params,"development":metric,"gate_status_counts":dict(gate_counts)})
+    eligible=[row for row in grid if row["development"].get("trades",0)>=MIN_POLICY_TRADES]
+    selected=max(eligible,key=lambda row:(row["development"].get("mean_net_pct",-np.inf),
+        -row["development"].get("trades",0),str(row["params"]))) if eligible else None
+    if selected is None:
+        return {**metadata,"status":"INSUFFICIENT_DEVELOPMENT_SAMPLE","params":None,
+            "periods":empty,"development_grid":grid,
+            "selection_rule":"Maximize development mean net among predeclared threshold combinations with at least MIN_POLICY_TRADES; no OOS selection."}
+    partial=float(coverage.get("coverage_pct",0.0) or 0.0)<50.0
+    combined_params={**base_params,**selected["params"]}
+    if partial:
+        return {**metadata,"status":"PARTIAL_COVERAGE","params":combined_params,
+            "earnings_thresholds":selected["params"],"periods":empty,
+            "development_grid":grid,
+            "selection_rule":"Predeclared earnings threshold grid selected on development only; stage is not promoted below 50% symbol coverage.",
+            "reason":"OpenDART symbol coverage is below 50%; no trades are added by this stage."}
+    periods={}
+    for period in period_names:
+        rows=choose_rows(_period(legacy_rows,period),selected["params"])
+        periods[period]=_metrics_with_portfolio(rows,requested,frames,period)
+        periods[period]["small_sample"]=period=="validation" and periods[period].get("trades",0)<MIN_POLICY_TRADES
+        periods[period]["earnings_gate_status_counts"]=dict(Counter(earnings_gate_status(row,
+            earnings_momentum_min=selected["params"]["earnings_momentum_min"],
+            op_yoy_min=selected["params"]["op_yoy_min"],opm_min=selected["params"]["opm_min"])
+            for row in _legacy_policy_stage(_period(legacy_rows,period),"legacy_risk_off_disclosure",base_params)))
+    return {**metadata,"status":"EVALUATED","params":combined_params,
+        "earnings_thresholds":selected["params"],
+        "selection_rule":"Maximize development mean net among predeclared threshold combinations with at least MIN_POLICY_TRADES; validation/diagnostic are report-only.",
+        "development_grid":grid,"periods":periods}
+
+
+def _three_way_report(samples):
+    """Summarize the exact selected direction3 probabilities without refitting."""
+    names=("UP","DOWN","SIDEWAYS");usable=[]
+    for row in samples or []:
+        truth=row.get("label");pred=row.get("prediction");probs=row.get("probabilities")
+        try:
+            values=np.asarray([probs[name] for name in names],dtype=float) if isinstance(probs,dict) else np.asarray(probs,dtype=float)
+        except (TypeError,ValueError):continue
+        if truth not in names or pred not in names or values.shape!=(3,) or not np.isfinite(values).all():continue
+        usable.append((truth,pred,values))
+    n=len(usable);counts={name:sum(row[0]==name for row in usable) for name in names}
+    predicted={name:sum(row[1]==name for row in usable) for name in names}
+    confusion={truth:{pred:sum(t==truth and p==pred for t,p,_ in usable) for pred in names} for truth in names}
+    class_metrics={}
+    for name in names:
+        correct=confusion[name][name];precision=correct/predicted[name] if predicted[name] else 0.0
+        recall=correct/counts[name] if counts[name] else 0.0
+        f1=2*precision*recall/(precision+recall) if precision+recall else 0.0
+        class_metrics[name]={"precision_pct":100*precision,"recall_pct":100*recall,
+            "f1_pct":100*f1,"actual":counts[name],"predicted":predicted[name],"correct":correct}
+    if not n:
+        return {"evaluation_rows_n":0,"accuracy_pct":None,"majority_class_baseline_accuracy_pct":None,
+            "accuracy_delta_vs_majority_pp":None,"multiclass_brier":None,"prior_brier":None,
+            "class_metrics":class_metrics,"mean_probabilities_pct":{name:None for name in names},
+            "confusion_matrix":confusion}
+    accuracy=sum(truth==pred for truth,pred,_ in usable)/n
+    priors=np.asarray([counts[name]/n for name in names],dtype=float)
+    probs=np.asarray([values for _,_,values in usable],dtype=float)
+    actual=np.asarray([[int(truth==name) for name in names] for truth,_,_ in usable],dtype=float)
+    brier=float(np.mean(np.sum((probs-actual)**2,axis=1)))
+    prior_brier=float(np.mean(np.sum((np.broadcast_to(priors,actual.shape)-actual)**2,axis=1)))
+    return {"evaluation_rows_n":n,"accuracy_pct":100*accuracy,
+        "majority_class_baseline_accuracy_pct":100*max(counts.values())/n,
+        "accuracy_delta_vs_majority_pp":100*(accuracy-max(counts.values())/n),
+        "multiclass_brier":brier,"prior_brier":prior_brier,
+        "class_metrics":class_metrics,
+        "mean_probabilities_pct":{name:100*float(probs[:,i].mean()) for i,name in enumerate(names)},
+        "confusion_matrix":confusion}
+
+
+def _paired_earnings_ablation(base_rows,earnings_rows):
+    """Compare plus_flow and plus_earnings on their exact shared scored rows."""
+    def row_key(row):
+        return (str(row.get("ticker")),str(row.get("signal_date")),
+            str(row.get("entry_date")),str(row.get("strategy") or row.get("candidate_variant")))
+    left={row_key(row):row for row in base_rows}
+    right={row_key(row):row for row in earnings_rows}
+    shared=sorted(set(left)&set(right))
+    result={}
+    for label,source in (("plus_flow",left),("plus_earnings",right)):
+        rows=[source[key] for key in shared]
+        trade=_trade_metrics(rows)
+        rank=_rank_metrics(rows)
+        auc=_auc(rows)
+        brier=_brier(rows,"model_probability")
+        calibration=_calibration(rows,"model_probability")
+        result[label]={"trades":trade.get("trades",0),"mean_net_pct":trade.get("mean_net_pct"),
+            "rank_spearman_datewise":rank.get("datewise_spearman_mean"),
+            "rank_spearman_pooled":rank.get("r_ic_spearman"),
+            "auroc":auc.get("auroc"),"brier":brier.get("brier"),
+            "ece":calibration.get("ece")}
+    deltas={}
+    for key in ("mean_net_pct","rank_spearman_datewise","rank_spearman_pooled","auroc","brier","ece"):
+        a=result["plus_earnings"].get(key);b=result["plus_flow"].get(key)
+        deltas[key]=(float(a)-float(b)) if a is not None and b is not None else None
+    return {"same_sample_n":len(shared),"same_sample_key":"ticker, signal_date, entry_date, strategy",
+        "plus_flow":result["plus_flow"],"plus_earnings":result["plus_earnings"],
+        "delta_plus_earnings_minus_plus_flow":deltas}
+
+
+def _slb_coverage_report(cohorts):
+    """Read only recent SLB caches; never fetch or feed them into historical models."""
+    per_ticker={};all_dates=[];root=Path(SLB_CACHE_ROOT)/"dealing"
+    tickers=[]
+    for cohort in ("KOSPI","KOSDAQ"):
+        tickers.extend(str(item[0]).zfill(6) for item in cohorts.get(cohort,[]))
+    for ticker in dict.fromkeys(tickers):
+        try:
+            isin=isin_for_stock_code(ticker);path=root/f"{isin}.json"
+            cached=json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            records=cached.get("records",[])
+            dates=sorted(str(row.get("stdDt","")).replace("-","") for row in records if row.get("stdDt"))
+            all_dates.extend(dates)
+            per_ticker[ticker]={"isin":isin,"rows_n":len(records),
+                "first_date":dates[0] if dates else None,"last_date":dates[-1] if dates else None,
+                "status":cached.get("status","CACHE_MISSING"),"available":bool(dates)}
+        except Exception as exc:
+            per_ticker[ticker]={"rows_n":0,"first_date":None,"last_date":None,
+                "status":"CACHE_READ_ERROR","available":False,"reason":type(exc).__name__}
+    rank_root=Path(SLB_CACHE_ROOT)/"rank";rank_dates=[]
+    if rank_root.exists():rank_dates=sorted(path.stem for path in rank_root.glob("*.json"))
+    return {"source":"data.go.kr B552481/SlbSvc XML",
+        "traffic_limit":{"calls_per_day":100,"minimum_interval_seconds":0.3},
+        "available_range":{"dealing_first_date":min(all_dates) if all_dates else None,
+            "dealing_last_date":max(all_dates) if all_dates else None,
+            "dealing_observed_days_n":len(set(all_dates)),"rank_cached_dates":rank_dates},
+        "per_ticker":per_ticker,"backtest_status":"NOT_EVALUATED",
+        "reason":"The dealing endpoint exposes only the latest five trading days; rank is top-100 for one requested date and the API limit is 100 calls/day. No SLB value is imputed or used in historical backtests."}
 
 
 def _period(trades,period):
@@ -590,7 +893,7 @@ def _rank_metrics(rows):
 def _feature_coverage(rows):
     """Development-only availability/variation audit; returns constant columns to drop."""
     report={};excluded=[]
-    columns={key:[] for key in NUMERIC_FEATURES}
+    columns={key:[] for key in ALL_NUMERIC_FEATURES}
     for strategy in STRATEGIES:
         columns[f"strategy_flag:{strategy}"]=[]
         columns[f"strategy_x_entry_net_rr:{strategy}"]=[]
@@ -605,7 +908,7 @@ def _feature_coverage(rows):
             if not np.isfinite(rr):rr=CENTERS["entry_net_rr"]
             columns[f"strategy_x_entry_net_rr:{candidate}"].append(
                 flag*np.clip((rr-CENTERS["entry_net_rr"])/SCALES["entry_net_rr"],-4,4))
-    for key in NUMERIC_FEATURES:
+    for key in ALL_NUMERIC_FEATURES:
         raw=[]
         for row in rows:
             try:value=float(row[key])
@@ -708,6 +1011,13 @@ def _legacy_policy_stage(rows,stage,params=None):
             # without the trend filter so the validation sample C/D lose is kept.
             if _disclosure_rejection(row,params) is not None:continue
             selected.append(row);continue
+        if stage=="legacy_risk_off_disclosure_earnings":
+            if _disclosure_rejection(row,params) is not None:continue
+            if earnings_gate_status(row,
+                    earnings_momentum_min=params.get("earnings_momentum_min"),
+                    op_yoy_min=params.get("op_yoy_min"),
+                    opm_min=params.get("opm_min"))=="REJECT":continue
+            selected.append(row);continue
         try:
             market_gap=float(row["market_ma200_gap_pct"])
             stock_trend=float(row["signal_trend_200_pct"])
@@ -764,17 +1074,18 @@ def _not_evaluated_fundamental_stage():
     return {"status":"NOT_EVALUATED","periods":{},"reason":{
         "short_selling":"Unavailable from unauthenticated CI sources: KRX endpoints return HTTP 400 LOGOUT; Naver status uses the same blocked KRX iframe.",
         "earnings_numeric_series":"Insufficient history: Naver has 3 annual years and 5 quarters; Yahoo has 4 annual years and 5 quarters, not the 2016-2025 development window.",
-        "opendart":"API key required; no key or fabricated zero values used."}}
+        "opendart_earnings":"Evaluated separately from the OpenDART cache/API in the B+D+E earnings policy; this short-fundamental stage does not reuse or duplicate those measurements."}}
 
 
 POLICY_SELECTION_METRIC="development mean_net_pct / max(abs(sequence MDD),1)"
 
 
 def _risk_adjusted_policy_selection(steps):
-    """Select among A, B, B+D, C and D using positive development return scaled by sequence MDD."""
+    """Select among evaluated A-D stages plus the separately evaluated B+D+E candidate."""
     comparison={};eligible=[]
     stage_names=("legacy_only","legacy_risk_off_hard_gate","legacy_risk_off_disclosure",
-                 "legacy_risk_off_trend_filter","legacy_risk_off_trend_disclosure")
+                 "legacy_risk_off_trend_filter","legacy_risk_off_trend_disclosure",
+                 "legacy_risk_off_disclosure_earnings")
     for name in stage_names:
         step=steps.get(name,{})
         dev=step.get("periods",{}).get("development",{})
@@ -936,20 +1247,21 @@ def _policy_ladder(legacy_rows,frames,requested,cohort,disclosures_available):
     steps["selected_policy"]=selected
     steps["selection_metric"]=POLICY_SELECTION_METRIC
     steps["development_selection_comparison"]=selection_comparison
-    steps["selection_rule"]=("Among A, B, B+D, C and D, select the development candidate with the highest mean_net_pct / "
+    steps["selection_rule"]=("Among A, B, B+D, C, D and B+D+E, select the development candidate with the highest mean_net_pct / "
         "max(abs(sequence MDD),1), requiring at least MIN_POLICY_TRADES and positive development mean net; "
         "ties use lower absolute sequence MDD then stage name ascending. A is scored on the same rule and is "
-        "the fallback when no candidate qualifies. Validation and diagnostic are report-only; E is NOT_EVALUATED.")
+        "the fallback when no candidate qualifies. Validation and diagnostic are report-only.")
     steps["stage_ladder"]={"A":"legacy_only","B":"legacy_risk_off_hard_gate",
         "B+D":"legacy_risk_off_disclosure","C":"legacy_risk_off_trend_filter",
-        "D":"legacy_risk_off_trend_disclosure",
-        "note":"B+D adds only the disclosure filter to B; C adds only the trend filter; D combines trend and disclosure."}
+        "D":"legacy_risk_off_trend_disclosure","B+D+E":"legacy_risk_off_disclosure_earnings",
+        "note":"B+D adds only the disclosure filter to B; C adds only the trend filter; D combines trend and disclosure; B+D+E adds earnings to B+D."}
     steps["development_volatility_caps_pct"]={k:round(v,8) for k,v in vol_caps.items()}
     steps["grid_constants"]={"market_ma200_gap_min_pct":list(TREND_MARKET_MA200_GAPS),
         "stock_ma200_gap_gt_pct":0,"relative_strength_60d_gt_pct":0,
         "volatility_quantiles":list(TREND_VOLATILITY_QUANTILES),
         "disclosure_bad_60d_max":list(DISCLOSURE_BAD_MAX_GRID),
         "disclosure_periodic_days_since_floor":list(DISCLOSURE_PERIODIC_DAYS_FLOOR_GRID),
+        "earnings_threshold_values":list(EARNINGS_POLICY_THRESHOLD_VALUES),
         "min_policy_trades":MIN_POLICY_TRADES,"risk_off_rule":REGIME_RULE["risk_off"]}
     return steps
 
@@ -1239,7 +1551,8 @@ def _policy_stage_trade_records(ladder,legacy_choice_rows):
     """Compact per-stage trade rows so the universe tables can be re-checked offline."""
     stages={}
     for stage_name in ("legacy_only","legacy_risk_off_hard_gate","legacy_risk_off_disclosure",
-            "legacy_risk_off_trend_filter","legacy_risk_off_trend_disclosure"):
+            "legacy_risk_off_trend_filter","legacy_risk_off_trend_disclosure",
+            "legacy_risk_off_disclosure_earnings"):
         entry=ladder.get(stage_name) or {}
         periods={}
         for period in ("development","validation","diagnostic"):
@@ -1269,6 +1582,13 @@ def _stage_gate_rejection(row,stage,params=None):
     if stage=="legacy_risk_off_hard_gate":return None
     params=params or {}
     if stage=="legacy_risk_off_disclosure":return _disclosure_rejection(row,params)
+    if stage=="legacy_risk_off_disclosure_earnings":
+        disclosure_reason=_disclosure_rejection(row,params)
+        if disclosure_reason:return disclosure_reason
+        status=earnings_gate_status(row,
+            earnings_momentum_min=params.get("earnings_momentum_min"),
+            op_yoy_min=params.get("op_yoy_min"),opm_min=params.get("opm_min"))
+        return "EARNINGS_THRESHOLD_NOT_MET" if status=="REJECT" else None
     try:
         market_gap=float(row["market_ma200_gap_pct"]);stock_trend=float(row["signal_trend_200_pct"])
         excess60=float(row["relative_strength_60d_pct"]);volatility=float(row["signal_volatility_20d_pct"])
@@ -1287,7 +1607,8 @@ RECENT_SIGNAL_WINDOW_DAYS=14
 RECENT_SIGNAL_LIST_SIZE=10
 STAGE_LABELS={"legacy_only":"A","legacy_risk_off_hard_gate":"B",
     "legacy_risk_off_disclosure":"B+D","legacy_risk_off_trend_filter":"C",
-    "legacy_risk_off_trend_disclosure":"D"}
+    "legacy_risk_off_trend_disclosure":"D",
+    "legacy_risk_off_disclosure_earnings":"B+D+E"}
 
 
 def _recent_signal_gate(legacy_rows,ladder,window_days=RECENT_SIGNAL_WINDOW_DAYS):
@@ -1498,17 +1819,20 @@ def run():
             "fixed_scale":True,"evaluation_period_scaling":False},
         "regime_distribution":{},"regime_performance":{},"ablation":{},
         "feature_coverage":{},"target_variants":{},"policy_comparison":{},"policy_ladder":{},
+        "earnings_coverage":{},"earnings_ablation":{},"slb_coverage":{},
+        "direction3_three_way":{},"direction3_earnings_breakdown":{},
         "recent_signal_gate":{},
         "disclosure_coverage":{},"focused_universe_ablation":{},"recommended_universe":{},
         "focused_universe_ablation_policy_b":{},"recommended_universe_policy_b":{},
         "focused_universe_ablation_policy_b_plus_d":{},"recommended_universe_policy_b_plus_d":{},
         "direction3_role":"diagnostic_only; all buy decisions come exclusively from the legacy policy ladder",
         "frozen_audit_benchmark":{k:list(v) for k,v in AUDIT_63_BENCHMARK.items()},
-        "feature_schema":{"version":"macro-relative-flow-v1","groups":{k:list(v) for k,v in FEATURE_GROUPS.items()},
-            "full_numeric_feature_count":len(NUMERIC_FEATURES),"strategy_flags":6,"strategy_interactions":6,
-            "feature_count_including_strategy_terms":len(NUMERIC_FEATURES)+12,"feature_limit":90,
+        "feature_schema":{"version":"macro-relative-flow-earnings-v1","groups":{k:list(v) for k,v in FEATURE_GROUPS.items()},
+            "base_numeric_feature_count":len(NUMERIC_FEATURES),"full_numeric_feature_count":len(ALL_NUMERIC_FEATURES),
+            "earnings_feature_count":len(EARNINGS_FEATURES),"strategy_flags":6,"strategy_interactions":6,
+            "feature_count_including_strategy_terms":len(ALL_NUMERIC_FEATURES)+12,"feature_limit":90,
             "fixed_centers":CENTERS,"fixed_scales":SCALES,
-            "limit_rationale":"59 fixed-scale numeric values + six strategy one-hots + six strategy×net-RR interactions = 71 fixed columns; schema fixed before OOS and no evaluation-window fitting/selection."},
+            "limit_rationale":"67 fixed-scale numeric values including 8 predeclared OpenDART features + six strategy one-hots + six strategy×net-RR interactions = 79 fixed columns; schema and scales fixed before OOS and no evaluation-window fitting/selection."},
         "cec6d80_baseline_source":archived_baseline.get("source_run_id"),
         "portfolio":{"max_concurrent_positions":5,"weighting":"equal initial notional slots"},"cohorts":{}}
     all_flow_frames={};all_flow_sources={};all_development_feature_rows=[]
@@ -1520,6 +1844,24 @@ def run():
         for ticker,name,_,_ in cohorts[cohort]:
             if ticker not in seen_disclosure_tickers:
                 disclosure_entries.append((ticker,name));seen_disclosure_tickers.add(ticker)
+    earnings_by_ticker,earnings_collection=_collect_earnings_history(disclosure_entries)
+    earnings_not_applicable={cohort:[str(item[0]).zfill(6) for item in cohorts.get(cohort,[])]
+        for cohort in ("TIGER_ETF","SOXL")}
+    out["earnings_coverage"]={"earnings_source":"OpenDART fnlttSinglAcntAll.json; CFS then OFS on status 013",
+        "key_present":earnings_collection.get("key_present",False),
+        "used_fields":list(EARNINGS_FEATURES),"collection":earnings_collection,
+        "not_applicable_tickers":earnings_not_applicable,
+        "per_ticker":{ticker:{"corp_code":value.get("diagnostics",{}).get("corp_code"),
+            "status":value.get("diagnostics",{}).get("status"),
+            "available":value.get("diagnostics",{}).get("available",False),
+            "attempted":value.get("diagnostics",{}).get("attempted",False),
+            "rows_n":len(value.get("records",[])),
+            "first_rcept_date":value.get("diagnostics",{}).get("first_rcept_date"),
+            "last_rcept_date":value.get("diagnostics",{}).get("last_rcept_date"),
+            "requests_n":value.get("diagnostics",{}).get("requests_n",0),
+            "failures":value.get("diagnostics",{}).get("failures",[]),
+            "reason":value.get("diagnostics",{}).get("reason")}
+            for ticker,value in earnings_by_ticker.items()}}
     disclosure_by_ticker={}
     disclosure_warmup= _run_disclosure_warmup_request()
     if disclosure_warmup is not None:
@@ -1601,6 +1943,18 @@ def run():
             row.update(features);row["disclosure_data_available"]=available
             row["disclosure_data_partial"]=bool(diag.get("partial",False))
             return row
+        def attach_earnings(row):
+            ticker=str(row["ticker"]).zfill(6)
+            if cohort not in ("KOSPI","KOSDAQ"):
+                features=earnings_features_for_signal([],row["signal_date"],corp_code=None,
+                    not_applicable=True)
+            else:
+                record=earnings_by_ticker.get(ticker,{})
+                diag=record.get("diagnostics",{})
+                features=earnings_features_for_signal(record.get("records",[]),row["signal_date"],
+                    corp_code=diag.get("corp_code"),abstain=not bool(earnings_collection.get("key_present")))
+            row.update(features)
+            return row
         legacy_all=[]
         for strategy,ts in legacy_by_variant.items():
             for t in ts:
@@ -1609,6 +1963,7 @@ def run():
                     row=_decorate_features({**t,"candidate_family":"legacy","candidate_variant":strategy,"strategy":strategy},frame,comp,breadth,gap,market_return60)
                     row.update(context["features"].get(t["ticker"],{}).get(t["signal_date"],{}))
                     attach_disclosure(row)
+                    attach_earnings(row)
                     legacy_all.append(row)
         broad_all=[]
         for t in broad:
@@ -1617,6 +1972,7 @@ def run():
                 row=_decorate_features({**t,"candidate_family":"broad","candidate_variant":"broad_market_ml","strategy":"broad_market_ml"},frame,comp,breadth,gap,market_return60)
                 row.update(context["features"].get(t["ticker"],{}).get(t["signal_date"],{}))
                 attach_disclosure(row)
+                attach_earnings(row)
                 broad_all.append(row)
         combined=legacy_all+broad_all
         # Exclude symbols whose development history has too few completed candidates,
@@ -1650,7 +2006,23 @@ def run():
             "requested_symbols_n":len(items),
             "coverage_pct":100.0*available_disclosure_n/len(items) if items else 0.0,
             "partial_symbols_n":len(partial_disclosure_tickers)}
+        cohort_earnings_coverage=_cohort_earnings_coverage(cohort,items,earnings_by_ticker,
+            legacy_all+broad_all,("development","validation","diagnostic"))
+        out["earnings_coverage"][cohort]={**cohort_earnings_coverage,
+            "feature_names":list(EARNINGS_FEATURES),
+            "coverage_basis":"legacy and broad candidate rows, split by fixed audit periods"}
         ladder=_policy_ladder(legacy_choice_rows,frames,len(items),cohort,cohort_disclosure_coverage)
+        earnings_step=_earnings_policy_stage(legacy_choice_rows,frames,len(items),
+            ladder.get("legacy_risk_off_disclosure",{}),cohort_earnings_coverage)
+        ladder["legacy_risk_off_disclosure_earnings"]=earnings_step
+        selected_legacy_policy,selection_comparison=_risk_adjusted_policy_selection(ladder)
+        ladder["selected_policy"]=selected_legacy_policy
+        ladder["selection_metric"]=POLICY_SELECTION_METRIC
+        ladder["development_selection_comparison"]=selection_comparison
+        ladder["selection_rule"]=("Among A, B, B+D, C, D and B+D+E, select the development candidate with the highest "
+            "mean_net_pct / max(abs(sequence MDD),1), requiring at least MIN_POLICY_TRADES and positive development mean net; "
+            "ties use lower absolute sequence MDD then stage name ascending. A is the fallback. OOS periods are report-only.")
+        ladder["stage_ladder"]["B+D+E"]="legacy_risk_off_disclosure_earnings"
         out["policy_ladder"][cohort]=ladder
         disclosure_fields=("disclosure_periodic_days_since","disclosure_bad_20d","disclosure_bad_60d",
             "disclosure_positive_20d","disclosure_count_60d")
@@ -1681,7 +2053,8 @@ def run():
         all_development_feature_rows.extend(development_rows)
         feature_coverage,excluded_features=_feature_coverage(development_rows)
         for col in excluded_features:print(f"FEATURE_AUTO_EXCLUDED cohort={cohort} feature={col} reason=zero_development_std",flush=True)
-        excluded_numeric_count=len(set(excluded_features)&set(NUMERIC_FEATURES))
+        excluded_numeric_count=len(set(excluded_features)&set(ALL_NUMERIC_FEATURES))
+        excluded_base_numeric_count=len(set(excluded_features)&set(NUMERIC_FEATURES))
         excluded_strategy_count=len(excluded_features)-excluded_numeric_count
         active_strategy_terms=12-excluded_strategy_count
         target_results={};target_status={}
@@ -1696,9 +2069,9 @@ def run():
                 rank=_rank_metrics(dev)
                 dev_comp[config]={"r_rank_metrics":rank,"datewise_primary_metric":rank.get("datewise_spearman_mean"),
                     "auroc":_auc(dev),"candidate_n":len(dev),"minimum_train_samples":min_train,
-                    "max_training_samples":4000,"numeric_features":len(NUMERIC_FEATURES)-excluded_numeric_count,
+                    "max_training_samples":4000,"numeric_features":len(NUMERIC_FEATURES)-excluded_base_numeric_count,
                     "auto_excluded_features":excluded_features,
-                    "feature_count_including_strategy_terms":len(NUMERIC_FEATURES)-excluded_numeric_count+active_strategy_terms}
+                    "feature_count_including_strategy_terms":len(NUMERIC_FEATURES)-excluded_base_numeric_count+active_strategy_terms}
             selectable=[(v["datewise_primary_metric"],v["r_rank_metrics"].get("tercile_top_minus_bottom_realized_r"),k)
                 for k,v in dev_comp.items() if v["datewise_primary_metric"] is not None and v["candidate_n"]>=MIN_POLICY_TRADES]
             chosen=max(selectable,key=lambda p:(p[0],p[1] if p[1] is not None else -1,p[2]))[2] if selectable else None
@@ -1806,11 +2179,12 @@ def run():
                     "predicted_r_spread":_model_diagnostics(_period(target_rows,p))["r_rank_metrics"].get("predicted_r_p10_p50_p90")}
                     for p in ("development","validation","diagnostic")}}
         out.setdefault("target_variants",{})[cohort]=target_report
-        ablation_result={}
+        ablation_result={};ab_scored_by_feature_set={}
         if selected_config:
             for feature_set in FEATURE_GROUPS:
                 ab_scored,_=walk_forward_scores(eligible_rows,selected_config,min_train,feature_set=feature_set,
                     target_variant=selected_target,excluded_features=excluded_features)
+                ab_scored_by_feature_set[feature_set]=ab_scored
                 active_numeric=sum(k not in excluded_features for k in FEATURE_GROUPS[feature_set])
                 ablation_result[feature_set]={"model_config":selected_config,"target_variant":selected_target,
                     "feature_count":active_numeric+active_strategy_terms,"periods":{}}
@@ -1820,6 +2194,17 @@ def run():
                         "r_rank_metrics":_rank_metrics(period_rows),"auroc":_auc(period_rows),
                         "diagnostics":_model_diagnostics(period_rows)}
         out["ablation"][cohort]=ablation_result
+        if selected_config and "plus_flow" in ab_scored_by_feature_set and "plus_earnings" in ab_scored_by_feature_set:
+            out["earnings_ablation"][cohort]={"status":"EVALUATED_SAME_MODEL_TARGET_AND_SHARED_ROWS",
+                "model_config":selected_config,"target_variant":selected_target,
+                "feature_sets":["plus_flow","plus_earnings"],
+                "periods":{period:_paired_earnings_ablation(
+                    _period(ab_scored_by_feature_set["plus_flow"],period),
+                    _period(ab_scored_by_feature_set["plus_earnings"],period))
+                    for period in ("development","validation","diagnostic")}}
+        else:
+            out["earnings_ablation"][cohort]={"status":"NOT_EVALUATED_NO_SELECTED_MODEL",
+                "model_config":selected_config,"target_variant":selected_target,"periods":{}}
         cohort_result={"requested":len(items),"loaded":len(instruments),"errors":errors,
             "data_coverage_pct":round(100*len(instruments)/len(items),2) if items else None,
             "data_complete":len(instruments)==len(items) and not errors,
@@ -1983,7 +2368,9 @@ def run():
         "attempted_symbols":sum(bool(v.get("attempted",False)) for v in all_flow_sources.values()),
         "by_ticker":all_flow_sources}
     expanded=run_expanded_direction_audit(flow_frames=all_flow_frames,flow_source_coverage=all_flow_sources,
-        macro_frames=macro_frames,macro_diagnostics=macro_sources)
+        macro_frames=macro_frames,macro_diagnostics=macro_sources,
+        earnings_by_ticker=earnings_by_ticker,
+        earnings_key_present=bool(earnings_collection.get("key_present")))
     out["universe_expansion"]=expanded["universe_expansion"]
     out["extended_pool_collection"]=expanded["extended_pool_collection"]
     out["flow_collection"]["extended_296_pool_attempted"]=bool(
@@ -1994,7 +2381,27 @@ def run():
         "No new extended-pool flow request was issued; provided benchmark flow frames were reused and missing symbols remain NaN.")
     out["flow_collection"]["extended_pool_collection"]=expanded["extended_pool_collection"]
     out["label_variants"]=expanded["label_variants"]
+    direction3_samples=expanded["direction3"].pop("_evaluation_samples",{})
     out["direction3"]=expanded["direction3"]
+    for cohort,sample_periods in direction3_samples.items():
+        out["direction3_three_way"][cohort]={}
+        out["direction3_earnings_breakdown"][cohort]={"diagnostic_only":True,
+            "feature_used_for_grouping":"earnings_momentum","model_retrained":False,"periods":{}}
+        for period in ("development","validation","diagnostic"):
+            samples=sample_periods.get(period,[]) if isinstance(sample_periods,dict) else []
+            out["direction3_three_way"][cohort][period]=_three_way_report(samples)
+            buckets={"earnings_momentum_gt_0":[],"earnings_momentum_le_0":[],
+                "earnings_momentum_missing":[]}
+            for sample in samples:
+                try:value=float(sample.get("earnings_momentum",np.nan))
+                except (TypeError,ValueError):value=np.nan
+                if not np.isfinite(value):buckets["earnings_momentum_missing"].append(sample)
+                elif value>0:buckets["earnings_momentum_gt_0"].append(sample)
+                else:buckets["earnings_momentum_le_0"].append(sample)
+            out["direction3_earnings_breakdown"][cohort]["periods"][period]={
+                name:{"rows_n":len(group),**_three_way_report(group)}
+                for name,group in buckets.items()}
+    out["slb_coverage"]=_slb_coverage_report(cohorts)
     out["feature_coverage"]["expanded_direction_model"]=expanded["feature_coverage"]
     out["expanded_direction_selection_rule"]=expanded["selection_rule"]
     out["runtime_seconds"]=(datetime.now(timezone.utc)-started).total_seconds()

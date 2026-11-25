@@ -10,6 +10,7 @@ import json
 import math
 import os
 import re
+import threading
 import time
 import zipfile
 from datetime import date, datetime
@@ -30,6 +31,49 @@ EARNINGS_FEATURES = (
     "opm_pct", "opm_yoy_delta_pp", "earnings_momentum",
 )
 _FINAL_REQUEST_STATUSES = {"000", "013"}
+
+
+def max_requests_per_run() -> int:
+    try:
+        value = int(os.environ.get("OPENDART_MAX_REQUESTS_PER_RUN", "6000"))
+    except (TypeError, ValueError):
+        value = 6000
+    return max(0, value)
+
+
+def warmup_workers_from_env() -> int:
+    try:
+        value = int(os.environ.get("OPENDART_WARMUP_WORKERS", "4"))
+    except (TypeError, ValueError):
+        value = 4
+    return max(1, min(8, value))
+
+
+class RunRequestBudget:
+    """Thread-safe request counter shared by all clients in one warmup run."""
+    def __init__(self, limit: int | None = None):
+        self.limit = max_requests_per_run() if limit is None else max(0, int(limit))
+        self._requests_n = 0
+        self._cap_reached = False
+        self._lock = threading.Lock()
+
+    def acquire(self) -> bool:
+        with self._lock:
+            if self._requests_n >= self.limit:
+                self._cap_reached = True
+                return False
+            self._requests_n += 1
+            return True
+
+    @property
+    def requests_n(self) -> int:
+        with self._lock:
+            return self._requests_n
+
+    @property
+    def cap_reached(self) -> bool:
+        with self._lock:
+            return self._cap_reached
 
 
 def request_interval_seconds() -> float:
@@ -147,7 +191,7 @@ def _empty_collection(stock_code, corp_code, *, status, key_present, reason=None
 class OpenDartClient:
     """Small synchronous client with a shared per-instance throttle and cache."""
     def __init__(self, cache_root=DEFAULT_CACHE_ROOT, *, http_get=None,
-                 clock=None, sleeper=None):
+                 clock=None, sleeper=None, request_budget=None):
         self.cache_root = Path(cache_root)
         self.corp_cache_path = self.cache_root / "corp-codes.json"
         # No alternate key source is accepted; this is the only secret lookup.
@@ -158,6 +202,7 @@ class OpenDartClient:
         self._last_request_at = None
         self._deadline = None
         self._requests_n = 0
+        self.request_budget = request_budget or RunRequestBudget()
 
     @property
     def key_present(self) -> bool:
@@ -165,6 +210,9 @@ class OpenDartClient:
 
     def set_time_budget(self, seconds: float | None):
         self._deadline = None if seconds is None else self._clock() + max(0.0, float(seconds))
+
+    def set_request_budget(self, request_budget: RunRequestBudget):
+        self.request_budget = request_budget
 
     def _budget_available(self) -> bool:
         return self._deadline is None or self._clock() < self._deadline
@@ -183,6 +231,8 @@ class OpenDartClient:
             return None, "ABSTAIN_NO_API_KEY"
         if not self._budget_available():
             return None, "SKIPPED_BUDGET"
+        if not self.request_budget.acquire():
+            return None, "REQUEST_CAP_REACHED"
         self._throttle()
         self._requests_n += 1
         try:
@@ -245,9 +295,10 @@ class OpenDartClient:
         failures = []
         attempted = 0
         budget_exhausted = False
+        cap_reached = False
 
         def request_fs(year, report_code, fs_div):
-            nonlocal attempted, budget_exhausted
+            nonlocal attempted, budget_exhausted, cap_reached
             combo = f"{year}:{report_code}:{fs_div}"
             prior = request_status.get(combo, {})
             if isinstance(prior, dict) and prior.get("status") in _FINAL_REQUEST_STATUSES:
@@ -258,6 +309,9 @@ class OpenDartClient:
             params = {"crtfc_key": self._api_key, "corp_code": corp_code,
                       "bsns_year": str(year), "reprt_code": report_code, "fs_div": fs_div}
             response, error = self._request(FINANCIAL_URL, params)
+            if error == "REQUEST_CAP_REACHED":
+                cap_reached = True
+                return error, None
             attempted += 1
             if error:
                 if error == "SKIPPED_BUDGET":
@@ -287,9 +341,9 @@ class OpenDartClient:
                 status, record = request_fs(year, report_code, "CFS")
                 if status == "013":
                     request_fs(year, report_code, "OFS")
-                if budget_exhausted:
+                if budget_exhausted or cap_reached:
                     break
-            if budget_exhausted:
+            if budget_exhausted or cap_reached:
                 break
 
         _atomic_json(cache_path, {
@@ -304,12 +358,15 @@ class OpenDartClient:
             0 if row.get("fs_div") == "CFS" else 1))
         return {"records": records, "diagnostics": {
             "stock_code": ticker, "corp_code": str(corp_code),
-            "status": "PARTIAL_BUDGET" if budget_exhausted else ("OK" if records else "NO_DATA"),
+            "status": ("PARTIAL_REQUEST_CAP" if cap_reached else
+                ("PARTIAL_BUDGET" if budget_exhausted else ("OK" if records else "NO_DATA"))),
             "available": bool(records), "attempted": attempted > 0,
             "key_present": True, "requests_n": attempted,
             "first_rcept_date": next((r.get("rcept_date") for r in records if r.get("rcept_date")), None),
             "last_rcept_date": next((r.get("rcept_date") for r in reversed(records) if r.get("rcept_date")), None),
             "records_n": len(records), "budget_exhausted": budget_exhausted,
+            "cap_reached": cap_reached or self.request_budget.cap_reached,
+            "request_limit": self.request_budget.limit,
             "failures": failures,
         }}
 
@@ -326,10 +383,12 @@ def get_company_financials(stock_code: str, *, corp_code: str | None = None,
         reprt_codes=reprt_codes)
 
 
-def _pct_change(current, previous, *, require_positive=False):
+def _pct_change(current, previous, *, require_positive=False,
+                require_positive_previous=False):
     if not (math.isfinite(current) and math.isfinite(previous)):
         return math.nan
-    if previous == 0 or (require_positive and (current <= 0 or previous <= 0)):
+    if (previous == 0 or (require_positive and (current <= 0 or previous <= 0))
+            or (require_positive_previous and previous <= 0)):
         return math.nan
     return (current / previous - 1.0) * 100.0
 
@@ -382,10 +441,12 @@ def earnings_features_for_signal(records, signal_date, *, corp_code,
     ``(current quarter - same quarter prior year) / prior-year quarter``; earnings
     momentum is the mean of the latest two finite quarterly YoY values.
     """
-    if not_applicable or not corp_code:
+    if not_applicable:
         return _nan_features(status="not_applicable")
     if abstain:
         return _nan_features(status="abstain_no_api_key")
+    if not corp_code:
+        return _nan_features(status="not_applicable")
     try:
         signal_day = date.fromisoformat(str(signal_date)[:10])
     except (TypeError, ValueError):
@@ -425,7 +486,8 @@ def earnings_features_for_signal(records, signal_date, *, corp_code,
     current_ni = _finite(ni_q.get(latest_quarter, math.nan))
     prior_ni = _finite(ni_q.get(prior_year_quarter, math.nan))
     rev_qoq = _pct_change(current_revenue, revenue_q.get(previous_quarter, math.nan), require_positive=True)
-    op_qoq = _pct_change(current_op, op_q.get(previous_quarter, math.nan), require_positive=True)
+    op_qoq = _pct_change(current_op, op_q.get(previous_quarter, math.nan),
+        require_positive_previous=True)
 
     opm = current_op / current_revenue * 100.0 if math.isfinite(current_op) and math.isfinite(current_revenue) and current_revenue > 0 else math.nan
     prior_opm = prior_op / prior_revenue * 100.0 if math.isfinite(prior_op) and math.isfinite(prior_revenue) and prior_revenue > 0 else math.nan
@@ -433,7 +495,7 @@ def earnings_features_for_signal(records, signal_date, *, corp_code,
     quarterly_op_yoy = []
     for (year, quarter), current_value in op_q.items():
         previous_value = op_q.get((year - 1, quarter), math.nan)
-        growth = _pct_change(current_value, previous_value)
+        growth = _pct_change(current_value, previous_value, require_positive_previous=True)
         if math.isfinite(growth):
             quarterly_op_yoy.append(((year, quarter), growth))
     momentum_values = [value for _, value in sorted(quarterly_op_yoy)[-2:]]
@@ -445,8 +507,8 @@ def earnings_features_for_signal(records, signal_date, *, corp_code,
         "rev_yoy_pct": _pct_change(current_revenue, prior_revenue, require_positive=True),
         # Growth from a zero/negative prior value is undefined for percentage
         # comparison (e.g. a loss-to-profit turnaround), so abstain with NaN.
-        "op_yoy_pct": _pct_change(current_op, prior_op, require_positive=True),
-        "ni_yoy_pct": _pct_change(current_ni, prior_ni, require_positive=True),
+        "op_yoy_pct": _pct_change(current_op, prior_op, require_positive_previous=True),
+        "ni_yoy_pct": _pct_change(current_ni, prior_ni, require_positive_previous=True),
         "rev_qoq_pct": rev_qoq,
         "op_qoq_pct": op_qoq,
         "opm_pct": opm,

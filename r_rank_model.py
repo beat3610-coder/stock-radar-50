@@ -37,11 +37,15 @@ FLOW_FEATURES=("foreign_flow_5d_to_turnover","foreign_flow_20d_to_turnover",
     "institution_flow_5d_to_turnover","institution_flow_20d_to_turnover",
     "foreign_buy_streak","institution_buy_streak","flow_direction_agreement","flow_data_available",
     "turnover_ratio20","signed_volume_flow5")
+EARNINGS_FEATURES=("rev_yoy_pct","op_yoy_pct","ni_yoy_pct","rev_qoq_pct",
+    "op_qoq_pct","opm_pct","opm_yoy_delta_pp","earnings_momentum")
 NUMERIC_FEATURES=BASE_NUMERIC_FEATURES+REGIME_FEATURES+RELATIVE_STRENGTH_FEATURES+FLOW_FEATURES
+ALL_NUMERIC_FEATURES=NUMERIC_FEATURES+EARNINGS_FEATURES
 FEATURE_GROUPS={"base30":BASE_NUMERIC_FEATURES,
     "plus_regime":BASE_NUMERIC_FEATURES+REGIME_FEATURES,
     "plus_relative":BASE_NUMERIC_FEATURES+REGIME_FEATURES+RELATIVE_STRENGTH_FEATURES,
-    "plus_flow":NUMERIC_FEATURES}
+    "plus_flow":NUMERIC_FEATURES,
+    "plus_earnings":NUMERIC_FEATURES+EARNINGS_FEATURES}
 CENTERS={"signal_rsi":50,"signal_adx":25,"signal_atr_pct":3,
     "signal_ma20_ma60_pct":0,"signal_volume_ratio":1.2,"signal_5d_return_pct":0,
     "signal_trend_200_pct":0,"signal_drawdown_20_pct":-3,"entry_net_rr":1.5,
@@ -69,6 +73,8 @@ CENTERS.update({
     "institution_flow_5d_to_turnover":0,"institution_flow_20d_to_turnover":0,
     "foreign_buy_streak":0,"institution_buy_streak":0,"flow_direction_agreement":0,
     "flow_data_available":0,"turnover_ratio20":1,"signed_volume_flow5":0})
+CENTERS.update({"rev_yoy_pct":0,"op_yoy_pct":0,"ni_yoy_pct":0,"rev_qoq_pct":0,
+    "op_qoq_pct":0,"opm_pct":10,"opm_yoy_delta_pp":0,"earnings_momentum":0})
 SCALES.update({
     "market_index_ma20_gap_pct":12,"market_index_ma60_gap_pct":18,"market_index_ma200_gap_pct":30,
     "market_index_return_5d_pct":10,"market_index_return_20d_pct":18,"market_index_return_60d_pct":30,
@@ -84,9 +90,12 @@ SCALES.update({
     "institution_flow_5d_to_turnover":.5,"institution_flow_20d_to_turnover":1,
     "foreign_buy_streak":5,"institution_buy_streak":5,"flow_direction_agreement":1,
     "flow_data_available":1,"turnover_ratio20":2,"signed_volume_flow5":1})
+SCALES.update({"rev_yoy_pct":50,"op_yoy_pct":50,"ni_yoy_pct":50,"rev_qoq_pct":50,
+    "op_qoq_pct":50,"opm_pct":20,"opm_yoy_delta_pp":20,"earnings_momentum":50})
 INTERACTION_FEATURES=("entry_net_rr",)
-FEATURE_COUNT=len(NUMERIC_FEATURES)+len(STRATEGIES)*(1+len(INTERACTION_FEATURES))
-# 59 fixed numeric inputs + six strategy flags + six strategy×net-RR terms.
+FEATURE_COUNT=max(len(features) for features in FEATURE_GROUPS.values())+len(STRATEGIES)*(1+len(INTERACTION_FEATURES))
+# 67 fixed numeric inputs at the widest ablation (+ earnings) + six strategy flags
+# + six strategy×net-RR terms. Earnings scales are fixed before evaluation.
 # Fixed scales and this predeclared schema are shared across all time windows.
 FEATURE_LIMIT=90
 MIN_TRAIN_SAMPLES=300

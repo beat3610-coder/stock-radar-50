@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - feature/probability-walkforward-audit-20261118
+      - feature/opendart-earnings-20261125
     paths:
       - '.github/workflows/audit-63-instruments.yml'
       - 'strategy_lab.py'
@@ -22,6 +23,8 @@ on:
       - 'slb.py'
       - 'slb_warmup.py'
       - 'tests/test_opendart.py'
+      - 'tests/test_opendart_warmup.py'
+      - 'tests/test_earnings_audit.py'
       - '.github/workflows/disclosure-warmup.yml'
       - '.github/workflows/opendart-warmup.yml'
       - '.github/workflows/slb-warmup.yml'
@@ -46,6 +49,8 @@ on:
       - 'slb.py'
       - 'slb_warmup.py'
       - 'tests/test_opendart.py'
+      - 'tests/test_opendart_warmup.py'
+      - 'tests/test_earnings_audit.py'
       - '.github/workflows/disclosure-warmup.yml'
       - '.github/workflows/opendart-warmup.yml'
       - '.github/workflows/slb-warmup.yml'
@@ -58,6 +63,8 @@ jobs:
     env:
       OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
       DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
+      OPENDART_WARMUP_WORKERS: "4"
+      OPENDART_MAX_REQUESTS_PER_RUN: "6000"
     steps:
       - uses: actions/checkout@v4
       - name: Restore validated public OHLCV cache

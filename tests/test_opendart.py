@@ -10,6 +10,7 @@ from io import BytesIO
 from unittest.mock import patch
 
 from opendart import (EARNINGS_FEATURES, REPORT_CODES, REPORT_QUARTERS, OpenDartClient,
+                      RunRequestBudget,
                       earnings_features_for_signal, earnings_gate_status, parse_corp_code_zip,
                       parse_financial_response, _quarter_standalones)
 from slb import (SLB_FEATURES, SlbClient, isin_for_stock_code,
@@ -114,6 +115,28 @@ class OpenDartTests(unittest.TestCase):
             self.assertEqual(client.get_corp_codes(), {"005930": "00126380"})
             get.assert_not_called()
 
+    def test_per_run_request_cap_stops_company_collection_with_diagnostics(self):
+        calls = []
+        def fake_get(url, *, params, timeout):
+            calls.append(dict(params))
+            return Response({"status": "000", "list": [
+                {"sj_div": "IS", "account_id": "ifrs-full_Revenue",
+                 "account_nm": "매출액", "thstrm_amount": "100",
+                 "rcept_no": "20250311000001"},
+            ]})
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"OPENDART_API_KEY": "test-secret"}):
+            client = OpenDartClient(directory, http_get=fake_get,
+                request_budget=RunRequestBudget(limit=1), sleeper=lambda _: None)
+            result = client.company_financials("005930", corp_code="00126380",
+                start_year=2024, end_year=2024, reprt_codes=("11013", "11014"))
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result["diagnostics"]["requests_n"], 1)
+        self.assertEqual(result["diagnostics"]["status"], "PARTIAL_REQUEST_CAP")
+        self.assertTrue(result["diagnostics"]["cap_reached"])
+        self.assertEqual(result["diagnostics"]["request_limit"], 1)
+
     def test_receipt_date_is_strictly_prior_and_saturday_report_is_available_monday(self):
         report = financial_record(2025, "11013", "2025-03-11", 100, 20, 10)
         same_day = earnings_features_for_signal([report], "2025-03-11", corp_code="00126380")
@@ -186,6 +209,15 @@ class OpenDartTests(unittest.TestCase):
         features = earnings_features_for_signal(records, "2024-11-18", corp_code="00126380")
         self.assertTrue(math.isnan(features["op_yoy_pct"]))
         self.assertTrue(math.isnan(features["ni_yoy_pct"]))
+
+    def test_profit_decline_to_loss_uses_positive_prior_denominator(self):
+        records = [
+            financial_record(2023, "11014", "2023-11-15", 100, 100, 80),
+            financial_record(2024, "11014", "2024-11-14", 90, -10, -8),
+        ]
+        features = earnings_features_for_signal(records, "2024-11-18", corp_code="00126380")
+        self.assertAlmostEqual(features["op_yoy_pct"], -110.0)
+        self.assertAlmostEqual(features["ni_yoy_pct"], -110.0)
 
     def test_nonpositive_revenue_and_missing_denominators_are_nan(self):
         records = [financial_record(2024, "11014", "2025-03-10", 0, 20, 10),
