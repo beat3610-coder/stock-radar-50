@@ -17,7 +17,14 @@ on:
       - 'flow_warmup.py'
       - 'disclosures.py'
       - 'disclosure_warmup.py'
+      - 'opendart.py'
+      - 'opendart_warmup.py'
+      - 'slb.py'
+      - 'slb_warmup.py'
+      - 'tests/test_opendart.py'
       - '.github/workflows/disclosure-warmup.yml'
+      - '.github/workflows/opendart-warmup.yml'
+      - '.github/workflows/slb-warmup.yml'
       - 'data/cec6d80-baseline.json'
   pull_request:
     paths:
@@ -34,13 +41,23 @@ on:
       - 'flow_warmup.py'
       - 'disclosures.py'
       - 'disclosure_warmup.py'
+      - 'opendart.py'
+      - 'opendart_warmup.py'
+      - 'slb.py'
+      - 'slb_warmup.py'
+      - 'tests/test_opendart.py'
       - '.github/workflows/disclosure-warmup.yml'
+      - '.github/workflows/opendart-warmup.yml'
+      - '.github/workflows/slb-warmup.yml'
       - 'data/cec6d80-baseline.json'
   workflow_dispatch:
 jobs:
   audit_63:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    env:
+      OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
+      DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - name: Restore validated public OHLCV cache
@@ -71,6 +88,20 @@ jobs:
           key: stock-radar-pr9-disclosures-${{ runner.os }}-shared-v1
           restore-keys: |
             stock-radar-pr9-disclosures-${{ runner.os }}-shared-v1-
+      - name: Restore OpenDART financial cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/stock-radar/opendart
+          key: stock-radar-pr9-opendart-${{ runner.os }}-shared-v1
+          restore-keys: |
+            stock-radar-pr9-opendart-${{ runner.os }}-shared-v1-
+      - name: Restore securities-lending cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/stock-radar/slb
+          key: stock-radar-pr9-slb-${{ runner.os }}-shared-v1
+          restore-keys: |
+            stock-radar-pr9-slb-${{ runner.os }}-shared-v1-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -110,3 +141,15 @@ jobs:
         with:
           path: .cache/stock-radar/disclosures
           key: stock-radar-pr9-disclosures-${{ runner.os }}-shared-v1-${{ github.run_id }}
+      - name: Save OpenDART financial cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/stock-radar/opendart
+          key: stock-radar-pr9-opendart-${{ runner.os }}-shared-v1-${{ github.run_id }}
+      - name: Save securities-lending cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/stock-radar/slb
+          key: stock-radar-pr9-slb-${{ runner.os }}-shared-v1-${{ github.run_id }}
