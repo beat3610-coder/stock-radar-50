@@ -1,5 +1,5 @@
 {
-  "tested_at_utc": "2026-11-16T12:52:59.552253+00:00",
+  "tested_at_utc": "2026-11-25T08:45:02.694602+00:00",
   "ticker": "005930",
   "source": "Naver investor daily",
   "html_diagnostic": {
@@ -9,20 +9,20 @@
     "sample_tables": []
   },
   "success": false,
-  "error": "ValueError: 네이버 20거래일 조회 실패 [p1:200/0일/137288B; p2:200/0일/137288B; p3:200/0일/137288B; p4:200/0일/137288B]",
+  "error": "ValueError: 네이버 20거래일 조회 실패 [p1:200/0일/87176B; p2:200/0일/87176B; p3:200/0일/87176B; p4:200/0일/87176B]",
   "new_naver_api": {
     "status": 404,
     "url": "https://stock.naver.com/api/domestic/detail/005930/trend?tradeType=KRX&startIdx=0&pageSize=20",
-    "content_type": "application/json; charset=utf-8",
-    "body": "{\"message\":\"Route GET:/api/domestic/detail/005930/trend?tradeType=KRX&startIdx=0&pageSize=20 not found\",\"error\":\"Not Found\",\"statusCode\":404}"
+    "content_type": "text/html; charset=utf-8",
+    "body": "<!DOCTYPE html><html lang=\"ko\" class=\"\" data-theme=\"light\"><head><meta charSet=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/><meta name=\"viewport\" content=\"width=1366, initial-scale=1.0, user-scalable=yes\"/><link rel=\"stylesheet\" href=\"https://financial-vn.pstatic.net/stock-pc/261122-5315000/_next/static/chunks/0-7ql"
   },
   "alternative_data_sources": {
     "github_aggregates": {
       "status": 200,
       "url": "https://raw.githubusercontent.com/james-brand/korea-market-data/main/data/foreign-flows-aggregates.csv",
-      "bytes": 230611,
+      "bytes": 229711,
       "content_type": "text/plain; charset=utf-8",
-      "sample": "# K-Export Stars Foreign Flow aggregates · as of 2026-11-13 · CC BY 4.0 · kexportstars.com/foreign-flow-watch/\nticker,name_en,market,last_close,f_1d_sh,f_5d_sh,f_5d_val,f_20d_sh,f_20d_val,i_1d_sh,i_5d_sh,i_20d_sh\r\n005930,SamsungElectronics,KOSPI,209000,8216,5855908,1220619323200,-1196051,-163290317400,-328604,91291,3655634\r\n402340,SKSQUARE,KOSPI,769000,5418,274850,215849471000,-194480,-20951980900"
+      "sample": "# K-Export Stars Foreign Flow aggregates · as of 2026-11-24 · CC BY 4.0 · kexportstars.com/foreign-flow-watch/\nticker,name_en,market,last_close,f_1d_sh,f_5d_sh,f_5d_val,f_20d_sh,f_20d_val,i_1d_sh,i_5d_sh,i_20d_sh\r\n175330,\"JB Financial Group Co., Ltd.\",KOSPI,25200,-16431,2916622,76160101900,2642976,68721258250,16194,-2973553,-2552198\r\n010170,\"TAIHAN Fiberoptics Co.,LTD\",KOSDAQ,14270,1819421,3844463"
     },
     "naver_mobile_front": {
       "status": 400,
@@ -34,27 +34,27 @@
     "naver_mobile_legacy": {
       "status": 200,
       "url": "https://m.stock.naver.com/api/stock/005930/integration",
-      "bytes": 9246,
+      "bytes": 9249,
       "content_type": "application/json;charset=UTF-8",
-      "sample": "{'stockEndType': 'stock', 'itemCode': '005930', 'reutersCode': '005930', 'stockName': '삼성전자', 'totalInfos': [{'code': 'lastClosePrice', 'key': '전일', 'value': '206,000'}, {'code': 'openPrice', 'key': '시가', 'value': '204,000', 'compareToPreviousPrice': {'code': '5', 'text': '하락', 'name': 'FALLING'}}, {'code': 'highPrice', 'key': '고가', 'value': '208,000', 'compareToPreviousPrice': {'code': '2', 'text': '상승', 'name': 'RISING'}}, {'code': 'lowPrice', 'key': '저가', 'value': '194,900', 'compareToPreviousPrice': {'code': '5', 'text': '하락', 'name': 'FALLING'}}, {'code': 'accumulatedTradingVolume', 'key': '거래량', 'value': '24,246,129'}, {'code': 'accumulatedTradingValue', 'key': '대금', 'value': '4조 8,435억'}, {'code': 'marketValue', 'key': '시총', 'value': '1,140조 243억'}, {'code': 'foreignRate', 'key': '외인소진율', 'value': '46.06%'}, {'code': 'highPriceOf52Weeks', 'key': '52주 최고', 'value': '380,000'}, {'code': 'lowPriceOf52Weeks', 'key': '52주 최저', 'value'"
+      "sample": "{'stockEndType': 'stock', 'itemCode': '005930', 'reutersCode': '005930', 'stockName': '삼성전자', 'totalInfos': [{'code': 'lastClosePrice', 'key': '전일', 'value': '189,400'}, {'code': 'openPrice', 'key': '시가', 'value': '181,600', 'compareToPreviousPrice': {'code': '5', 'text': '하락', 'name': 'FALLING'}}, {'code': 'highPrice', 'key': '고가', 'value': '182,300', 'compareToPreviousPrice': {'code': '5', 'text': '하락', 'name': 'FALLING'}}, {'code': 'lowPrice', 'key': '저가', 'value': '169,100', 'compareToPreviousPrice': {'code': '5', 'text': '하락', 'name': 'FALLING'}}, {'code': 'accumulatedTradingVolume', 'key': '거래량', 'value': '31,838,056'}, {'code': 'accumulatedTradingValue', 'key': '대금', 'value': '5조 5,266억'}, {'code': 'marketValue', 'key': '시총', 'value': '996조 7,905억'}, {'code': 'foreignRate', 'key': '외인소진율', 'value': '45.90%'}, {'code': 'highPriceOf52Weeks', 'key': '52주 최고', 'value': '380,000'}, {'code': 'lowPriceOf52Weeks', 'key': '52주 최저', 'value"
     }
   },
   "verified_primary_source": {
     "success": true,
     "sample": {
-      "date": "2026-11-13",
+      "date": "2026-11-24",
       "source": "K-Export Stars/KIS 기반 일별 집계 (CC BY 4.0)",
       "source_url": "https://github.com/james-brand/korea-market-data",
       "기관": {
-        "1일": -328604,
-        "5일": 91291,
-        "20일": 3655634,
+        "1일": 1176494,
+        "5일": 840584,
+        "20일": 7447237,
         "연속 순매수일": null
       },
       "외국인": {
-        "1일": 8216,
-        "5일": 5855908,
-        "20일": -1196051,
+        "1일": 2348072,
+        "5일": -1427827,
+        "20일": -11925676,
         "연속 순매수일": null
       }
     }
