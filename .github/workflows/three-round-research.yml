@@ -1,0 +1,86 @@
+name: Three-round 300-stock research audit
+on:
+  push:
+    branches:
+      - feature/probability-walkforward-audit-20261118
+    paths:
+      - three_round_trade_model.py
+      - strategy_lab.py
+      - tests/test_three_round_trade_model.py
+      - .github/workflows/three-round-research.yml
+  workflow_dispatch:
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore validated public OHLCV cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/stock-radar/prices
+          key: stock-radar-pr9-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            stock-radar-pr9-cache-${{ runner.os }}-${{ github.ref_name }}-
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Three-round unit tests
+        run: python -m unittest discover -s tests -p test_three_round_trade_model.py -v
+      - name: 300-current-constituent historical comparison
+        run: |
+          python -c "from strategy_lab import run; from pathlib import Path; import json; r=run(per_market=100); Path('data').mkdir(exist_ok=True); Path('data/strategy-lab-latest.json').write_text(json.dumps(r,ensure_ascii=False,indent=2,default=str),encoding='utf-8')" > three-round-research.log 2>&1
+      - name: Extract three-round diagnostic report
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("data/strategy-lab-latest.json")
+          if p.exists():
+              report=json.loads(p.read_text(encoding="utf-8"))
+              out={m:v.get("three_round_probability",{}) for m,v in report.get("markets",{}).items()}
+              Path("three-round-results.json").write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding="utf-8")
+              print(json.dumps(out,ensure_ascii=False,indent=2))
+          else:
+              print("Research did not produce a report; see attached log")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: three-round-research-diagnostics
+          path: |
+            three-round-research.log
+            three-round-results.json
+            data/strategy-lab-latest.json
+          if-no-files-found: warn
+      - name: Enforce complete 300-history report
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("data/strategy-lab-latest.json")
+          if not p.exists():
+              raise SystemExit("FAILED: research report missing")
+          report=json.loads(p.read_text(encoding="utf-8"))
+          incomplete=[]
+          for market in ("KR","KQ","US"):
+              row=report.get("markets",{}).get(market,{})
+              requested=row.get("requested",0)
+              loaded=row.get("loaded",0)
+              sources=len(row.get("price_sources",{}))
+              if requested!=100 or loaded!=100 or sources!=100:
+                  incomplete.append(f"{market} requested={requested}, loaded={loaded}/100, sources={sources}/100")
+          if report.get("data_integrity_status")!="PASS" or incomplete:
+              raise SystemExit("HISTORICAL_DATA_INTEGRITY_FAIL: "+"; ".join(incomplete))
+          print("HISTORICAL_DATA_INTEGRITY_PASS KR=100/100 KQ=100/100 US=100/100")
+          PY
+      - name: Save validated public OHLCV cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/stock-radar/prices
+          key: stock-radar-pr9-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}

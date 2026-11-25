@@ -1,40 +1,347 @@
 import datetime as dt
+import hashlib
+import json
+import os
+from pathlib import Path
+import time
 import pandas as pd
 from engine import normalize
 
-def get_prices(code, market, *, start_date=None):
+PRICE_CACHE = Path(os.environ.get("STOCK_RADAR_PRICE_CACHE", ".cache/stock-radar/prices"))
+RETRY_DELAYS = (0.5, 1.0)
+
+class HistoricalFlowError(RuntimeError):
+    def __init__(self,message,diagnostics):
+        super().__init__(message)
+        self.diagnostics=diagnostics
+
+def _cache_path(code, market, start):
+    key=hashlib.sha256(f"{market}:{code}:{start}".encode()).hexdigest()[:24]
+    return PRICE_CACHE/f"{key}.csv"
+
+def _read_cached(path, min_bars, max_age_days):
+    if not path.exists():return None
+    try:
+        frame=normalize(pd.read_csv(path,index_col=0,parse_dates=True))
+        last=pd.Timestamp(frame.index[-1]).date()
+        age=(dt.date.today()-last).days
+        if len(frame)<min_bars or age<0 or age>max_age_days:return None
+        return frame
+    except Exception:
+        return None
+
+def _write_cached(path, frame):
+    path.parent.mkdir(parents=True,exist_ok=True)
+    tmp=path.with_suffix(".tmp")
+    frame.to_csv(tmp,index_label="Date")
+    tmp.replace(path)
+
+def get_prices(code, market, *, start_date=None, min_bars=None):
     """Live default stays compact; research may ask for longer raw OHLCV history.
 
     The provider may return less history than requested; caller must inspect
     the actual first/last dates and observations rather than assume coverage.
     """
-    import FinanceDataReader as fdr
     start=(dt.date.today()-dt.timedelta(days=850)).isoformat() if start_date is None else str(pd.Timestamp(start_date).date())
+    required_bars=(250 if start_date is not None else 50) if min_bars is None else int(min_bars)
+    cache_path=_cache_path(code,market,start)
+    cached=_read_cached(cache_path,required_bars,14)
+    if cached is not None:
+        return cached,f"validated local OHLCV cache ({len(cached)} bars; through {cached.index[-1].date()})"
+    # A validated cache fetched from an earlier start date contains every bar
+    # needed by a later audit window. Reuse it instead of forcing a duplicate
+    # provider download under a different cache key.
+    if start_date is not None:
+        for prior_start in ("2006-01-01","2010-01-01","2016-01-01"):
+            if prior_start>=start:continue
+            prior_path=_cache_path(code,market,prior_start)
+            prior=_read_cached(prior_path,required_bars,14)
+            if prior is not None:
+                prior=prior.loc[pd.Timestamp(start):]
+                if len(prior)>=required_bars:
+                    _write_cached(cache_path,prior)
+                    return prior,f"validated reused OHLCV cache from {prior_start} ({len(prior)} bars; through {prior.index[-1].date()})"
     failures=[]
-    candidates=[f"NAVER:{code}",code] if market in ("KR","KQ") else [f"STOOQ:{code}",code]
-    for symbol in candidates:
-        try:
-            return normalize(fdr.DataReader(symbol,start)),f"FinanceDataReader {symbol}"
-        except Exception as e:
-            failures.append(f"{symbol}: {str(e)[:110]}")
+    try:
+        import FinanceDataReader as fdr
+        candidates=[f"NAVER:{code}",code] if market in ("KR","KQ") else [f"STOOQ:{code}",code]
+        for symbol in candidates:
+            for attempt in range(1,len(RETRY_DELAYS)+2):
+                try:
+                    frame=normalize(fdr.DataReader(symbol,start))
+                    if len(frame)<required_bars:raise ValueError(f"history too short: {len(frame)}<{required_bars}")
+                    _write_cached(cache_path,frame)
+                    return frame,f"FinanceDataReader {symbol} ({len(frame)} bars)"
+                except Exception as e:
+                    failures.append(f"{symbol} try {attempt}: {str(e)[:95]}")
+                    if attempt<=len(RETRY_DELAYS):time.sleep(RETRY_DELAYS[attempt-1])
+    except Exception as e:
+        failures.append(f"FinanceDataReader unavailable: {str(e)[:95]}")
     try:
         import yfinance as yf
         suffix=".KQ" if market=="KQ" else ".KS"
         ticker=code if market=="US" else code+suffix
-        # Keep raw close series (not dividend-adjusted total-return proxy), consistent with
-        # the displayed exchange price; critical for distribution-paying ETFs.
-        data=yf.download(ticker,period="2y" if start_date is None else None,
-                         start=start if start_date is not None else None,
-                         interval="1d",auto_adjust=False,progress=False,
-                         threads=False,timeout=12)
-        return normalize(data),f"Yahoo {ticker}"
+        for attempt in range(1,len(RETRY_DELAYS)+2):
+            try:
+                data=yf.download(ticker,period="2y" if start_date is None else None,
+                                 start=start if start_date is not None else None,
+                                 interval="1d",auto_adjust=False,progress=False,
+                                 threads=False,timeout=20)
+                frame=normalize(data)
+                if len(frame)<required_bars:raise ValueError(f"history too short: {len(frame)}<{required_bars}")
+                _write_cached(cache_path,frame)
+                return frame,f"Yahoo {ticker} ({len(frame)} bars)"
+            except Exception as e:
+                failures.append(f"Yahoo {ticker} try {attempt}: {str(e)[:95]}")
+                if attempt<=len(RETRY_DELAYS):time.sleep(RETRY_DELAYS[attempt-1])
     except Exception as e:
-        failures.append(f"Yahoo: {str(e)[:110]}")
+        failures.append(f"Yahoo unavailable: {str(e)[:95]}")
+    # A stale complete cache can still support fixed historical windows, but its
+    # as-of date is returned explicitly so callers can reject incomplete windows.
+    try:
+        frame=normalize(pd.read_csv(cache_path,index_col=0,parse_dates=True))
+        if len(frame)>=required_bars:
+            return frame,f"stale historical cache ({len(frame)} bars; through {frame.index[-1].date()})"
+    except Exception:pass
     raise RuntimeError(" | ".join(failures))
 
-def get_historical_prices(code,market,*,start_date="2006-01-01"):
+def get_historical_prices(code,market,*,start_date="2006-01-01",min_bars=250):
     """Explicit research-only historical fetch, never a silent 850-day cap."""
-    return get_prices(code,market,start_date=start_date)
+    return get_prices(code,market,start_date=start_date,min_bars=min_bars)
+
+
+MARKET_SERIES={
+    # FinanceDataReader symbols are preferred; Yahoo symbols are explicit fallback.
+    "KOSPI":{"fdr":"KS11","yahoo":"^KS11"},
+    "KOSDAQ":{"fdr":"KQ11","yahoo":"^KQ11"},
+    "SP500":{"fdr":"US500","yahoo":"^GSPC"},
+    "SOX":{"fdr":"^SOX","yahoo":"^SOX"},
+    "VIX":{"fdr":"^VIX","yahoo":"^VIX"},
+    "USDKRW":{"fdr":"USD/KRW","yahoo":"KRW=X"},
+}
+
+def _normalize_market_close(data):
+    """Normalize index/FX series without applying stock-candle OHLC checks."""
+    if data is None or data.empty:raise ValueError("market-series response is empty")
+    frame=data.copy()
+    if isinstance(frame.columns,pd.MultiIndex):frame.columns=frame.columns.get_level_values(0)
+    frame.columns=[str(c).strip().title() for c in frame.columns]
+    close_key=next((k for k in ("Close","Adj Close","Value") if k in frame.columns),None)
+    if close_key is None:
+        if frame.shape[1]==1:close_key=frame.columns[0]
+        else:raise ValueError(f"market-series Close column missing: {list(frame.columns)}")
+    close=pd.to_numeric(frame[close_key],errors="coerce").dropna()
+    close=close[close>0]
+    close=close.loc[~close.index.duplicated(keep="last")].sort_index()
+    if len(close)<2:raise ValueError(f"market-series close history too short: {len(close)}")
+    return pd.DataFrame({"Close":close})
+
+def get_market_series_bundle(*,start_date="2016-01-01",end_date=None):
+    """Fetch/cache daily market series; report every source failure explicitly."""
+    end=(dt.date.today()+dt.timedelta(days=1)).isoformat() if end_date is None else str(pd.Timestamp(end_date).date())
+    root=PRICE_CACHE.parent/"indices"
+    root.mkdir(parents=True,exist_ok=True)
+    frames={};diagnostics={}
+    import logging
+    logger=logging.getLogger("stock_radar.market_series")
+    for key,spec in MARKET_SERIES.items():
+        path=root/f"{key.lower()}_{start_date}_{end}.csv"
+        attempts=[]
+        frame=None;source=None;loaded_cache=False
+        if path.exists():
+            try:
+                cached=_normalize_market_close(pd.read_csv(path,index_col=0,parse_dates=True))
+                if not cached.empty and cached.index.min()<=pd.Timestamp(start_date) and cached.index.max()>=pd.Timestamp(end)-pd.Timedelta(days=12):
+                    metadata_path=path.with_suffix(".source.json")
+                    metadata=json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.exists() else {}
+                    cached_source=metadata.get("source")
+                    if cached_source:
+                        frame=cached;source=cached_source;loaded_cache=True
+                    else:
+                        # Earlier caches did not persist provider provenance;
+                        # refresh once so the audit never labels a cached value
+                        # with a stale source from the prior loop iteration.
+                        attempts.append("cache source metadata missing; refreshing from declared providers")
+            except Exception as exc:
+                attempts.append(f"cache: {type(exc).__name__}: {str(exc)[:120]}")
+        if frame is None:
+            try:
+                import FinanceDataReader as fdr
+                for attempt in range(1,4):
+                    try:
+                        candidate=_normalize_market_close(fdr.DataReader(spec["fdr"],start_date,end))
+                        frame=candidate
+                        source=f"FinanceDataReader {spec['fdr']}"
+                        break
+                    except Exception as exc:
+                        attempts.append(f"FDR {spec['fdr']} try {attempt}: {type(exc).__name__}: {str(exc)[:120]}")
+                        if attempt<3:time.sleep(RETRY_DELAYS[min(attempt-1,len(RETRY_DELAYS)-1)])
+            except Exception as exc:
+                attempts.append(f"FinanceDataReader unavailable: {type(exc).__name__}: {str(exc)[:120]}")
+        if frame is None:
+            try:
+                import yfinance as yf
+                for attempt in range(1,4):
+                    try:
+                        candidate=yf.download(spec["yahoo"],start=start_date,end=end,interval="1d",
+                            auto_adjust=False,progress=False,threads=False,timeout=20)
+                        if isinstance(candidate.columns,pd.MultiIndex):
+                            candidate.columns=candidate.columns.get_level_values(0)
+                        candidate=_normalize_market_close(candidate)
+                        frame=candidate
+                        source=f"Yahoo {spec['yahoo']}"
+                        break
+                    except Exception as exc:
+                        attempts.append(f"Yahoo {spec['yahoo']} try {attempt}: {type(exc).__name__}: {str(exc)[:120]}")
+                        if attempt<3:time.sleep(RETRY_DELAYS[min(attempt-1,len(RETRY_DELAYS)-1)])
+            except Exception as exc:
+                attempts.append(f"yfinance unavailable: {type(exc).__name__}: {str(exc)[:120]}")
+        if frame is not None:
+            frame=frame.sort_index()
+            if not loaded_cache:
+                frame.to_csv(path,index_label="Date")
+                path.with_suffix(".source.json").write_text(json.dumps({"source":source},ensure_ascii=False),encoding="utf-8")
+            frames[key]=frame
+            diagnostics[key]={"status":"cache" if loaded_cache else "ok","source":source,"requested_symbol":spec,
+                "first_date":str(frame.index.min().date()),"last_date":str(frame.index.max().date()),
+                "observations":len(frame),"failures":attempts}
+        else:
+            diagnostics[key]={"status":"unavailable","source":None,"requested_symbol":spec,
+                "first_date":None,"last_date":None,"observations":0,"failures":attempts}
+            logger.error("Market series unavailable %s: %s",key," | ".join(attempts))
+    return frames,diagnostics
+
+
+def get_historical_investor_flows(code,*,start_date="2015-12-01",end_date=None):
+    """Fetch/cache dated foreign/institution share flows from Naver's free API.
+
+    The API returns ten trading sessions at a time. ``bizdate`` walks backward
+    from the oldest returned session, so this collector can build an auditable
+    2015+ history without KRX credentials or a paid feed. Partial histories are
+    returned with diagnostics; callers must preserve missing values as NaN.
+    """
+    import logging
+    import requests
+    code=str(code).strip().zfill(6)
+    start=pd.Timestamp(start_date).normalize()
+    end=(pd.Timestamp(dt.date.today()) if end_date is None else pd.Timestamp(end_date)).normalize()
+    cache_root=PRICE_CACHE.parent/"flows";cache_root.mkdir(parents=True,exist_ok=True)
+    path=cache_root/f"naver_{code}.csv";meta_path=path.with_suffix(".json")
+    cached=pd.DataFrame(columns=["foreign_net_shares","institution_net_shares"])
+    if path.exists():
+        try:
+            cached=pd.read_csv(path,index_col=0,parse_dates=True)
+            cached.index=pd.to_datetime(cached.index).tz_localize(None).normalize()
+            cached=cached.apply(pd.to_numeric,errors="coerce").dropna(how="all")
+            cached=cached[~cached.index.duplicated(keep="last")].sort_index()
+        except Exception:
+            cached=pd.DataFrame(columns=["foreign_net_shares","institution_net_shares"])
+    rows=cached.to_dict("index") if not cached.empty else {}
+    requests_n=0;attempts=[];failures=[];pages=0;consecutive_no_progress=0
+    session=requests.Session()
+    session.headers.update({"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36",
+        "Referer":"https://m.stock.naver.com/","Accept":"application/json, text/plain, */*"})
+
+    def parse_count(value):
+        if value is None:return float("nan")
+        text=str(value).replace(",","").replace("+","").strip()
+        return float(text) if text else float("nan")
+
+    # Refresh the recent edge when cache is stale; then page back until the
+    # requested historical boundary or a genuinely partial provider response.
+    recent_missing=(not rows or max(rows)<end-pd.Timedelta(days=7))
+    cursors=[None] if recent_missing else []
+    oldest=pd.Timestamp(min(rows)) if rows else None
+    if oldest is not None and oldest>start and not recent_missing:
+        cursors.append(oldest.strftime("%Y%m%d"))
+    seen_cursors=set()
+    while cursors:
+        cursor=cursors.pop(0)
+        if cursor in seen_cursors:continue
+        seen_cursors.add(cursor)
+        params={} if cursor is None else {"bizdate":cursor}
+        payload=None
+        for attempt in range(1,4):
+            requests_n+=1
+            try:
+                response=session.get(f"https://m.stock.naver.com/api/stock/{code}/trend",params=params,timeout=15)
+                if response.status_code in (429,500,502,503,504):
+                    raise requests.HTTPError(f"HTTP {response.status_code}",response=response)
+                response.raise_for_status();payload=response.json()
+                if not isinstance(payload,list):raise ValueError(f"unexpected JSON shape {type(payload).__name__}")
+                break
+            except Exception as exc:
+                message=f"cursor={cursor or 'latest'} try={attempt}: {type(exc).__name__}: {str(exc)[:140]}"
+                attempts.append(message)
+                if attempt<3:time.sleep(.35*(2**(attempt-1)))
+        if payload is None:
+            failures.append(attempts[-1] if attempts else "request failed")
+            break
+        page_rows=[]
+        for item in payload:
+            try:
+                day=pd.to_datetime(str(item["bizdate"]),format="%Y%m%d").normalize()
+                foreign=parse_count(item.get("foreignerPureBuyQuant"))
+                institution=parse_count(item.get("organPureBuyQuant"))
+                if day<=end and (pd.notna(foreign) or pd.notna(institution)):
+                    page_rows.append((day,foreign,institution))
+            except (KeyError,ValueError,TypeError):continue
+        pages+=1
+        if not page_rows:
+            # An empty response is the normal end of history for a listing
+            # whose IPO predates the requested start boundary. A non-empty,
+            # unparseable response remains an explicit provider failure.
+            if payload:failures.append(f"cursor={cursor or 'latest'}: non-empty page had no usable trend rows")
+            break
+        before=len(rows)
+        for day,foreign,institution in page_rows:
+            rows[day]={"foreign_net_shares":foreign,"institution_net_shares":institution}
+        page_oldest=min(row[0] for row in page_rows)
+        if page_oldest<=start:
+            break
+        if len(rows)==before:
+            consecutive_no_progress+=1
+            if consecutive_no_progress>3:
+                failures.append(f"cursor={cursor or 'latest'}: no pagination progress after {consecutive_no_progress} consecutive pages")
+                break
+            # Naver occasionally repeats the same ten-session page for a
+            # cursor on a non-trading day. Step the bizdate back one calendar
+            # day and retry; subsequent repeated pages continue stepping back.
+            next_cursor=(pd.Timestamp(page_oldest)-pd.Timedelta(days=1)).normalize()
+            if cursor is not None:
+                next_cursor=min(next_cursor,pd.Timestamp(cursor)-pd.Timedelta(days=1))
+            cursors.append(next_cursor.strftime("%Y%m%d"))
+            continue
+        consecutive_no_progress=0
+        next_cursor=page_oldest.strftime("%Y%m%d")
+        if next_cursor==cursor:
+            failures.append(f"cursor={cursor}: provider cursor did not move")
+            break
+        cursors.append(next_cursor)
+        # Persist every successful page so an interrupted run resumes at the
+        # cached oldest date instead of repeating completed requests.
+        frame=pd.DataFrame.from_dict(rows,orient="index").sort_index()
+        frame.index=pd.to_datetime(frame.index)
+        frame.to_csv(path,index_label="Date")
+
+    frame=pd.DataFrame.from_dict(rows,orient="index")
+    if not frame.empty:
+        frame.index=pd.to_datetime(frame.index).normalize()
+        frame=frame.apply(pd.to_numeric,errors="coerce").sort_index()
+        frame=frame.loc[(frame.index>=start)&(frame.index<=end)]
+        frame=frame[~frame.index.duplicated(keep="last")]
+    diagnostics={"ticker":code,"source":"Naver mobile stock trend API","source_url":f"https://m.stock.naver.com/api/stock/{code}/trend",
+      "requested_start":str(start.date()),"requested_end":str(end.date()),"first_date":str(frame.index.min().date()) if not frame.empty else None,
+      "last_date":str(frame.index.max().date()) if not frame.empty else None,"rows_n":len(frame),"requests_n":requests_n,
+      "pages_n":pages,"attempted":requests_n>0 or path.exists(),"available":not frame.empty,"failures":failures,"retry_log":attempts}
+    if not frame.empty:
+        frame.to_csv(path,index_label="Date")
+    meta_path.write_text(json.dumps(diagnostics,ensure_ascii=False,indent=2),encoding="utf-8")
+    frame.attrs["collection_diagnostics"]=diagnostics
+    if frame.empty:
+        logging.getLogger("stock_radar.flows").error("Naver historical investor flow unavailable %s: %s",code,diagnostics)
+        raise HistoricalFlowError("Naver mobile API returned no usable investor-flow rows: "+" | ".join(failures or attempts[-3:] or ["empty range/cache"]),diagnostics)
+    return frame,"Naver mobile stock trend API (foreign/institution net-buy shares)"
 
 
 def verify_recent_close(code, market, primary_date, primary_price, primary_source,

@@ -8,6 +8,25 @@ import datetime as dt
 MANDATORY_KR=[("472150","TIGER 배당커버드콜액티브","필수 ETF"),
               ("0262B0","TIGER 200커버드콜액티브","필수 ETF")]
 MANDATORY_US=[("SOXL","SOXL","필수 3배 레버리지 ETF")]
+# Frozen PR #9 audit benchmark. Captured from the explicitly reviewed
+# 2026-11-23 audit list; 015760 replaces the inadvertently substituted
+# 096770. Do not rank-refresh this benchmark between audit runs.
+AUDIT_63_KOSPI=(
+    "005930","000660","402340","373220","207940","009150","105560","005380","068270","032830",
+    "028260","055550","000270","034730","086790","006400","012450","012330","329180","034020",
+    "035420","316140","000810","138040","011200","066570","005490","033780","010120","015760",
+)
+AUDIT_63_KOSDAQ=(
+    "196170","247540","086520","277810","036930","222800","039030","028300","108490","058470",
+    "000250","240810","403870","214450","095340","031980","145020","030530","319660","041510",
+    "010170","087010","298380","131290","310210","141080","140410","178320","064760","357780",
+)
+AUDIT_63_BENCHMARK={
+    "KOSPI":AUDIT_63_KOSPI,"KOSDAQ":AUDIT_63_KOSDAQ,
+    "TIGER_ETF":tuple(code for code,_,_ in MANDATORY_KR),"SOXL":tuple(code for code,_,_ in MANDATORY_US),
+}
+assert len(AUDIT_63_KOSPI)==len(set(AUDIT_63_KOSPI))==30
+assert len(AUDIT_63_KOSDAQ)==len(set(AUDIT_63_KOSDAQ))==30
 NASDAQ_SNAPSHOT="ADBE AMD ABNB ALNY GOOGL AMZN AEP AMGN ADI AAPL AMAT APP ARM ASML ALAB ADSK ADP AXON BKR BKNG AVGO CDNS CTAS CSCO CCEP CMCSA CEG CPRT CRWV COST CRWD CSX DDOG DXCM FANG DASH EXC FAST FER FTNT GEHC GILD HONA HON IDXX INTC INTU ISRG KDP KLAC LRCX LIN LITE MAR MRVL MELI META MCHP MU MSFT MSTR MDLZ MPWR MNST NBIS NFLX NVDA NXPI ORLY ODFL PCAR PLTR PANW PAYX PYPL PDD PEP QCOM REGN RKLB ROP ROST SNDK STX SHOP SPCX SBUX SNPS TMUS TTWO TER TSLA TXN TRI VRTX WMT WDC WDAY XEL MRNA".split()
 assert len(NASDAQ_SNAPSHOT)==100 and len(set(NASDAQ_SNAPSHOT))==100
 SNAPSHOT_DATE="2026-11-13"
@@ -275,51 +294,49 @@ def sort_nasdaq_by_market_cap(rows):
     ranked=sorted(rows,key=lambda x:(-float(caps.get(x[0],0)),x[0]))
     return ranked,f"NASDAQ 시총순 {known}/{len(rows)}개 확인 / 조회일 {dt.date.today().isoformat()} (미확인 종목 후순위)"
 
-def get_universe():
+def get_universe(include_us=True):
     kr_error=None
-    try: kr,kr_source=kospi_top100()
-    except Exception as e:
-        kr_error=str(e)
+    try:
+        from naver_api_universe import naver_api_top100
+        kr,kr_source=naver_api_top100("KR")
+    except Exception as api_exc:
         try:
-            from naver_api_universe import naver_api_top100
-            kr,kr_source=naver_api_top100("KR")
-            kr_source+=" / FDR 오류: "+kr_error[:85]
-            kr_error=None
-        except Exception as fallback_exc:
+            kr,kr_source=kospi_top100()
+            kr_source+=" / Naver API 오류: "+str(api_exc)[:85]
+        except Exception as e:
+            kr_error=str(e)
             try:
                 from naver_universe import naver_top100
                 kr,kr_source=naver_top100("KR")
-                kr_source+=" / API 오류: "+str(fallback_exc)[:85]
+                kr_source+=" / API 오류: "+str(api_exc)[:85]
                 kr_error=None
             except Exception as legacy_exc:
-                kr=[];kr_source="시총 상위 100종목 조회 실패 (FDR/Naver API/HTML)"
-                kr_error=kr_error+" | Naver API: "+str(fallback_exc)+" | HTML: "+str(legacy_exc)
+                kr=[];kr_source="시총 상위 100종목 조회 실패 (Naver API/FDR/HTML)"
+                kr_error=kr_error+" | Naver API: "+str(api_exc)+" | HTML: "+str(legacy_exc)
     kq_error=None
-    try: kq,kq_source=kosdaq_top100()
-    except Exception as e:
-        kq_error=str(e)
+    try:
+        from naver_api_universe import naver_api_top100
+        kq,kq_source=naver_api_top100("KQ")
+    except Exception as api_exc:
         try:
-            from naver_api_universe import naver_api_top100
-            kq,kq_source=naver_api_top100("KQ")
-            kq_source+=" / FDR 오류: "+kq_error[:85]
-            kq_error=None
-        except Exception as fallback_exc:
+            kq,kq_source=kosdaq_top100()
+            kq_source+=" / Naver API 오류: "+str(api_exc)[:85]
+        except Exception as e:
+            kq_error=str(e)
             try:
                 from naver_universe import naver_top100
                 kq,kq_source=naver_top100("KQ")
-                kq_source+=" / API 오류: "+str(fallback_exc)[:85]
+                kq_source+=" / API 오류: "+str(api_exc)[:85]
                 kq_error=None
             except Exception as legacy_exc:
-                kq=[];kq_source="코스닥 상위 100종목 조회 실패 (FDR/Naver API/HTML)"
-                kq_error=kq_error+" | Naver API: "+str(fallback_exc)+" | HTML: "+str(legacy_exc)
-    us,us_source=nasdaq_top100()
-    try:
-        us,cap_source=sort_nasdaq_by_market_cap(us)
-        us_source=us_source+" | "+cap_source
-        us_cap_sorted=True
-    except Exception as e:
-        us_source=us_source+" | 시총순 확인 불가: "+str(e)[:135]
-        us_cap_sorted=False
+                kq=[];kq_source="코스닥 상위 100종목 조회 실패 (Naver API/FDR/HTML)"
+                kq_error=kq_error+" | Naver API: "+str(api_exc)+" | HTML: "+str(legacy_exc)
+    us=[];us_source="미국 일반주식 제외 (SOXL만 별도 추적)";us_cap_sorted=False
+    if include_us:
+        us,us_source=nasdaq_top100()
+        # Keep the validated Nasdaq-100 constituent order. FDR's full NASDAQ
+        # listing performs a thousands-symbol scrape and can stall this audit;
+        # it is unnecessary when the requested sample is the 100 constituents.
     kr_codes={code for code,_,_ in kr}
     us_codes={code for code,_,_ in us}
     # In the event a mandatory instrument qualifies for the index, do not duplicate.

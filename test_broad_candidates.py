@@ -15,7 +15,7 @@ class BroadPoolTest(unittest.TestCase):
             "Volume":np.full(n,100000.),"VOL20":np.full(n,80000.),
             "MA20":np.full(n,95.),"MA60":np.full(n,99.),
             "MA200":np.full(n,120.),"RSI":np.full(n,35.),
-            "ADX":np.full(n,14.),"ATR":np.full(n,2.)
+            "ADX":np.full(n,14.),"ATR":np.full(n,2.),"MACDH":np.full(n,-0.2)
         },index=idx)
     def test_negative_trend_is_not_excluded_from_training(self):
         x=self.frame()

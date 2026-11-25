@@ -5,6 +5,9 @@ from predictive_model import vector, fit_probabilities,walkforward_model_filter,
 def record(i,win,signal="2025-02-01",exit_date="2025-02-03",hot=False):
     return {"ticker":f"S{i}","entry_date":signal,"signal_date":signal,
             "exit_date":exit_date,"net_pct":3.0 if win else -2.5,
+            "entry_net_rr":1.5,"entry_net_upside_pct":4.0,
+            "entry_net_downside_pct":3.0,"signal_stop_atr":1.8,
+            "candidate_legacy":0.0,
             "signal_rsi":63.0 if hot else 48.0,
             "signal_adx":35.0 if hot else 19.0,
             "signal_atr_pct":1.7 if hot else 4.5,
@@ -72,6 +75,16 @@ class ModelTest(unittest.TestCase):
         strong=fit_probabilities(h,record(1001,False,hot=True))
         weak=fit_probabilities(h,record(1002,True,hot=False))
         self.assertGreater(strong["predicted_win_pct"],weak["predicted_win_pct"])
+
+    def test_expected_net_uses_candidate_specific_payoff(self):
+        h=self.history()
+        a=record(1003,False,hot=True)
+        b={**a,"entry_net_upside_pct":8.0,"entry_net_downside_pct":2.0}
+        pa=fit_probabilities(h,a);pb=fit_probabilities(h,b)
+        self.assertEqual(pa["predicted_win_pct"],pb["predicted_win_pct"])
+        expected=(pa["predicted_win_pct"]/100*8.0-
+                  (1-pa["predicted_win_pct"]/100)*2.0)
+        self.assertAlmostEqual(pb["expected_net_pct"],expected,places=4)
 
 if __name__=="__main__":
     unittest.main()

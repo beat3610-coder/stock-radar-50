@@ -1,0 +1,145 @@
+name: Probability walk-forward audit unit tests
+on:
+  push:
+    branches:
+      - feature/probability-walkforward-audit-20261118
+  pull_request:
+    paths:
+      - probability_walkforward_audit.py
+      - three_round_trade_model.py
+      - profit_selector51.py
+      - regime_selector60.py
+      - feature_selector60.py
+      - net_edge_model.py
+      - trend_guard_model.py
+      - market_breadth_gate.py
+      - naver_api_universe.py
+      - flow_warmup.py
+      - disclosure_warmup.py
+      - disclosures.py
+      - providers.py
+      - market_context.py
+      - broad_candidates.py
+      - predictive_model.py
+      - audit_63_fast.py
+      - expanded_direction_audit.py
+      - r_rank_model.py
+      - universe.py
+      - strategy_lab.py
+      - tests/test_probability_walkforward_audit.py
+      - tests/test_three_round_trade_model.py
+      - tests/test_profit_selector51.py
+      - tests/test_regime_selector60.py
+      - tests/test_feature_selector60.py
+      - tests/test_net_edge_model.py
+      - tests/test_trend_guard_model.py
+      - tests/test_market_breadth_gate.py
+      - tests/test_naver_api_universe.py
+      - tests/test_flow_warmup.py
+      - tests/test_disclosures.py
+      - tests/test_audit_63_metrics.py
+      - tests/test_expanded_direction_audit.py
+      - tests/test_r_rank_model.py
+      - tests/test_market_context.py
+      - test_predictive_model.py
+      - test_broad_candidates.py
+      - test_strategy_lab.py
+      - .github/workflows/probability-audit-tests.yml
+      - .github/workflows/audit-63-instruments.yml
+      - .github/workflows/flow-warmup.yml
+      - .github/workflows/disclosure-warmup.yml
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install 'numpy>=1.26,<3' 'pandas>=2.2,<3' 'requests>=2.31,<3' 'scikit-learn>=1.5,<2'
+      - run: python -m unittest discover -s tests -p test_probability_walkforward_audit.py -v
+      - run: python -m unittest discover -s tests -p test_three_round_trade_model.py -v
+      - run: python -m unittest discover -s tests -p test_profit_selector51.py -v
+      - run: python -m unittest discover -s tests -p test_regime_selector60.py -v
+      - run: python -m unittest discover -s tests -p test_feature_selector60.py -v
+      - run: python -m unittest discover -s tests -p test_net_edge_model.py -v
+      - run: python -m unittest discover -s tests -p test_trend_guard_model.py -v
+      - run: python -m unittest discover -s tests -p test_market_breadth_gate.py -v
+      - run: python -m unittest discover -s tests -p test_naver_api_universe.py -v
+      - run: python -m unittest tests.test_flow_warmup -v
+      - run: python -m unittest tests.test_disclosures -v
+      - run: python -m unittest tests.test_audit_63_metrics tests.test_expanded_direction_audit test_predictive_model.py test_broad_candidates.py test_strategy_lab.py -v
+      - run: python -m unittest tests.test_r_rank_model -v
+      - run: python -m unittest tests.test_market_context -v
+      - run: python -m py_compile providers.py broad_candidates.py predictive_model.py audit_63_fast.py expanded_direction_audit.py flow_warmup.py disclosures.py disclosure_warmup.py r_rank_model.py market_context.py strategy_lab.py three_round_trade_model.py profit_selector51.py regime_selector60.py feature_selector60.py net_edge_model.py trend_guard_model.py market_breadth_gate.py universe.py naver_api_universe.py
+
+  historical_300:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore validated public OHLCV cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/stock-radar/prices
+          key: stock-radar-pr9-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            stock-radar-pr9-cache-${{ runner.os }}-${{ github.ref_name }}-
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run 100 symbols per market against real historical OHLCV
+        run: |
+          python - <<'PY' > three-round-research.log 2>&1
+          from strategy_lab import run
+          from pathlib import Path
+          import json
+          result=run(per_market=100)
+          Path("data").mkdir(exist_ok=True)
+          Path("data/strategy-lab-latest.json").write_text(json.dumps(result,ensure_ascii=False,indent=2,default=str),encoding="utf-8")
+          out={key:{"rounds":row.get("three_round_probability"),"target51":row.get("target51_research"),"target60":row.get("target60_regime"),"feature60":row.get("target60_features"),"net_edge":row.get("net_edge_research"),"trend_guard":row.get("trend_guard_research"),"market_breadth":row.get("market_breadth_research"),"loaded":row.get("loaded")} for key,row in result.get("markets",{}).items()}
+          Path("three-round-results.json").write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding="utf-8")
+          print(json.dumps(out,ensure_ascii=False),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: three-round-300-stock-results
+          path: |
+            three-round-results.json
+            three-round-research.log
+          if-no-files-found: warn
+      - name: Enforce 300-stock data integrity
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path("data/strategy-lab-latest.json")
+          if not p.exists():
+              raise SystemExit("FAILED: research report missing")
+          r=json.loads(p.read_text(encoding="utf-8"))
+          failed=[]
+          for key in ("KR","KQ","US"):
+              row=r.get("markets",{}).get(key,{})
+              count=row.get("loaded",0)
+              requested=row.get("requested",0)
+              unique_sources=len(row.get("price_sources",{}))
+              if requested!=100 or count!=100 or unique_sources!=100:
+                  message=f"FAILED {key}: requested={requested}, histories={count}/100, unique_sources={unique_sources}/100"
+                  print(message)
+                  failed.append(message)
+          if r.get("data_integrity_status")!="PASS":
+              failed.append("FAILED: research report data_integrity_status is not PASS")
+          if failed:
+              raise SystemExit("HISTORICAL_DATA_INTEGRITY_FAIL; partial research is not complete")
+          print("HISTORICAL_DATA_INTEGRITY_PASS KR=100/100 KQ=100/100 US=100/100")
+          PY
+      - name: Save validated public OHLCV cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/stock-radar/prices
+          key: stock-radar-pr9-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
