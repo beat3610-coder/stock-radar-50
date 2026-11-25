@@ -22,7 +22,7 @@ jobs:
       - name: Collect public DART HTML disclosure histories
         env:
           DISCLOSURE_REQUEST_INTERVAL_SECONDS: "0.5"
-        run: python -u disclosure_warmup.py --time-budget-seconds 3300 --workers 2
+        run: python -u disclosure_warmup.py --time-budget-seconds 3300 --workers 4 --priority-benchmark
       - uses: actions/upload-artifact@v4
         if: always()
         with:
