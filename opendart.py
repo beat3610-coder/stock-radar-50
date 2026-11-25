@@ -401,6 +401,15 @@ def _finite(value):
         return math.nan
 
 
+def _meets_earnings_materiality(amount, period_revenue, *, minimum_margin=0.01):
+    """Whether a positive earnings denominator is at least 1% of its sales base."""
+    amount = _finite(amount)
+    period_revenue = _finite(period_revenue)
+    return (math.isfinite(amount) and math.isfinite(period_revenue)
+        and amount > 0 and period_revenue > 0
+        and amount / period_revenue >= minimum_margin)
+
+
 def _quarter_standalones(records, field):
     by_year = {}
     for row in records:
@@ -485,16 +494,22 @@ def earnings_features_for_signal(records, signal_date, *, corp_code,
     prior_op = _finite(op_q.get(prior_year_quarter, math.nan))
     current_ni = _finite(ni_q.get(latest_quarter, math.nan))
     prior_ni = _finite(ni_q.get(prior_year_quarter, math.nan))
-    rev_qoq = _pct_change(current_revenue, revenue_q.get(previous_quarter, math.nan), require_positive=True)
-    op_qoq = _pct_change(current_op, op_q.get(previous_quarter, math.nan),
-        require_positive_previous=True)
+    previous_revenue = revenue_q.get(previous_quarter, math.nan)
+    previous_op = op_q.get(previous_quarter, math.nan)
+    rev_qoq = _pct_change(current_revenue, previous_revenue, require_positive=True)
+    op_qoq = (_pct_change(current_op, previous_op, require_positive_previous=True)
+        if _meets_earnings_materiality(previous_op, previous_revenue) else math.nan)
 
     opm = current_op / current_revenue * 100.0 if math.isfinite(current_op) and math.isfinite(current_revenue) and current_revenue > 0 else math.nan
     prior_opm = prior_op / prior_revenue * 100.0 if math.isfinite(prior_op) and math.isfinite(prior_revenue) and prior_revenue > 0 else math.nan
 
     quarterly_op_yoy = []
     for (year, quarter), current_value in op_q.items():
-        previous_value = op_q.get((year - 1, quarter), math.nan)
+        prior_key = (year - 1, quarter)
+        previous_value = op_q.get(prior_key, math.nan)
+        previous_revenue = revenue_q.get(prior_key, math.nan)
+        if not _meets_earnings_materiality(previous_value, previous_revenue):
+            continue
         growth = _pct_change(current_value, previous_value, require_positive_previous=True)
         if math.isfinite(growth):
             quarterly_op_yoy.append(((year, quarter), growth))
@@ -507,8 +522,10 @@ def earnings_features_for_signal(records, signal_date, *, corp_code,
         "rev_yoy_pct": _pct_change(current_revenue, prior_revenue, require_positive=True),
         # Growth from a zero/negative prior value is undefined for percentage
         # comparison (e.g. a loss-to-profit turnaround), so abstain with NaN.
-        "op_yoy_pct": _pct_change(current_op, prior_op, require_positive_previous=True),
-        "ni_yoy_pct": _pct_change(current_ni, prior_ni, require_positive_previous=True),
+        "op_yoy_pct": (_pct_change(current_op, prior_op, require_positive_previous=True)
+            if _meets_earnings_materiality(prior_op, prior_revenue) else math.nan),
+        "ni_yoy_pct": (_pct_change(current_ni, prior_ni, require_positive_previous=True)
+            if _meets_earnings_materiality(prior_ni, prior_revenue) else math.nan),
         "rev_qoq_pct": rev_qoq,
         "op_qoq_pct": op_qoq,
         "opm_pct": opm,

@@ -219,6 +219,32 @@ class OpenDartTests(unittest.TestCase):
         self.assertAlmostEqual(features["op_yoy_pct"], -110.0)
         self.assertAlmostEqual(features["ni_yoy_pct"], -110.0)
 
+    def test_sub_one_percent_prior_earnings_margin_is_abstained(self):
+        records = [
+            financial_record(2023, "11012", "2023-08-14", 1_000_000_000_000, 100_000_000, 100_000_000),
+            financial_record(2023, "11014", "2023-11-14", 1_000_000_000_000, 100_000_000, 100_000_000),
+            financial_record(2024, "11012", "2024-08-14", 1_100_000_000_000, 2_000_000_000, 2_000_000_000),
+            financial_record(2024, "11014", "2024-11-14", 1_200_000_000_000, 3_000_000_000, 3_000_000_000),
+        ]
+        features = earnings_features_for_signal(records, "2024-11-18", corp_code="00126380")
+        self.assertTrue(math.isnan(features["op_yoy_pct"]))
+        self.assertTrue(math.isnan(features["ni_yoy_pct"]))
+        self.assertTrue(math.isnan(features["op_qoq_pct"]))
+        self.assertTrue(math.isnan(features["earnings_momentum"]))
+
+    def test_five_percent_prior_operating_margin_keeps_growth_metrics(self):
+        records = [
+            financial_record(2023, "11012", "2023-08-14", 1_000_000_000_000, 50_000_000_000, 40_000_000_000),
+            financial_record(2023, "11014", "2023-11-14", 1_000_000_000_000, 50_000_000_000, 40_000_000_000),
+            financial_record(2024, "11012", "2024-08-14", 1_100_000_000_000, 60_000_000_000, 50_000_000_000),
+            financial_record(2024, "11014", "2024-11-14", 1_200_000_000_000, 100_000_000_000, 80_000_000_000),
+        ]
+        features = earnings_features_for_signal(records, "2024-11-18", corp_code="00126380")
+        self.assertAlmostEqual(features["op_yoy_pct"], 100.0)
+        self.assertAlmostEqual(features["ni_yoy_pct"], 100.0)
+        self.assertAlmostEqual(features["op_qoq_pct"], (100 / 60 - 1) * 100)
+        self.assertAlmostEqual(features["earnings_momentum"], 60.0)
+
     def test_nonpositive_revenue_and_missing_denominators_are_nan(self):
         records = [financial_record(2024, "11014", "2025-03-10", 0, 20, 10),
                    financial_record(2023, "11014", "2024-03-10", 100, 10, 5)]
