@@ -240,12 +240,15 @@ def slb_features_for_signal(ticker: str, signal_date, *, cache_root=DEFAULT_CACH
             dealing_records = []
     ordered = sorted((row for row in dealing_records if str(row.get("stdDt", "")).replace("-", "") <= day),
                      key=lambda row: str(row.get("stdDt", "")).replace("-", ""))
-    current = next((row for row in reversed(ordered)
-                    if str(row.get("stdDt", "")).replace("-", "") == day), None)
-    if current is None:
+    current_indexes = [i for i, row in enumerate(ordered)
+                    if str(row.get("stdDt", "")).replace("-", "") == day]
+    if not current_indexes:
         return _nan_features("signal_date_not_covered")
+    current_index = current_indexes[-1]
+    current = ordered[current_index]
     rem = _number(current.get("slbTrRemQty"))
-    previous = _number(ordered[-2].get("slbTrRemQty")) if len(ordered) >= 2 else math.nan
+    previous_index = current_indexes[0] - 1
+    previous = _number(ordered[previous_index].get("slbTrRemQty")) if previous_index >= 0 else math.nan
     oldest = _number(ordered[0].get("slbTrRemQty")) if len(ordered) >= 2 else math.nan
     matched = _number(current.get("matcQty"))
     one_day = (rem / previous - 1.0) * 100.0 if math.isfinite(rem) and math.isfinite(previous) and previous > 0 else math.nan

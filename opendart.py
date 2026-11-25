@@ -23,8 +23,8 @@ API_BASE = "https://opendart.fss.or.kr/api"
 CORP_CODE_URL = f"{API_BASE}/corpCode.xml"
 FINANCIAL_URL = f"{API_BASE}/fnlttSinglAcntAll.json"
 DEFAULT_CACHE_ROOT = Path(".cache/stock-radar/opendart")
-REPORT_CODES = ("11014", "11012", "11013", "11011")  # Q1, half-year, Q3, annual
-REPORT_QUARTERS = {"11014": 1, "11012": 2, "11013": 3, "11011": 4}
+REPORT_CODES = ("11013", "11012", "11014", "11011")  # Q1, half-year, Q3, annual
+REPORT_QUARTERS = {"11013": 1, "11012": 2, "11014": 3, "11011": 4}
 EARNINGS_FEATURES = (
     "rev_yoy_pct", "op_yoy_pct", "ni_yoy_pct", "rev_qoq_pct", "op_qoq_pct",
     "opm_pct", "opm_yoy_delta_pp", "earnings_momentum",
@@ -124,7 +124,8 @@ def parse_financial_response(payload, *, stock_code: str, corp_code: str,
         "revenue": _account_value(rows, ("ifrs-full_Revenue",), ("매출액", "수익(매출액)", "영업수익")),
         "operating_income": _account_value(rows,
             ("dart_OperatingIncomeLoss", "ifrs-full_OperatingIncomeLoss"), ("영업이익",)),
-        "net_income": _account_value(rows, ("ifrs-full_ProfitLoss",), ("당기순이익",)),
+        "net_income": _account_value(rows, ("ifrs-full_ProfitLoss",),
+            ("당기순이익", "분기순이익", "반기순이익")),
         "currency": next((str(row.get("currency")) for row in rows if row.get("currency")), None),
     }
     record["rcept_date"] = _date_from_receipt(record["rcept_no"])
@@ -355,10 +356,15 @@ def _quarter_standalones(records, field):
         q2y = cumulative.get(2, math.nan)
         q3y = cumulative.get(3, math.nan)
         q4y = cumulative.get(4, math.nan)
+        # fnlttSinglAcntAll's Q1, half-year, and Q3 thstrm_amount values
+        # are the standalone three-month periods. Only the annual filing is
+        # a full-year total; derive Q4 by subtracting Q1-Q3 from that total.
         if math.isfinite(q1): standalone[(year, 1)] = q1
-        if math.isfinite(q2y) and math.isfinite(q1): standalone[(year, 2)] = q2y - q1
-        if math.isfinite(q3y) and math.isfinite(q2y): standalone[(year, 3)] = q3y - q2y
-        if math.isfinite(q4y) and math.isfinite(q3y): standalone[(year, 4)] = q4y - q3y
+        if math.isfinite(q2y): standalone[(year, 2)] = q2y
+        if math.isfinite(q3y): standalone[(year, 3)] = q3y
+        if all(math.isfinite(value) for value in (q1, q2y, q3y, q4y)):
+            q4 = q4y - q1 - q2y - q3y
+            standalone[(year, 4)] = q4 if q4 > 0 else math.nan
     return standalone
 
 
@@ -406,18 +412,20 @@ def earnings_features_for_signal(records, signal_date, *, corp_code,
     eligible = list(by_period.values())
     latest = max(eligible, key=lambda r: (int(r.get("bsns_year", 0)),
         REPORT_QUARTERS.get(str(r.get("reprt_code")), 0), r.get("rcept_date", "")))
-    ytd_key = (int(latest.get("bsns_year", 0)), str(latest.get("reprt_code")))
-    prior = by_period.get((ytd_key[0] - 1, ytd_key[1]), {})
-    current_revenue = _finite(latest.get("revenue")); prior_revenue = _finite(prior.get("revenue"))
-    current_op = _finite(latest.get("operating_income")); prior_op = _finite(prior.get("operating_income"))
-    current_ni = _finite(latest.get("net_income")); prior_ni = _finite(prior.get("net_income"))
-
+    latest_quarter = (int(latest.get("bsns_year", 0)), REPORT_QUARTERS.get(str(latest.get("reprt_code")), 0))
     revenue_q = _quarter_standalones(eligible, "revenue")
     op_q = _quarter_standalones(eligible, "operating_income")
-    latest_quarter = (int(latest.get("bsns_year", 0)), REPORT_QUARTERS.get(str(latest.get("reprt_code")), 0))
+    ni_q = _quarter_standalones(eligible, "net_income")
     previous_quarter = (latest_quarter[0] - 1, 4) if latest_quarter[1] == 1 else (latest_quarter[0], latest_quarter[1] - 1)
-    rev_qoq = _pct_change(revenue_q.get(latest_quarter, math.nan), revenue_q.get(previous_quarter, math.nan), require_positive=True)
-    op_qoq = _pct_change(op_q.get(latest_quarter, math.nan), op_q.get(previous_quarter, math.nan))
+    prior_year_quarter = (latest_quarter[0] - 1, latest_quarter[1])
+    current_revenue = _finite(revenue_q.get(latest_quarter, math.nan))
+    prior_revenue = _finite(revenue_q.get(prior_year_quarter, math.nan))
+    current_op = _finite(op_q.get(latest_quarter, math.nan))
+    prior_op = _finite(op_q.get(prior_year_quarter, math.nan))
+    current_ni = _finite(ni_q.get(latest_quarter, math.nan))
+    prior_ni = _finite(ni_q.get(prior_year_quarter, math.nan))
+    rev_qoq = _pct_change(current_revenue, revenue_q.get(previous_quarter, math.nan), require_positive=True)
+    op_qoq = _pct_change(current_op, op_q.get(previous_quarter, math.nan), require_positive=True)
 
     opm = current_op / current_revenue * 100.0 if math.isfinite(current_op) and math.isfinite(current_revenue) and current_revenue > 0 else math.nan
     prior_opm = prior_op / prior_revenue * 100.0 if math.isfinite(prior_op) and math.isfinite(prior_revenue) and prior_revenue > 0 else math.nan
@@ -435,8 +443,10 @@ def earnings_features_for_signal(records, signal_date, *, corp_code,
     days_since = (signal_day - date.fromisoformat(latest_receipt)).days
     features = {
         "rev_yoy_pct": _pct_change(current_revenue, prior_revenue, require_positive=True),
-        "op_yoy_pct": _pct_change(current_op, prior_op),
-        "ni_yoy_pct": _pct_change(current_ni, prior_ni),
+        # Growth from a zero/negative prior value is undefined for percentage
+        # comparison (e.g. a loss-to-profit turnaround), so abstain with NaN.
+        "op_yoy_pct": _pct_change(current_op, prior_op, require_positive=True),
+        "ni_yoy_pct": _pct_change(current_ni, prior_ni, require_positive=True),
         "rev_qoq_pct": rev_qoq,
         "op_qoq_pct": op_qoq,
         "opm_pct": opm,

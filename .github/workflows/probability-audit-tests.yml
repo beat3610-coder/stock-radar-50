@@ -4,7 +4,6 @@ on:
     branches:
       - feature/probability-walkforward-audit-20261118
       - feature/opendart-earnings-20261125
-      - feature/opendart-earnings-20261125
   pull_request:
     paths:
       - probability_walkforward_audit.py

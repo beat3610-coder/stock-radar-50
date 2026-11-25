@@ -9,9 +9,9 @@ import zipfile
 from io import BytesIO
 from unittest.mock import patch
 
-from opendart import (EARNINGS_FEATURES, OpenDartClient, earnings_features_for_signal,
-                      earnings_gate_status, parse_corp_code_zip,
-                      parse_financial_response)
+from opendart import (EARNINGS_FEATURES, REPORT_CODES, REPORT_QUARTERS, OpenDartClient,
+                      earnings_features_for_signal, earnings_gate_status, parse_corp_code_zip,
+                      parse_financial_response, _quarter_standalones)
 from slb import (SLB_FEATURES, SlbClient, isin_for_stock_code,
                  parse_slb_xml, slb_features_for_signal)
 
@@ -115,7 +115,7 @@ class OpenDartTests(unittest.TestCase):
             get.assert_not_called()
 
     def test_receipt_date_is_strictly_prior_and_saturday_report_is_available_monday(self):
-        report = financial_record(2025, "11014", "2025-03-11", 100, 20, 10)
+        report = financial_record(2025, "11013", "2025-03-11", 100, 20, 10)
         same_day = earnings_features_for_signal([report], "2025-03-11", corp_code="00126380")
         next_day = earnings_features_for_signal([report], "2025-03-12", corp_code="00126380")
         self.assertEqual(same_day["earnings_data_available"], 0)
@@ -123,20 +123,20 @@ class OpenDartTests(unittest.TestCase):
         self.assertEqual(next_day["earnings_data_available"], 1)
         self.assertEqual(next_day["earnings_last_rcept_date"], "2025-03-11")
         self.assertEqual(next_day["earnings_days_since_rcept"], 1)
-        saturday = financial_record(2025, "11014", "2025-03-15", 110, 25, 12)
+        saturday = financial_record(2025, "11013", "2025-03-15", 110, 25, 12)
         monday = earnings_features_for_signal([saturday], "2025-03-17", corp_code="00126380")
         self.assertEqual(monday["earnings_data_available"], 1)
         self.assertEqual(monday["earnings_last_rcept_date"], "2025-03-15")
 
     def test_q4_standalone_yoy_qoq_margin_and_momentum_values(self):
         records = [
-            financial_record(2023, "11014", "2023-05-01", 100, 10, 5),
-            financial_record(2023, "11012", "2023-08-01", 230, 30, 15),
-            financial_record(2023, "11013", "2023-11-01", 360, 60, 25),
-            financial_record(2023, "11011", "2024-03-01", 500, 100, 40),
-            financial_record(2024, "11014", "2024-05-01", 120, 20, 10),
-            financial_record(2024, "11012", "2024-08-01", 250, 50, 25),
-            financial_record(2024, "11013", "2024-11-01", 400, 90, 50),
+            financial_record(2023, "11013", "2023-05-15", 80, -10, 2),
+            financial_record(2023, "11012", "2023-08-01", 100, 2, 5),
+            financial_record(2023, "11014", "2023-11-15", 90, 48, 8),
+            financial_record(2023, "11011", "2024-03-01", 395, 100, 40),
+            financial_record(2024, "11013", "2024-05-15", 150, -8, 5),
+            financial_record(2024, "11012", "2024-08-01", 187.5, -3.2, 10),
+            financial_record(2024, "11014", "2024-11-15", 112.5, 67.2, 15),
             financial_record(2024, "11011", "2025-03-10", 600, 140, 80),
         ]
         features = earnings_features_for_signal(records, "2025-03-12", corp_code="00126380")
@@ -145,9 +145,47 @@ class OpenDartTests(unittest.TestCase):
         self.assertAlmostEqual(features["ni_yoy_pct"], 100.0)
         self.assertAlmostEqual(features["rev_qoq_pct"], 100 / 3)
         self.assertAlmostEqual(features["op_qoq_pct"], 25.0)
-        self.assertAlmostEqual(features["opm_pct"], 140 / 6)
-        self.assertAlmostEqual(features["opm_yoy_delta_pp"], 140 / 6 - 20.0)
-        self.assertAlmostEqual(features["earnings_momentum"], (100 / 3 + 25.0) / 2)
+        self.assertAlmostEqual(features["opm_pct"], 56.0)
+        self.assertAlmostEqual(features["opm_yoy_delta_pp"], 8.0)
+        self.assertAlmostEqual(features["earnings_momentum"], 40.0)
+
+    def test_single_quarter_amounts_and_q4_annual_remainder(self):
+        records = [
+            financial_record(2024, "11013", "2024-05-15", 100, 10, 5),
+            financial_record(2024, "11012", "2024-08-14", 110, 20, 10),
+            financial_record(2024, "11014", "2024-11-14", 120, 30, 15),
+            financial_record(2024, "11011", "2025-03-10", 480, 100, 50),
+        ]
+        quarterly_revenue = _quarter_standalones(records, "revenue")
+        self.assertEqual(quarterly_revenue[(2024, 1)], 100)
+        self.assertEqual(quarterly_revenue[(2024, 2)], 110)
+        self.assertEqual(quarterly_revenue[(2024, 3)], 120)
+        self.assertEqual(quarterly_revenue[(2024, 4)], 150)
+        third_quarter = earnings_features_for_signal(records, "2024-11-17", corp_code="00126380")
+        self.assertAlmostEqual(third_quarter["rev_qoq_pct"], (120 / 110 - 1) * 100)
+        fourth_quarter = earnings_features_for_signal(records, "2025-03-12", corp_code="00126380")
+        self.assertAlmostEqual(fourth_quarter["rev_qoq_pct"], (150 / 120 - 1) * 100)
+
+    def test_report_code_mapping_and_november_11014_is_third_quarter(self):
+        self.assertEqual(REPORT_QUARTERS, {"11013": 1, "11012": 2, "11014": 3, "11011": 4})
+        self.assertEqual(REPORT_CODES, ("11013", "11012", "11014", "11011"))
+        records = [
+            financial_record(2025, "11013", "2025-05-15", 100, 10, 5),
+            financial_record(2025, "11012", "2025-08-14", 220, 30, 15),
+            financial_record(2025, "11014", "2025-11-14", 360, 60, 25),
+        ]
+        features = earnings_features_for_signal(records, "2025-11-17", corp_code="00126380")
+        self.assertEqual(features["earnings_last_rcept_date"], "2025-11-14")
+        self.assertAlmostEqual(features["rev_qoq_pct"], (360 / 220 - 1) * 100)
+
+    def test_negative_prior_operating_income_turnaround_is_nan(self):
+        records = [
+            financial_record(2023, "11014", "2023-11-15", 10000, -1800, -100),
+            financial_record(2024, "11014", "2024-11-14", 20000, 7000, 200),
+        ]
+        features = earnings_features_for_signal(records, "2024-11-18", corp_code="00126380")
+        self.assertTrue(math.isnan(features["op_yoy_pct"]))
+        self.assertTrue(math.isnan(features["ni_yoy_pct"]))
 
     def test_nonpositive_revenue_and_missing_denominators_are_nan(self):
         records = [financial_record(2024, "11014", "2025-03-10", 0, 20, 10),
@@ -206,6 +244,15 @@ class SlbTests(unittest.TestCase):
         self.assertAlmostEqual(current["slb_rem_qty_change_5d_pct"], 100 / 9)
         self.assertAlmostEqual(current["slb_matc_to_rem_pct"], 10.0)
         self.assertEqual(current["slb_history_days"], 2)
+
+    def test_slb_one_day_change_uses_row_before_current_date_not_duplicate_current_row(self):
+        rows = [
+            {"stdDt": "20261120", "slbTrRemQty": "900", "matcQty": "90"},
+            {"stdDt": "20261121", "slbTrRemQty": "1000", "matcQty": "100"},
+            {"stdDt": "20261121", "slbTrRemQty": "1100", "matcQty": "110"},
+        ]
+        result = slb_features_for_signal("005930", "2026-11-21", dealing_records=rows)
+        self.assertAlmostEqual(result["slb_rem_qty_change_1d_pct"], (1100 / 900 - 1) * 100)
 
 
 if __name__ == "__main__":
