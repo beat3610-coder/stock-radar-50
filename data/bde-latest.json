@@ -1,7 +1,7 @@
 {
  "schema_version": 1,
  "kind": "bde_recent_filter_and_candidates",
- "generated_utc": "2026-11-26T07:43:11.215433+00:00",
+ "generated_utc": "2026-11-26T08:30:50.926010+00:00",
  "research_only": true,
  "live_approved": false,
  "evaluation_warning": null,
@@ -34,7 +34,53 @@
   "audit_report": "audit-63 artifact: audit-63-latest.json",
   "run_id": "45635628647",
   "head": "c99238c81805d378a30eafd2467e22e5f6b4655c",
-  "branch": "feature/opendart-earnings-20261125"
+  "branch": "feature/opendart-earnings-20261125",
+  "newer_attempt": {
+   "report_created_utc": "2026-11-26T06:23:37.495726+00:00",
+   "run_id": "45767809305",
+   "head": null,
+   "report_status": "RESEARCH_ONLY_NOT_LIVE_APPROVED",
+   "cohorts": {
+    "KOSPI": {
+     "bde_stage_status": "UPSTREAM_DISCLOSURE_NOT_EVALUATED",
+     "bde_development_trades": 0,
+     "selected_policy": "legacy_risk_off_trend_filter",
+     "disclosure_development_min_non_missing_pct": 0.0,
+     "earnings_available_symbols_n": 23,
+     "earnings_requested_symbols_n": 30
+    },
+    "KOSDAQ": {
+     "bde_stage_status": "UPSTREAM_DISCLOSURE_NOT_EVALUATED",
+     "bde_development_trades": 0,
+     "selected_policy": "legacy_risk_off_trend_filter",
+     "disclosure_development_min_non_missing_pct": 0.0,
+     "earnings_available_symbols_n": 0,
+     "earnings_requested_symbols_n": 30
+    },
+    "TIGER_ETF": {
+     "bde_stage_status": "UPSTREAM_DISCLOSURE_NOT_EVALUATED",
+     "bde_development_trades": 0,
+     "selected_policy": "legacy_only",
+     "disclosure_development_min_non_missing_pct": 0.0,
+     "earnings_available_symbols_n": 0,
+     "earnings_requested_symbols_n": 0
+    },
+    "SOXL": {
+     "bde_stage_status": "UPSTREAM_DISCLOSURE_NOT_EVALUATED",
+     "bde_development_trades": 0,
+     "selected_policy": "legacy_only",
+     "disclosure_development_min_non_missing_pct": 0.0,
+     "earnings_available_symbols_n": 0,
+     "earnings_requested_symbols_n": 0
+    }
+   },
+   "earnings_collection": {
+    "attempted_symbols_n": 23,
+    "available_symbols_n": 23,
+    "requested_symbols_n": 60,
+    "budget_exhausted": true
+   }
+  }
  },
  "cohorts": {
   "KOSPI": {
@@ -2107,6 +2153,7 @@
   }
  },
  "notes": [
+  "더 새로운 감사 시도(2026-11-26, run 45767809305)는 공시 데이터가 확보되지 않아(개발구간 결측률 0%) 코스피·코스닥·TIGER ETF·SOXL의 B+D+E 단계를 평가하지 못했습니다. 그래서 화면은 마지막으로 실제 평가된 2026-11-25 결과를 유지합니다.",
   "SLB(공매도 잔고)는 백테스트에 반영되지 않았습니다: NOT_EVALUATED",
   "코스피: 실적 피처를 더해도 3방향 모델 성능 변화가 사실상 없습니다(Brier·AUROC 차이 < 0.001/0.01).",
   "코스닥: 실적 피처를 더해도 3방향 모델 성능 변화가 사실상 없습니다(Brier·AUROC 차이 < 0.001/0.01).",

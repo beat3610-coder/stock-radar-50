@@ -193,6 +193,38 @@ def test_live_headline_reads_stage_counts():
     assert bd.live_headline(None) is None
 
 
+def test_audit_attempt_summary_detects_unevaluated_bde_stage():
+    attempt = bd.audit_attempt_summary({
+        "created_utc": "2026-11-26T06:23:37+00:00",
+        "status": "RESEARCH_ONLY_NOT_LIVE_APPROVED",
+        "policy_ladder": {"KOSPI": {
+            "selected_policy": "legacy_risk_off_trend_filter",
+            "legacy_risk_off_disclosure_earnings": {
+                "status": "UPSTREAM_DISCLOSURE_NOT_EVALUATED",
+                "periods": {"development": {"trades": 0}}}}},
+        "disclosure_coverage": {"KOSPI": {"periods": {"development": {
+            "disclosure_bad_60d": {"non_missing_pct": 0.0}}}}},
+        "earnings_coverage": {"KOSPI": {"available_symbols_n": 23, "requested_symbols_n": 30},
+                              "collection": {"attempted_symbols_n": 23, "available_symbols_n": 23,
+                                             "requested_symbols_n": 60, "budget_exhausted": True}},
+    }, run_id="45767809305")
+    assert attempt["cohorts"]["KOSPI"]["bde_stage_status"] == "UPSTREAM_DISCLOSURE_NOT_EVALUATED"
+    assert attempt["cohorts"]["KOSPI"]["disclosure_development_min_non_missing_pct"] == 0.0
+    assert attempt["earnings_collection"]["budget_exhausted"] is True
+    assert bd.audit_attempt_summary([1, 2]) is None
+
+
+def test_unevaluated_newer_attempt_keeps_previous_summary_and_says_why():
+    summary = bd.build_summary(_audit(), newer_attempt={
+        "report_created_utc": "2026-11-26T06:23:37+00:00", "run_id": "45767809305",
+        "cohorts": {"KOSPI": {"bde_stage_status": "UPSTREAM_DISCLOSURE_NOT_EVALUATED",
+                              "disclosure_development_min_non_missing_pct": 0.0}}})
+    assert summary["cohorts"]["KOSPI"]["selected_policy"]["label"] == "B+D+E"
+    note = summary["notes"][0]
+    assert "45767809305" in note and "공시 데이터가 확보되지 않아" in note
+    assert "2026-11-25" in note
+
+
 def test_cli_writes_summary_and_status(tmp_path):
     audit_path = tmp_path / "audit-63-latest.json"
     audit_path.write_text(json.dumps(_audit()), encoding="utf-8")
