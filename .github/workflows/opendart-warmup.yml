@@ -1,0 +1,50 @@
+name: OpenDART 60-stock earnings cache warmup
+on:
+  push:
+    branches:
+      - feature/opendart-earnings-20261125
+    paths:
+      - 'opendart.py'
+      - 'opendart_warmup.py'
+      - 'universe.py'
+      - '.github/workflows/opendart-warmup.yml'
+  workflow_dispatch:
+concurrency:
+  group: opendart-warmup-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  opendart_warmup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      OPENDART_API_KEY: ${{ secrets.OPENDART_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore OpenDART financial cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/stock-radar/opendart
+          key: stock-radar-pr9-opendart-${{ runner.os }}-shared-v1
+          restore-keys: |
+            stock-radar-pr9-opendart-${{ runner.os }}-shared-v1-
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install 'requests>=2.31,<3' 'pandas>=2.2,<3'
+      - name: Warm annual and quarterly financial history
+        env:
+          OPENDART_REQUEST_INTERVAL_SECONDS: "0.15"
+          OPENDART_MAX_REQUESTS_PER_RUN: "6000"
+        run: python -u opendart_warmup.py --time-budget-seconds 2400 --workers 4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: opendart-earnings-warmup
+          path: data/opendart-warmup-latest.json
+          if-no-files-found: warn
+      - name: Save OpenDART financial cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/stock-radar/opendart
+          key: stock-radar-pr9-opendart-${{ runner.os }}-shared-v1-${{ github.run_id }}

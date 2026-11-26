@@ -28,6 +28,7 @@ class RRankModelTests(unittest.TestCase):
         self.assertEqual(widths["plus_regime"],49)
         self.assertEqual(widths["plus_relative"],61)
         self.assertEqual(widths["plus_flow"],71)
+        self.assertEqual(widths["plus_earnings"],79)
 
     def test_only_fixed_predeclared_model_configs(self):
         self.assertEqual({v["kind"] for v in MODEL_CONFIGS.values()},

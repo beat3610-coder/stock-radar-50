@@ -1,0 +1,49 @@
+name: Recent securities-lending snapshot warmup
+on:
+  push:
+    branches:
+      - feature/opendart-earnings-20261125
+    paths:
+      - 'slb.py'
+      - 'slb_warmup.py'
+      - 'universe.py'
+      - '.github/workflows/slb-warmup.yml'
+  workflow_dispatch:
+concurrency:
+  group: slb-warmup-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  slb_warmup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore recent SLB cache and daily quota ledger
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/stock-radar/slb
+          key: stock-radar-pr9-slb-${{ runner.os }}-shared-v1
+          restore-keys: |
+            stock-radar-pr9-slb-${{ runner.os }}-shared-v1-
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install 'requests>=2.31,<3' 'pandas>=2.2,<3'
+      - name: Fetch up to 60 dealing histories plus one daily rank
+        env:
+          SLB_REQUEST_INTERVAL_SECONDS: "0.3"
+        run: python -u slb_warmup.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: slb-recent-snapshot
+          path: data/slb-warmup-latest.json
+          if-no-files-found: warn
+      - name: Save recent SLB cache and daily quota ledger
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/stock-radar/slb
+          key: stock-radar-pr9-slb-${{ runner.os }}-shared-v1-${{ github.run_id }}

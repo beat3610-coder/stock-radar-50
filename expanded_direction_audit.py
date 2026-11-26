@@ -494,7 +494,8 @@ def _policy_table(rows,probs,payoffs):
         table[key]=value
     return table
 
-def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,payoffs=None,exclude_features=()):
+def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,payoffs=None,
+                    exclude_features=(),include_samples=False):
     lo,hi={"development":(SAMPLE_START,TRAIN_END),"validation":(TRAIN_END,VALID_END),"diagnostic":(VALID_END,HOLDOUT_END)}[period]
     eval_rows=[r for r in rows if r["horizon"]==horizon and lo<=r["entry_date"]<hi and r["label_available_date"]<hi]
     if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None,"temperature":temperature_info}
@@ -540,13 +541,20 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
       "mean_predicted_probability_pct":100*float(target_probs.mean()),"brier":float(np.mean((target_probs-target_actual)**2))}
     vol_metrics["target_hit_probability"]=target_report
     policies=_policy_table(eval_rows,probs,payoffs)
-    return {"n":len(eval_rows),"metrics":vol_metrics,"fixed_band_metrics":{k:v["metrics"] for k,v in theta_results.items()},
+    result={"n":len(eval_rows),"metrics":vol_metrics,"fixed_band_metrics":{k:v["metrics"] for k,v in theta_results.items()},
       "theta_results":theta_results,"buy_policy_candidates":policies,"buy_policy":None,
       "temperature":temperature_info,"class_payoffs_from_development":payoffs,
       "policy_selection_scope":"development only; thresholds are spread, sideways-probability, and net EV after existing costs",
       "probability_sample":{"p_up_p10_p50_p90":np.percentile(probs[:,2],[10,50,90]).tolist(),
         "p_down_p10_p50_p90":np.percentile(probs[:,0],[10,50,90]).tolist(),
         "p_sideways_p10_p50_p90":np.percentile(probs[:,1],[10,50,90]).tolist()}}
+    if include_samples:
+        result["evaluation_samples"]=[{"label":row["label_vol"],
+            "prediction":classes[int(np.argmax(prob))],
+            "probabilities":{"DOWN":float(prob[0]),"SIDEWAYS":float(prob[1]),"UP":float(prob[2])},
+            "earnings_momentum":row.get("earnings_momentum")}
+            for row,prob in zip(eval_rows,probs)]
+    return result
 
 def _ablation_period_summary(result,policy_key):
     metrics=result.get("metrics") or {}
@@ -593,10 +601,14 @@ def _selection_rows_for(cohort,pool,benchmark_rows):
     """Select US model/horizon on full-universe OOS-development forecasts."""
     return pool if cohort=="US" else benchmark_rows
 
-def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,macro_frames=None,macro_diagnostics=None):
+def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,macro_frames=None,
+                                macro_diagnostics=None,earnings_by_ticker=None,
+                                earnings_key_present=False):
     from concurrent.futures import ThreadPoolExecutor, as_completed
+    from opendart import earnings_features_for_signal
     universe=_ticker_set(); audit=_audit_symbols(universe); rows=[]; loaded=[]; failures=[]; special_eval={}
     flow_frames=flow_frames or {};flow_source_coverage=flow_source_coverage or {}
+    earnings_by_ticker=earnings_by_ticker or {}
     sources=universe.pop("universe_sources",{}); universe_errors=universe.pop("universe_errors",{})
     jobs=[(c,item) for c,items in universe.items() for item in items]
     frames_by_cohort={c:{} for c in universe}
@@ -675,9 +687,22 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
       "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC,
       "selection_rule":"Development-only walk-forward: select one model/horizon by mean datewise Spearman(P(UP), realized net return), requiring positive IC and at least 100 top-15% development candidates. Calibrate multiclass probabilities with development OOF temperature scaling. Select spread + sideways-probability + net expected-value policy on development only; all selected policy OOS results are reported.",
       "feature_coverage":{"feature_names":list(FEATURES),"fixed_centers":CENTERS,"fixed_scales":SCALES,"feature_count":len(FEATURES),"cross_section_count_key":"xs_count","constant_column_policy":"recomputed from each past-only training snapshot and excluded when std is zero"}}
+    direction3_eval_samples_by_cohort={}
     for cohort,pool in bycohort.items():
         eval_rows=[r for r in pool if r["ticker"] in audit.get(cohort,set())]
         eval_rows.extend(special_eval.get(cohort,[]))
+        for row in eval_rows:
+            if cohort in ("KOSPI","KOSDAQ"):
+                cached=earnings_by_ticker.get(str(row["ticker"]).zfill(6),{})
+                diagnostics=cached.get("diagnostics",{})
+                earnings=earnings_features_for_signal(cached.get("records",[]),row["signal_date"],
+                    corp_code=diagnostics.get("corp_code"),abstain=not earnings_key_present)
+            else:
+                earnings=earnings_features_for_signal([],row["signal_date"],corp_code=None,
+                    not_applicable=True)
+            # Diagnostic grouping only: these values are not in FEATURES and do
+            # not participate in direction3 fitting, selection, or thresholds.
+            row["earnings_momentum"]=earnings.get("earnings_momentum")
         pool63=[r for r in eval_rows]
         # SOXL is evaluation-only; selection and every forecast for it must be
         # trained from the available ordinary-US cohort, never the 162-row ETF.
@@ -741,6 +766,7 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
           fit_meta={k:v for k,v in spec.items() if k not in ("training_rows","evaluation_rows")}
           cohort_report["fit_metadata_by_universe"][fit_name]=fit_meta
           comparisons={}
+          audit_eval_samples={period:[] for period in ("development","validation","diagnostic")}
           if chosen[1] is not None:
             h=chosen[2]
             if fit_name=="63_audit_symbols" or cohort=="US":
@@ -749,13 +775,17 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
                 fit_dev=_backtest_model(fixed_eval_rows,training,chosen[1],h,"development")
             fit_payoffs=fit_dev.get("class_payoffs_from_development") or _class_payoffs(
                 [r for r in training if r["horizon"]==h and r["label_available_date"]<TRAIN_END])
-            dev=(fit_dev if cohort!="US" and fit_name=="63_audit_symbols" else
-                 _backtest_model(fixed_eval_rows,training,chosen[1],h,"development",
-                   temperature_info=fit_dev.get("temperature"),payoffs=fit_payoffs))
+            dev=_backtest_model(fixed_eval_rows,training,chosen[1],h,"development",
+                temperature_info=fit_dev.get("temperature"),payoffs=fit_payoffs,
+                include_samples=fit_name=="63_audit_symbols")
             periods={"development":dev}
             for period in ("validation","diagnostic"):
                 periods[period]=_backtest_model(fixed_eval_rows,training,chosen[1],h,period,
-                  temperature_info=fit_dev.get("temperature"),payoffs=fit_payoffs)
+                  temperature_info=fit_dev.get("temperature"),payoffs=fit_payoffs,
+                  include_samples=fit_name=="63_audit_symbols")
+            if fit_name=="63_audit_symbols":
+                audit_eval_samples={period:raw.get("evaluation_samples",[])
+                    for period,raw in periods.items()}
             for period,raw in periods.items():
                 met=raw.get("metrics");grid=raw.get("buy_policy_candidates",{})
                 comparisons[period]={"n":raw.get("n",0),"metrics":met,"fixed_band_metrics":raw.get("fixed_band_metrics"),
@@ -779,6 +809,8 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
                 for p in ("development","validation","diagnostic")}
             cohort_report.setdefault("policy_selection_status_by_universe",{})[fit_name]="NO_DEVELOPMENT_EDGE"
           cohort_report["universe_comparison"][fit_name]=comparisons
+          if fit_name=="63_audit_symbols":
+              direction3_eval_samples_by_cohort[cohort]=audit_eval_samples
         # Feature ablation reuses the selected model, horizon, label, and
         # development-selected policy threshold. Only flow inputs are removed;
         # validation/diagnostic are reported, never used for reselection.
@@ -857,6 +889,7 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
         str(theta):{name:sum(r.get(f"label_{theta}")==name for r in bycohort.get(cohort,[]) if r["label_available_date"]<TRAIN_END)
                     for name in ("DOWN","SIDEWAYS","UP")} for theta in THETAS}}
       for cohort,v in volatility_k.items()}
+    out["direction3"]["_evaluation_samples"]=direction3_eval_samples_by_cohort
     # Preserve readable, auditable source/data failures separately.
     Path("data").mkdir(exist_ok=True)
     return out
