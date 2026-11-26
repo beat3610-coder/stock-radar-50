@@ -197,6 +197,41 @@ def _earnings_ablation(audit):
     return out
 
 
+def audit_attempt_summary(audit, *, run_id=None, head=None):
+    """다른 실행의 감사가 B+D+E를 실제로 평가했는지 확인하는 요약.
+
+    교체 판단에만 쓴다. 새 실행이 공시·실적 데이터를 못 받아 B+D+E를 미평가로
+    남겼다면 그 실행으로 화면 데이터를 갈아치우지 않기 위해서다.
+    """
+    if not isinstance(audit, dict):
+        return None
+    cohorts = {}
+    for cohort in COHORT_LABELS:
+        ladder = (audit.get("policy_ladder") or {}).get(cohort) or {}
+        step = ladder.get("legacy_risk_off_disclosure_earnings") or {}
+        periods = step.get("periods") or {}
+        disclosure = (((audit.get("disclosure_coverage") or {}).get(cohort) or {})
+                      .get("periods") or {}).get("development") or {}
+        periods_pct = [v.get("non_missing_pct") for v in disclosure.values()
+                       if isinstance(v, dict) and v.get("non_missing_pct") is not None]
+        earnings = ((audit.get("earnings_coverage") or {}).get(cohort) or {})
+        cohorts[cohort] = {
+            "bde_stage_status": step.get("status"),
+            "bde_development_trades": (periods.get("development") or {}).get("trades"),
+            "selected_policy": ladder.get("selected_policy"),
+            "disclosure_development_min_non_missing_pct": (round(min(periods_pct), 2)
+                                                            if periods_pct else None),
+            "earnings_available_symbols_n": earnings.get("available_symbols_n"),
+            "earnings_requested_symbols_n": earnings.get("requested_symbols_n"),
+        }
+    collection = (audit.get("earnings_coverage") or {}).get("collection") or {}
+    return {"report_created_utc": audit.get("created_utc"), "run_id": run_id, "head": head,
+            "report_status": audit.get("status"), "cohorts": cohorts,
+            "earnings_collection": {k: collection.get(k) for k in
+                                    ("attempted_symbols_n", "available_symbols_n",
+                                     "requested_symbols_n", "budget_exhausted")}}
+
+
 def _direction3(audit):
     """3방향(상승·횡보·하락) 분류 정확도. 매수 승률과 다른 지표라 따로 둔다."""
     out = {}
@@ -223,7 +258,7 @@ def _direction3(audit):
     return out
 
 
-def build_summary(audit, *, source=None, generated_utc=None):
+def build_summary(audit, *, source=None, generated_utc=None, newer_attempt=None):
     """전체 감사 보고서에서 B+D+E 화면용 요약을 만든다.
 
     원본 값은 그대로 옮기고 없는 값은 None으로 둔다. 계산·추정·보정은 하지 않는다.
@@ -251,6 +286,8 @@ def build_summary(audit, *, source=None, generated_utc=None):
         },
         "cohorts": {},
     }
+    if newer_attempt:
+        summary["source"]["newer_attempt"] = newer_attempt
     for cohort in COHORT_LABELS:
         block = (audit.get("policy_ladder") or {}).get(cohort) or {}
         cohort_detail = (audit.get("cohorts") or {}).get(cohort) or {}
@@ -325,6 +362,30 @@ def _recent_signal(signal_block, mapping):
 def _notes(summary):
     """화면에 반드시 함께 보여야 하는 한계. 데이터에서 직접 확인된 것만 적는다."""
     notes = []
+    attempt = (summary.get("source") or {}).get("newer_attempt") or {}
+    if attempt:
+        attempt_cohorts = attempt.get("cohorts") or {}
+        failed = [COHORT_LABELS.get(c, c) for c, v in attempt_cohorts.items()
+                  if (v or {}).get("bde_stage_status") not in (None, "EVALUATED")]
+        if failed:
+            coverage_values = [(v or {}).get("disclosure_development_min_non_missing_pct")
+                               for v in attempt_cohorts.values()]
+            no_disclosure = bool(coverage_values) and all(
+                c in (0, 0.0, None) for c in coverage_values)
+            reason = ("공시 데이터가 확보되지 않아(개발구간 결측률 0%)" if no_disclosure
+                      else "상류 단계 데이터가 없어")
+            kept = str((summary.get("source") or {}).get("report_created_utc"))[:10]
+            notes.append(
+                f"더 새로운 감사 시도({str(attempt.get('report_created_utc'))[:10]}, "
+                f"run {attempt.get('run_id')})는 {reason} {'·'.join(failed)}의 B+D+E 단계를 "
+                f"평가하지 못했습니다. 그래서 화면은 마지막으로 실제 평가된 {kept} 결과를 유지합니다.")
+    coverage = (summary.get("coverage") or {}).get("earnings") or {}
+    collection = coverage.get("collection") or {}
+    if collection.get("budget_exhausted"):
+        notes.append(
+            f"실적 수집 요청예산이 소진되어 {collection.get('available_symbols_n')}"
+            f"/{collection.get('requested_symbols_n')}종목만 확보했습니다. "
+            "실적이 없는 종목은 E단계가 판정 보류(ABSTAIN)로 처리됩니다.")
     slb = (summary.get("coverage") or {}).get("slb") or {}
     if slb and slb.get("backtest_status") and slb.get("backtest_status") != "EVALUATED":
         notes.append("SLB(공매도 잔고)는 백테스트에 반영되지 않았습니다: "
@@ -409,6 +470,7 @@ def render(st, summary, live=None):
         return
     age = summary_age_days(summary)
     source = summary.get("source") or {}
+    attempt = source.get("newer_attempt") or {}
     head_left, head_mid, head_right = st.columns(3)
     head_left.metric("요약 생성", str(summary.get("generated_utc", "—"))[:16].replace("T", " ") + " UTC")
     head_mid.metric("감사 보고서 기준", str(source.get("report_created_utc", "—"))[:16].replace("T", " ")
@@ -420,6 +482,13 @@ def render(st, summary, live=None):
     if age is not None and age > STALE_AFTER_DAYS:
         st.warning(f"B+D+E 요약이 {age:.0f}일 지났습니다. 최신 감사 아티팩트로 다시 생성하기 전까지는 "
                    "이전 판정입니다.")
+    if attempt:
+        statuses = {COHORT_LABELS.get(c, c): (v or {}).get("bde_stage_status")
+                    for c, v in (attempt.get("cohorts") or {}).items()}
+        st.warning("더 새로운 감사 시도(" + str(attempt.get("report_created_utc"))[:16].replace("T", " ")
+                   + f', run {attempt.get("run_id")})는 B+D+E를 평가하지 못했습니다: '
+                   + ", ".join(f"{k} {v}" for k, v in statuses.items())
+                   + ". 그래서 화면은 마지막으로 실제 평가된 결과를 보여줍니다.")
 
     if live:
         st.markdown("**오늘의 후보 단계별 통과 수**")
@@ -621,6 +690,9 @@ def parse_args(argv=None):
     parser.add_argument("--run-id", default=None, help="감사를 만든 GitHub Actions run id")
     parser.add_argument("--head", default=None, help="감사를 만든 커밋 SHA")
     parser.add_argument("--branch", default=None)
+    parser.add_argument("--attempt-audit", default=None,
+                        help="더 새로운 감사 시도 보고서 경로(교체 대신 비교용으로 기록)")
+    parser.add_argument("--attempt-run-id", default=None)
     parser.add_argument("--status", action="store_true", help="커밋된 요약의 기준 시각만 확인")
     return parser.parse_args(argv)
 
@@ -649,7 +721,15 @@ def main(argv=None):
     audit = json.loads(path.read_text(encoding="utf-8"))
     source = {"audit_report": _report_label(path),
               "run_id": args.run_id, "head": args.head, "branch": args.branch}
-    summary = build_summary(audit, source=source)
+    attempt = None
+    if args.attempt_audit:
+        attempt_path = Path(args.attempt_audit)
+        if attempt_path.exists():
+            attempt = audit_attempt_summary(json.loads(attempt_path.read_text(encoding="utf-8")),
+                                            run_id=args.attempt_run_id)
+        else:
+            print("ATTEMPT_REPORT_MISSING " + str(attempt_path))
+    summary = build_summary(audit, source=source, newer_attempt=attempt)
     out = write_summary(summary, args.out)
     print("WROTE " + str(out) + " " + json.dumps({
         "bytes": out.stat().st_size,
