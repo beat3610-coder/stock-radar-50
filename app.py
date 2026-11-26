@@ -12,6 +12,7 @@ from plotly.subplots import make_subplots
 from universe import get_universe
 from engine import compute,evaluate
 from providers import get_prices,get_flows,verify_recent_close
+from bde_dashboard import load_summary as load_bde_summary,load_live as load_bde_live,render as render_bde
 
 import audit_runtime
 audit_runtime.ensure_started()
@@ -28,6 +29,9 @@ st.warning(
     "최종 투자 판단은 이용자 본인이 해야 하며, 투자 결과에 따른 이익과 손실은 "
     "이용자 본인에게 귀속됩니다. 실제 주문 전 공식 시세와 관련 정보를 직접 확인하세요."
 )
+# B+D+E(위험국면 + 공시 + 실적) 최근 필터와 오늘의 후보. 값은 커밋된 감사 요약에서만 읽는다.
+with st.expander("🧭 B+D+E 실전 필터 · 최근 후보",expanded=True):
+    render_bde(st,load_bde_summary(),load_bde_live())
 # Historical model research is displayed separately from live trade signals.
 # These are dated, already-inspected research windows, not independent forward tests.
 with st.expander("🔬 예측모델 개선 현황 · 2025~2026년 과거 검증", expanded=False):
