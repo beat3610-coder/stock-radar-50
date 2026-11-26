@@ -16,6 +16,31 @@ from direction3 import make_direction_rows,score_directions,HORIZON,BAND_PCT
 from buy_success import attach_buy_labels,score_buy_success
 from adaptive_trade_plans import (
     label_plans,score_plans,make_plan_candidates,TARGET_WIN_PCT)
+from bde_dashboard import load_summary as load_bde_summary
+
+
+def bde_evolution_block():
+    """시간별 진화 보고서에 함께 실을 B+D+E 최근 필터 요약.
+
+    값은 동결된 63종목 감사의 B+D+E 결과를 그대로 옮긴 것이고, 이 실행의 새 학습과
+    섞지 않는다. 요약 파일이 없으면 빈 값을 넣지 않고 아예 넣지 않는다.
+    """
+    summary=load_bde_summary()
+    if not summary:return None
+    source=summary.get("source") or {}
+    return {"source_report_created_utc":source.get("report_created_utc"),
+            "summary_generated_utc":summary.get("generated_utc"),
+            "audit_report":source.get("audit_report"),"run_id":source.get("run_id"),
+            "head":source.get("head"),"stage_order":summary.get("stage_order"),
+            "selected_policy":{cohort:(block.get("selected_policy") or {}).get("label")
+                                for cohort,block in (summary.get("cohorts") or {}).items()},
+            "recent_signal":{cohort:{"latest_signal_date":(block.get("recent_signal") or {}).get("latest_signal_date"),
+                                     "accepted_n_by_stage":(block.get("recent_signal") or {}).get("accepted_n_by_stage")}
+                              for cohort,block in (summary.get("cohorts") or {}).items()},
+            "direction3_accuracy_pct":{market:{period:(row or {}).get("accuracy_pct")
+                                               for period,row in block.items()}
+                                       for market,block in (summary.get("direction3") or {}).items()},
+            "notes":summary.get("notes"),"research_only":True,"live_approved":False}
 
 
 def run_direction3(per_market=100,previous=None):
@@ -163,6 +188,8 @@ def run_direction3(per_market=100,previous=None):
         result["training_health"].get(m,{}).get("fresh_training",False)
         for m in ("KR","KQ","US"))
     result["deployment_gate"]="RESEARCH_ONLY_NOT_LIVE_APPROVED"
+    bde_block=bde_evolution_block()
+    if bde_block:result["bde_filter"]=bde_block
     result["evaluation_warning"]=(
         "기존 모델/과거 결과와 새 학습을 분리합니다. "
         "전체 과거를 수식 선택에 사용했으며 독립 실전 승률이 아닙니다.")

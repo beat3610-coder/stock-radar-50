@@ -1,0 +1,2119 @@
+{
+ "schema_version": 1,
+ "kind": "bde_recent_filter_and_candidates",
+ "generated_utc": "2026-11-26T07:43:11.215433+00:00",
+ "research_only": true,
+ "live_approved": false,
+ "evaluation_warning": null,
+ "stage_order": [
+  "A",
+  "B",
+  "B+D",
+  "C",
+  "D",
+  "B+D+E"
+ ],
+ "stage_labels": {
+  "A": "legacy_only",
+  "B": "legacy_risk_off_hard_gate",
+  "B+D": "legacy_risk_off_disclosure",
+  "C": "legacy_risk_off_trend_filter",
+  "D": "legacy_risk_off_trend_disclosure",
+  "B+D+E": "legacy_risk_off_disclosure_earnings"
+ },
+ "source": {
+  "report_created_utc": "2026-11-25T14:35:29.031142+00:00",
+  "report_status": "RESEARCH_ONLY_NOT_LIVE_APPROVED",
+  "sample_start": "2016-01-01",
+  "windows": {
+   "development_end": "2025-11-01",
+   "validation_end": "2026-04-01",
+   "diagnostic_end": "2026-11-01"
+  },
+  "feature_timing": "all model features and planned payoff/risk fields use signal-day close; next-open values are outcome/execution only",
+  "audit_report": "audit-63 artifact: audit-63-latest.json",
+  "run_id": "45635628647",
+  "head": "c99238c81805d378a30eafd2467e22e5f6b4655c",
+  "branch": "feature/opendart-earnings-20261125"
+ },
+ "cohorts": {
+  "KOSPI": {
+   "selected_policy": {
+    "stage": "legacy_risk_off_disclosure_earnings",
+    "label": "B+D+E",
+    "status": "EVALUATED",
+    "params": {
+     "disclosure_bad_60d_max": 0,
+     "disclosure_periodic_days_since_floor": 20,
+     "earnings_momentum_min": null,
+     "op_yoy_min": null,
+     "opm_min": 0
+    },
+    "earnings_thresholds": {
+     "earnings_momentum_min": null,
+     "op_yoy_min": null,
+     "opm_min": 0
+    },
+    "stage_definition": "B + D + E: frozen RISK_OFF gate, selected existing disclosure gate, and development-selected earnings thresholds.",
+    "periods": {
+     "development": {
+      "trades": 31,
+      "win_rate_pct": 51.61,
+      "mean_net_pct": 1.456,
+      "profit_factor": 1.737,
+      "max_drawdown_pct": 19.6,
+      "max_drawdown_sequence_pct": 19.6,
+      "coverage_pct": 70.0,
+      "traded_symbols": 21,
+      "requested_symbols": 30,
+      "small_sample": false,
+      "earnings_gate_status_counts": {
+       "REJECT": 2,
+       "PASS": 19,
+       "ABSTAIN": 12
+      },
+      "max_drawdown_portfolio_5_equal_pct": 4.313
+     },
+     "validation": {
+      "trades": 6,
+      "win_rate_pct": 50.0,
+      "mean_net_pct": 3.843,
+      "profit_factor": 3.01,
+      "max_drawdown_pct": 7.51,
+      "max_drawdown_sequence_pct": 7.51,
+      "coverage_pct": 20.0,
+      "traded_symbols": 6,
+      "requested_symbols": 30,
+      "small_sample": true,
+      "earnings_gate_status_counts": {
+       "PASS": 4,
+       "ABSTAIN": 2
+      },
+      "max_drawdown_portfolio_5_equal_pct": 0.851
+     },
+     "diagnostic": {
+      "trades": 0,
+      "win_rate_pct": null,
+      "mean_net_pct": null,
+      "profit_factor": null,
+      "max_drawdown_pct": null,
+      "max_drawdown_sequence_pct": null,
+      "coverage_pct": 0.0,
+      "traded_symbols": 0,
+      "requested_symbols": 30,
+      "small_sample": false,
+      "earnings_gate_status_counts": {},
+      "max_drawdown_portfolio_5_equal_pct": 0.0
+     }
+    },
+    "earnings_coverage_pct": 100.0,
+    "missing_feature_action": "ABSTAIN; unavailable earnings do not reject a legacy entry."
+   },
+   "recent_signal": {
+    "status": "EVALUATED",
+    "window_days": 14,
+    "window_start": "2026-08-20",
+    "latest_signal_date": "2026-09-03",
+    "signals_n": 1,
+    "accepted_n_by_stage": {
+     "A": 1,
+     "B": 1,
+     "B+D": 0,
+     "C": 1,
+     "D": 1,
+     "B+D+E": 0
+    },
+    "gate_passed_n_by_stage": {
+     "A": 1,
+     "B": 1,
+     "B+D": 0,
+     "C": 1,
+     "D": 1,
+     "B+D+E": 0
+    },
+    "stage_status": {
+     "A": "EVALUATED",
+     "B": "EVALUATED",
+     "B+D": "EVALUATED",
+     "C": "EVALUATED",
+     "D": "EVALUATED",
+     "B+D+E": "EVALUATED"
+    },
+    "dropped_by_disclosure": [
+     {
+      "ticker": "055550",
+      "signal_date": "2026-09-03",
+      "reason": "PERIODIC_REPORT_TOO_RECENT",
+      "disclosure_bad_60d": 0.0,
+      "disclosure_periodic_days_since": 13
+     }
+    ]
+   },
+   "signals": [
+    {
+     "ticker": "055550",
+     "signal_date": "2026-09-03",
+     "market_regime": "RISK_ON",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 13,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": false,
+       "reason": "PERIODIC_REPORT_TOO_RECENT"
+      },
+      "C": {
+       "accepted": true,
+       "reason": null
+      },
+      "D": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D+E": {
+       "accepted": false,
+       "reason": "PERIODIC_REPORT_TOO_RECENT"
+      }
+     },
+     "selected_stage": "B+D+E",
+     "selected_accepted": false,
+     "selected_reason": "PERIODIC_REPORT_TOO_RECENT",
+     "first_block": {
+      "label": "B+D",
+      "reason": "PERIODIC_REPORT_TOO_RECENT",
+      "text": "정기보고서 제출 후 대기 거래일 미달"
+     }
+    },
+    {
+     "ticker": "033780",
+     "signal_date": "2026-05-14",
+     "market_regime": "RISK_ON",
+     "disclosure_bad_60d": 1,
+     "disclosure_periodic_days_since": 39,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": false,
+       "reason": "BAD_TITLE_WITHIN_60_DAYS"
+      },
+      "C": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "B+D+E": {
+       "accepted": false,
+       "reason": "BAD_TITLE_WITHIN_60_DAYS"
+      }
+     },
+     "selected_stage": "B+D+E",
+     "selected_accepted": false,
+     "selected_reason": "BAD_TITLE_WITHIN_60_DAYS",
+     "first_block": {
+      "label": "B+D",
+      "reason": "BAD_TITLE_WITHIN_60_DAYS",
+      "text": "60거래일 내 악성 공시"
+     }
+    },
+    {
+     "ticker": "316140",
+     "signal_date": "2026-01-22",
+     "market_regime": "RISK_ON",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 46,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": true,
+       "reason": null
+      },
+      "C": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "B+D+E": {
+       "accepted": true,
+       "reason": null
+      }
+     },
+     "selected_stage": "B+D+E",
+     "selected_accepted": true,
+     "selected_reason": null,
+     "first_block": null
+    },
+    {
+     "ticker": "066570",
+     "signal_date": "2026-01-16",
+     "market_regime": "RISK_ON",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 42,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": true,
+       "reason": null
+      },
+      "C": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "B+D+E": {
+       "accepted": true,
+       "reason": null
+      }
+     },
+     "selected_stage": "B+D+E",
+     "selected_accepted": true,
+     "selected_reason": null,
+     "first_block": null
+    },
+    {
+     "ticker": "032830",
+     "signal_date": "2026-01-16",
+     "market_regime": "RISK_ON",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 42,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": true,
+       "reason": null
+      },
+      "C": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "B+D+E": {
+       "accepted": true,
+       "reason": null
+      }
+     },
+     "selected_stage": "B+D+E",
+     "selected_accepted": true,
+     "selected_reason": null,
+     "first_block": null
+    },
+    {
+     "ticker": "055550",
+     "signal_date": "2026-01-06",
+     "market_regime": "RISK_ON",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 34,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": true,
+       "reason": null
+      },
+      "C": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "B+D+E": {
+       "accepted": true,
+       "reason": null
+      }
+     },
+     "selected_stage": "B+D+E",
+     "selected_accepted": true,
+     "selected_reason": null,
+     "first_block": null
+    },
+    {
+     "ticker": "028260",
+     "signal_date": "2026-01-06",
+     "market_regime": "RISK_ON",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 34,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": true,
+       "reason": null
+      },
+      "C": {
+       "accepted": true,
+       "reason": null
+      },
+      "D": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D+E": {
+       "accepted": true,
+       "reason": null
+      }
+     },
+     "selected_stage": "B+D+E",
+     "selected_accepted": true,
+     "selected_reason": null,
+     "first_block": null
+    },
+    {
+     "ticker": "033780",
+     "signal_date": "2025-12-16",
+     "market_regime": "RISK_ON",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 22,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": true,
+       "reason": null
+      },
+      "C": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "B+D+E": {
+       "accepted": true,
+       "reason": null
+      }
+     },
+     "selected_stage": "B+D+E",
+     "selected_accepted": true,
+     "selected_reason": null,
+     "first_block": null
+    },
+    {
+     "ticker": "005380",
+     "signal_date": "2025-12-04",
+     "market_regime": "NEUTRAL",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 14,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": false,
+       "reason": "PERIODIC_REPORT_TOO_RECENT"
+      },
+      "C": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "B+D+E": {
+       "accepted": false,
+       "reason": "PERIODIC_REPORT_TOO_RECENT"
+      }
+     },
+     "selected_stage": "B+D+E",
+     "selected_accepted": false,
+     "selected_reason": "PERIODIC_REPORT_TOO_RECENT",
+     "first_block": {
+      "label": "B+D",
+      "reason": "PERIODIC_REPORT_TOO_RECENT",
+      "text": "정기보고서 제출 후 대기 거래일 미달"
+     }
+    },
+    {
+     "ticker": "000270",
+     "signal_date": "2025-12-04",
+     "market_regime": "NEUTRAL",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 14,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": false,
+       "reason": "PERIODIC_REPORT_TOO_RECENT"
+      },
+      "C": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "B+D+E": {
+       "accepted": false,
+       "reason": "PERIODIC_REPORT_TOO_RECENT"
+      }
+     },
+     "selected_stage": "B+D+E",
+     "selected_accepted": false,
+     "selected_reason": "PERIODIC_REPORT_TOO_RECENT",
+     "first_block": {
+      "label": "B+D",
+      "reason": "PERIODIC_REPORT_TOO_RECENT",
+      "text": "정기보고서 제출 후 대기 거래일 미달"
+     }
+    }
+   ],
+   "legacy_variant": "trend_breakout",
+   "stage_params": {
+    "A": {
+     "stage": "legacy_only",
+     "status": "EVALUATED",
+     "params": {},
+     "earnings_thresholds": null
+    },
+    "B": {
+     "stage": "legacy_risk_off_hard_gate",
+     "status": "EVALUATED",
+     "params": {
+      "rule": "(cohort index below MA200 and realized volatility ratio > 1.2) OR VIX 250-observation expanding percentile > 0.80 OR USD/KRW 20-day change > +3%."
+     },
+     "earnings_thresholds": null
+    },
+    "B+D": {
+     "stage": "legacy_risk_off_disclosure",
+     "status": "EVALUATED",
+     "params": {
+      "disclosure_bad_60d_max": 0,
+      "disclosure_periodic_days_since_floor": 20
+     },
+     "earnings_thresholds": null
+    },
+    "C": {
+     "stage": "legacy_risk_off_trend_filter",
+     "status": "EVALUATED",
+     "params": {
+      "market_ma200_gap_min_pct": 0.0,
+      "stock_ma200_gap_gt_pct": 0,
+      "relative_strength_60d_gt_pct": 0,
+      "volatility_cap_quantile": "p90",
+      "volatility_cap_pct": 2.406364992719253
+     },
+     "earnings_thresholds": null
+    },
+    "D": {
+     "stage": "legacy_risk_off_trend_disclosure",
+     "status": "EVALUATED",
+     "params": {
+      "market_ma200_gap_min_pct": -5.0,
+      "stock_ma200_gap_gt_pct": 0,
+      "relative_strength_60d_gt_pct": 0,
+      "volatility_cap_quantile": "p90",
+      "volatility_cap_pct": 2.406364992719253,
+      "disclosure_bad_60d_max": 0,
+      "disclosure_periodic_days_since_floor": 0
+     },
+     "earnings_thresholds": null
+    },
+    "B+D+E": {
+     "stage": "legacy_risk_off_disclosure_earnings",
+     "status": "EVALUATED",
+     "params": {
+      "disclosure_bad_60d_max": 0,
+      "disclosure_periodic_days_since_floor": 20,
+      "earnings_momentum_min": null,
+      "op_yoy_min": null,
+      "opm_min": 0
+     },
+     "earnings_thresholds": {
+      "earnings_momentum_min": null,
+      "op_yoy_min": null,
+      "opm_min": 0
+     }
+    }
+   },
+   "instruments": [
+    {
+     "ticker": "005930",
+     "name": "삼성전자"
+    },
+    {
+     "ticker": "000660",
+     "name": "SK하이닉스"
+    },
+    {
+     "ticker": "402340",
+     "name": "SK스퀘어"
+    },
+    {
+     "ticker": "373220",
+     "name": "LG에너지솔루션"
+    },
+    {
+     "ticker": "207940",
+     "name": "삼성바이오로직스"
+    },
+    {
+     "ticker": "009150",
+     "name": "삼성전기"
+    },
+    {
+     "ticker": "105560",
+     "name": "KB금융"
+    },
+    {
+     "ticker": "005380",
+     "name": "현대차"
+    },
+    {
+     "ticker": "068270",
+     "name": "셀트리온"
+    },
+    {
+     "ticker": "032830",
+     "name": "삼성생명"
+    },
+    {
+     "ticker": "028260",
+     "name": "삼성물산"
+    },
+    {
+     "ticker": "055550",
+     "name": "신한지주"
+    },
+    {
+     "ticker": "000270",
+     "name": "기아"
+    },
+    {
+     "ticker": "034730",
+     "name": "SK"
+    },
+    {
+     "ticker": "086790",
+     "name": "하나금융지주"
+    },
+    {
+     "ticker": "006400",
+     "name": "삼성SDI"
+    },
+    {
+     "ticker": "012450",
+     "name": "한화에어로스페이스"
+    },
+    {
+     "ticker": "012330",
+     "name": "현대모비스"
+    },
+    {
+     "ticker": "329180",
+     "name": "HD현대중공업"
+    },
+    {
+     "ticker": "034020",
+     "name": "두산에너빌리티"
+    },
+    {
+     "ticker": "035420",
+     "name": "NAVER"
+    },
+    {
+     "ticker": "316140",
+     "name": "우리금융지주"
+    },
+    {
+     "ticker": "000810",
+     "name": "삼성화재"
+    },
+    {
+     "ticker": "138040",
+     "name": "메리츠금융지주"
+    },
+    {
+     "ticker": "011200",
+     "name": "HMM"
+    },
+    {
+     "ticker": "066570",
+     "name": "LG전자"
+    },
+    {
+     "ticker": "005490",
+     "name": "POSCO홀딩스"
+    },
+    {
+     "ticker": "033780",
+     "name": "KT&G"
+    },
+    {
+     "ticker": "010120",
+     "name": "LS ELECTRIC"
+    },
+    {
+     "ticker": "015760",
+     "name": "한국전력"
+    }
+   ]
+  },
+  "KOSDAQ": {
+   "selected_policy": {
+    "stage": "legacy_risk_off_trend_disclosure",
+    "label": "D",
+    "status": "EVALUATED",
+    "params": {
+     "market_ma200_gap_min_pct": 0.0,
+     "stock_ma200_gap_gt_pct": 0,
+     "relative_strength_60d_gt_pct": 0,
+     "volatility_cap_quantile": "p90",
+     "volatility_cap_pct": 2.789189800252177,
+     "disclosure_bad_60d_max": 1,
+     "disclosure_periodic_days_since_floor": 0
+    },
+    "earnings_thresholds": null,
+    "stage_definition": "C + D: RISK_OFF hard gate, selected trend filter and the DART disclosure filter.",
+    "periods": {
+     "development": {
+      "trades": 14,
+      "win_rate_pct": 64.29,
+      "mean_net_pct": 3.695,
+      "profit_factor": 2.508,
+      "max_drawdown_pct": 13.11,
+      "max_drawdown_sequence_pct": 13.11,
+      "coverage_pct": 40.0,
+      "traded_symbols": 12,
+      "requested_symbols": 30,
+      "small_sample": false,
+      "earnings_gate_status_counts": null,
+      "max_drawdown_portfolio_5_equal_pct": 3.127
+     },
+     "validation": {
+      "trades": 0,
+      "win_rate_pct": null,
+      "mean_net_pct": null,
+      "profit_factor": null,
+      "max_drawdown_pct": null,
+      "max_drawdown_sequence_pct": null,
+      "coverage_pct": 0.0,
+      "traded_symbols": 0,
+      "requested_symbols": 30,
+      "small_sample": true,
+      "earnings_gate_status_counts": null,
+      "max_drawdown_portfolio_5_equal_pct": 0.0
+     },
+     "diagnostic": {
+      "trades": 0,
+      "win_rate_pct": null,
+      "mean_net_pct": null,
+      "profit_factor": null,
+      "max_drawdown_pct": null,
+      "max_drawdown_sequence_pct": null,
+      "coverage_pct": 0.0,
+      "traded_symbols": 0,
+      "requested_symbols": 30,
+      "small_sample": false,
+      "earnings_gate_status_counts": null,
+      "max_drawdown_portfolio_5_equal_pct": 0.0
+     }
+    },
+    "earnings_coverage_pct": null,
+    "missing_feature_action": null
+   },
+   "recent_signal": {
+    "status": "EVALUATED",
+    "window_days": 14,
+    "window_start": "2025-11-03",
+    "latest_signal_date": "2025-11-17",
+    "signals_n": 1,
+    "accepted_n_by_stage": {
+     "A": 1,
+     "B": 1,
+     "B+D": 0,
+     "C": 0,
+     "D": 0,
+     "B+D+E": 0
+    },
+    "gate_passed_n_by_stage": {
+     "A": 1,
+     "B": 1,
+     "B+D": 0,
+     "C": 0,
+     "D": 0,
+     "B+D+E": 0
+    },
+    "stage_status": {
+     "A": "EVALUATED",
+     "B": "EVALUATED",
+     "B+D": "EVALUATED",
+     "C": "EVALUATED",
+     "D": "EVALUATED",
+     "B+D+E": "EVALUATED"
+    },
+    "dropped_by_disclosure": [
+     {
+      "ticker": "058470",
+      "signal_date": "2025-11-17",
+      "reason": "PERIODIC_REPORT_TOO_RECENT",
+      "disclosure_bad_60d": 0.0,
+      "disclosure_periodic_days_since": 2
+     }
+    ]
+   },
+   "signals": [
+    {
+     "ticker": "058470",
+     "signal_date": "2025-11-17",
+     "market_regime": "NEUTRAL",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 2,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": false,
+       "reason": "PERIODIC_REPORT_TOO_RECENT"
+      },
+      "C": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "B+D+E": {
+       "accepted": false,
+       "reason": "PERIODIC_REPORT_TOO_RECENT"
+      }
+     },
+     "selected_stage": "D",
+     "selected_accepted": false,
+     "selected_reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE",
+     "first_block": {
+      "label": "B+D",
+      "reason": "PERIODIC_REPORT_TOO_RECENT",
+      "text": "정기보고서 제출 후 대기 거래일 미달"
+     }
+    },
+    {
+     "ticker": "064760",
+     "signal_date": "2025-07-29",
+     "market_regime": "RISK_ON",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 51,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": true,
+       "reason": null
+      },
+      "C": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "B+D+E": {
+       "accepted": true,
+       "reason": null
+      }
+     },
+     "selected_stage": "D",
+     "selected_accepted": false,
+     "selected_reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE",
+     "first_block": {
+      "label": "C",
+      "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE",
+      "text": "60일 상대강도 음수"
+     }
+    },
+    {
+     "ticker": "041510",
+     "signal_date": "2025-07-21",
+     "market_regime": "RISK_ON",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 1,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": false,
+       "reason": "PERIODIC_REPORT_TOO_RECENT"
+      },
+      "C": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "B+D+E": {
+       "accepted": false,
+       "reason": "PERIODIC_REPORT_TOO_RECENT"
+      }
+     },
+     "selected_stage": "D",
+     "selected_accepted": false,
+     "selected_reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE",
+     "first_block": {
+      "label": "B+D",
+      "reason": "PERIODIC_REPORT_TOO_RECENT",
+      "text": "정기보고서 제출 후 대기 거래일 미달"
+     }
+    },
+    {
+     "ticker": "058470",
+     "signal_date": "2025-07-08",
+     "market_regime": "RISK_ON",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 37,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": true,
+       "reason": null
+      },
+      "C": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "B+D+E": {
+       "accepted": true,
+       "reason": null
+      }
+     },
+     "selected_stage": "D",
+     "selected_accepted": false,
+     "selected_reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE",
+     "first_block": {
+      "label": "C",
+      "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE",
+      "text": "60일 상대강도 음수"
+     }
+    },
+    {
+     "ticker": "178320",
+     "signal_date": "2024-04-12",
+     "market_regime": "RISK_OFF",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 15,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": false,
+       "reason": "MARKET_REGIME_RISK_OFF"
+      },
+      "B+D": {
+       "accepted": false,
+       "reason": "MARKET_REGIME_RISK_OFF"
+      },
+      "C": {
+       "accepted": false,
+       "reason": "MARKET_REGIME_RISK_OFF"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "MARKET_REGIME_RISK_OFF"
+      },
+      "B+D+E": {
+       "accepted": false,
+       "reason": "MARKET_REGIME_RISK_OFF"
+      }
+     },
+     "selected_stage": "D",
+     "selected_accepted": false,
+     "selected_reason": "MARKET_REGIME_RISK_OFF",
+     "first_block": {
+      "label": "B",
+      "reason": "MARKET_REGIME_RISK_OFF",
+      "text": "시장 위험국면(RISK_OFF) — 신규 진입 차단"
+     }
+    },
+    {
+     "ticker": "030530",
+     "signal_date": "2024-04-04",
+     "market_regime": "RISK_ON",
+     "disclosure_bad_60d": 3,
+     "disclosure_periodic_days_since": 10,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": false,
+       "reason": "BAD_TITLE_WITHIN_60_DAYS"
+      },
+      "C": {
+       "accepted": true,
+       "reason": null
+      },
+      "D": {
+       "accepted": false,
+       "reason": "BAD_TITLE_WITHIN_60_DAYS"
+      },
+      "B+D+E": {
+       "accepted": false,
+       "reason": "BAD_TITLE_WITHIN_60_DAYS"
+      }
+     },
+     "selected_stage": "D",
+     "selected_accepted": false,
+     "selected_reason": "BAD_TITLE_WITHIN_60_DAYS",
+     "first_block": {
+      "label": "B+D",
+      "reason": "BAD_TITLE_WITHIN_60_DAYS",
+      "text": "60거래일 내 악성 공시"
+     }
+    },
+    {
+     "ticker": "357780",
+     "signal_date": "2024-01-24",
+     "market_regime": "RISK_OFF",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 48,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": false,
+       "reason": "MARKET_REGIME_RISK_OFF"
+      },
+      "B+D": {
+       "accepted": false,
+       "reason": "MARKET_REGIME_RISK_OFF"
+      },
+      "C": {
+       "accepted": false,
+       "reason": "MARKET_REGIME_RISK_OFF"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "MARKET_REGIME_RISK_OFF"
+      },
+      "B+D+E": {
+       "accepted": false,
+       "reason": "MARKET_REGIME_RISK_OFF"
+      }
+     },
+     "selected_stage": "D",
+     "selected_accepted": false,
+     "selected_reason": "MARKET_REGIME_RISK_OFF",
+     "first_block": {
+      "label": "B",
+      "reason": "MARKET_REGIME_RISK_OFF",
+      "text": "시장 위험국면(RISK_OFF) — 신규 진입 차단"
+     }
+    },
+    {
+     "ticker": "145020",
+     "signal_date": "2024-01-02",
+     "market_regime": "RISK_ON",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 32,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": true,
+       "reason": null
+      },
+      "C": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "D": {
+       "accepted": false,
+       "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE"
+      },
+      "B+D+E": {
+       "accepted": true,
+       "reason": null
+      }
+     },
+     "selected_stage": "D",
+     "selected_accepted": false,
+     "selected_reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE",
+     "first_block": {
+      "label": "C",
+      "reason": "RELATIVE_STRENGTH_60D_NOT_POSITIVE",
+      "text": "60일 상대강도 음수"
+     }
+    },
+    {
+     "ticker": "145020",
+     "signal_date": "2023-12-14",
+     "market_regime": "NEUTRAL",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 22,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": true,
+       "reason": null
+      },
+      "C": {
+       "accepted": true,
+       "reason": null
+      },
+      "D": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D+E": {
+       "accepted": true,
+       "reason": null
+      }
+     },
+     "selected_stage": "D",
+     "selected_accepted": true,
+     "selected_reason": null,
+     "first_block": null
+    },
+    {
+     "ticker": "222800",
+     "signal_date": "2023-10-17",
+     "market_regime": "NEUTRAL",
+     "disclosure_bad_60d": 0,
+     "disclosure_periodic_days_since": 41,
+     "stages": {
+      "A": {
+       "accepted": true,
+       "reason": null
+      },
+      "B": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D": {
+       "accepted": true,
+       "reason": null
+      },
+      "C": {
+       "accepted": true,
+       "reason": null
+      },
+      "D": {
+       "accepted": true,
+       "reason": null
+      },
+      "B+D+E": {
+       "accepted": false,
+       "reason": "EARNINGS_THRESHOLD_NOT_MET"
+      }
+     },
+     "selected_stage": "D",
+     "selected_accepted": true,
+     "selected_reason": null,
+     "first_block": null
+    }
+   ],
+   "legacy_variant": "trend_pullback_balanced",
+   "stage_params": {
+    "A": {
+     "stage": "legacy_only",
+     "status": "EVALUATED",
+     "params": {},
+     "earnings_thresholds": null
+    },
+    "B": {
+     "stage": "legacy_risk_off_hard_gate",
+     "status": "EVALUATED",
+     "params": {
+      "rule": "(cohort index below MA200 and realized volatility ratio > 1.2) OR VIX 250-observation expanding percentile > 0.80 OR USD/KRW 20-day change > +3%."
+     },
+     "earnings_thresholds": null
+    },
+    "B+D": {
+     "stage": "legacy_risk_off_disclosure",
+     "status": "EVALUATED",
+     "params": {
+      "disclosure_bad_60d_max": 1,
+      "disclosure_periodic_days_since_floor": 20
+     },
+     "earnings_thresholds": null
+    },
+    "C": {
+     "stage": "legacy_risk_off_trend_filter",
+     "status": "EVALUATED",
+     "params": {
+      "market_ma200_gap_min_pct": 0.0,
+      "stock_ma200_gap_gt_pct": 0,
+      "relative_strength_60d_gt_pct": 0,
+      "volatility_cap_quantile": "p90",
+      "volatility_cap_pct": 2.789189800252177
+     },
+     "earnings_thresholds": null
+    },
+    "D": {
+     "stage": "legacy_risk_off_trend_disclosure",
+     "status": "EVALUATED",
+     "params": {
+      "market_ma200_gap_min_pct": 0.0,
+      "stock_ma200_gap_gt_pct": 0,
+      "relative_strength_60d_gt_pct": 0,
+      "volatility_cap_quantile": "p90",
+      "volatility_cap_pct": 2.789189800252177,
+      "disclosure_bad_60d_max": 1,
+      "disclosure_periodic_days_since_floor": 0
+     },
+     "earnings_thresholds": null
+    },
+    "B+D+E": {
+     "stage": "legacy_risk_off_disclosure_earnings",
+     "status": "EVALUATED",
+     "params": {
+      "disclosure_bad_60d_max": 1,
+      "disclosure_periodic_days_since_floor": 20,
+      "earnings_momentum_min": 0,
+      "op_yoy_min": null,
+      "opm_min": null
+     },
+     "earnings_thresholds": {
+      "earnings_momentum_min": 0,
+      "op_yoy_min": null,
+      "opm_min": null
+     }
+    }
+   },
+   "instruments": [
+    {
+     "ticker": "196170",
+     "name": "알테오젠"
+    },
+    {
+     "ticker": "247540",
+     "name": "에코프로비엠"
+    },
+    {
+     "ticker": "086520",
+     "name": "에코프로"
+    },
+    {
+     "ticker": "277810",
+     "name": "레인보우로보틱스"
+    },
+    {
+     "ticker": "036930",
+     "name": "주성엔지니어링"
+    },
+    {
+     "ticker": "222800",
+     "name": "심텍"
+    },
+    {
+     "ticker": "039030",
+     "name": "이오테크닉스"
+    },
+    {
+     "ticker": "028300",
+     "name": "HLB"
+    },
+    {
+     "ticker": "108490",
+     "name": "로보티즈"
+    },
+    {
+     "ticker": "058470",
+     "name": "리노공업"
+    },
+    {
+     "ticker": "000250",
+     "name": "삼천당제약"
+    },
+    {
+     "ticker": "240810",
+     "name": "원익IPS"
+    },
+    {
+     "ticker": "403870",
+     "name": "HPSP"
+    },
+    {
+     "ticker": "214450",
+     "name": "파마리서치"
+    },
+    {
+     "ticker": "095340",
+     "name": "ISC"
+    },
+    {
+     "ticker": "031980",
+     "name": "피에스케이홀딩스"
+    },
+    {
+     "ticker": "145020",
+     "name": "휴젤"
+    },
+    {
+     "ticker": "030530",
+     "name": "원익홀딩스"
+    },
+    {
+     "ticker": "319660",
+     "name": "피에스케이"
+    },
+    {
+     "ticker": "041510",
+     "name": "에스엠"
+    },
+    {
+     "ticker": "010170",
+     "name": "대한광통신"
+    },
+    {
+     "ticker": "087010",
+     "name": "펩트론"
+    },
+    {
+     "ticker": "298380",
+     "name": "에이비엘바이오"
+    },
+    {
+     "ticker": "131290",
+     "name": "티에스이"
+    },
+    {
+     "ticker": "310210",
+     "name": "보로노이"
+    },
+    {
+     "ticker": "141080",
+     "name": "리가켐바이오"
+    },
+    {
+     "ticker": "140410",
+     "name": "메지온"
+    },
+    {
+     "ticker": "178320",
+     "name": "서진시스템"
+    },
+    {
+     "ticker": "064760",
+     "name": "티씨케이"
+    },
+    {
+     "ticker": "357780",
+     "name": "솔브레인"
+    }
+   ]
+  },
+  "TIGER_ETF": {
+   "selected_policy": {
+    "stage": "legacy_only",
+    "label": "A",
+    "status": "EVALUATED",
+    "params": {},
+    "earnings_thresholds": null,
+    "stage_definition": null,
+    "periods": {
+     "development": {
+      "trades": 0,
+      "win_rate_pct": null,
+      "mean_net_pct": null,
+      "profit_factor": null,
+      "max_drawdown_pct": null,
+      "max_drawdown_sequence_pct": null,
+      "coverage_pct": 0.0,
+      "traded_symbols": 0,
+      "requested_symbols": 2,
+      "small_sample": false,
+      "earnings_gate_status_counts": null,
+      "max_drawdown_portfolio_5_equal_pct": 0.0
+     },
+     "validation": {
+      "trades": 0,
+      "win_rate_pct": null,
+      "mean_net_pct": null,
+      "profit_factor": null,
+      "max_drawdown_pct": null,
+      "max_drawdown_sequence_pct": null,
+      "coverage_pct": 0.0,
+      "traded_symbols": 0,
+      "requested_symbols": 2,
+      "small_sample": true,
+      "earnings_gate_status_counts": null,
+      "max_drawdown_portfolio_5_equal_pct": 0.0
+     },
+     "diagnostic": {
+      "trades": 0,
+      "win_rate_pct": null,
+      "mean_net_pct": null,
+      "profit_factor": null,
+      "max_drawdown_pct": null,
+      "max_drawdown_sequence_pct": null,
+      "coverage_pct": 0.0,
+      "traded_symbols": 0,
+      "requested_symbols": 2,
+      "small_sample": false,
+      "earnings_gate_status_counts": null,
+      "max_drawdown_portfolio_5_equal_pct": 0.0
+     }
+    },
+    "earnings_coverage_pct": null,
+    "missing_feature_action": null
+   },
+   "recent_signal": {
+    "status": "NO_SIGNALS",
+    "window_days": null,
+    "window_start": null,
+    "latest_signal_date": null,
+    "signals_n": null,
+    "accepted_n_by_stage": {},
+    "gate_passed_n_by_stage": {},
+    "stage_status": {},
+    "dropped_by_disclosure": []
+   },
+   "signals": [],
+   "legacy_variant": null,
+   "stage_params": {
+    "A": {
+     "stage": "legacy_only",
+     "status": "EVALUATED",
+     "params": {},
+     "earnings_thresholds": null
+    },
+    "B": {
+     "stage": "legacy_risk_off_hard_gate",
+     "status": "EVALUATED",
+     "params": {
+      "rule": "(cohort index below MA200 and realized volatility ratio > 1.2) OR VIX 250-observation expanding percentile > 0.80 OR USD/KRW 20-day change > +3%."
+     },
+     "earnings_thresholds": null
+    },
+    "B+D": {
+     "stage": "legacy_risk_off_disclosure",
+     "status": "NOT_EVALUATED",
+     "params": null,
+     "earnings_thresholds": null
+    },
+    "C": {
+     "stage": "legacy_risk_off_trend_filter",
+     "status": "INSUFFICIENT_DEVELOPMENT_SAMPLE",
+     "params": null,
+     "earnings_thresholds": null
+    },
+    "D": {
+     "stage": "legacy_risk_off_trend_disclosure",
+     "status": "NOT_EVALUATED",
+     "params": null,
+     "earnings_thresholds": null
+    },
+    "B+D+E": {
+     "stage": "legacy_risk_off_disclosure_earnings",
+     "status": "UPSTREAM_DISCLOSURE_NOT_EVALUATED",
+     "params": null,
+     "earnings_thresholds": null
+    }
+   },
+   "instruments": [
+    {
+     "ticker": "472150",
+     "name": "TIGER 배당커버드콜액티브"
+    },
+    {
+     "ticker": "0262B0",
+     "name": "TIGER 200커버드콜액티브"
+    }
+   ]
+  },
+  "SOXL": {
+   "selected_policy": {
+    "stage": "legacy_only",
+    "label": "A",
+    "status": "EVALUATED",
+    "params": {},
+    "earnings_thresholds": null,
+    "stage_definition": null,
+    "periods": {
+     "development": {
+      "trades": 0,
+      "win_rate_pct": null,
+      "mean_net_pct": null,
+      "profit_factor": null,
+      "max_drawdown_pct": null,
+      "max_drawdown_sequence_pct": null,
+      "coverage_pct": 0.0,
+      "traded_symbols": 0,
+      "requested_symbols": 1,
+      "small_sample": false,
+      "earnings_gate_status_counts": null,
+      "max_drawdown_portfolio_5_equal_pct": 0.0
+     },
+     "validation": {
+      "trades": 0,
+      "win_rate_pct": null,
+      "mean_net_pct": null,
+      "profit_factor": null,
+      "max_drawdown_pct": null,
+      "max_drawdown_sequence_pct": null,
+      "coverage_pct": 0.0,
+      "traded_symbols": 0,
+      "requested_symbols": 1,
+      "small_sample": true,
+      "earnings_gate_status_counts": null,
+      "max_drawdown_portfolio_5_equal_pct": 0.0
+     },
+     "diagnostic": {
+      "trades": 0,
+      "win_rate_pct": null,
+      "mean_net_pct": null,
+      "profit_factor": null,
+      "max_drawdown_pct": null,
+      "max_drawdown_sequence_pct": null,
+      "coverage_pct": 0.0,
+      "traded_symbols": 0,
+      "requested_symbols": 1,
+      "small_sample": false,
+      "earnings_gate_status_counts": null,
+      "max_drawdown_portfolio_5_equal_pct": 0.0
+     }
+    },
+    "earnings_coverage_pct": null,
+    "missing_feature_action": null
+   },
+   "recent_signal": {
+    "status": "NO_SIGNALS",
+    "window_days": null,
+    "window_start": null,
+    "latest_signal_date": null,
+    "signals_n": null,
+    "accepted_n_by_stage": {},
+    "gate_passed_n_by_stage": {},
+    "stage_status": {},
+    "dropped_by_disclosure": []
+   },
+   "signals": [],
+   "legacy_variant": null,
+   "stage_params": {
+    "A": {
+     "stage": "legacy_only",
+     "status": "EVALUATED",
+     "params": {},
+     "earnings_thresholds": null
+    },
+    "B": {
+     "stage": "legacy_risk_off_hard_gate",
+     "status": "EVALUATED",
+     "params": {
+      "rule": "(cohort index below MA200 and realized volatility ratio > 1.2) OR VIX 250-observation expanding percentile > 0.80 OR USD/KRW 20-day change > +3%."
+     },
+     "earnings_thresholds": null
+    },
+    "B+D": {
+     "stage": "legacy_risk_off_disclosure",
+     "status": "NOT_EVALUATED",
+     "params": null,
+     "earnings_thresholds": null
+    },
+    "C": {
+     "stage": "legacy_risk_off_trend_filter",
+     "status": "INSUFFICIENT_DEVELOPMENT_SAMPLE",
+     "params": null,
+     "earnings_thresholds": null
+    },
+    "D": {
+     "stage": "legacy_risk_off_trend_disclosure",
+     "status": "NOT_EVALUATED",
+     "params": null,
+     "earnings_thresholds": null
+    },
+    "B+D+E": {
+     "stage": "legacy_risk_off_disclosure_earnings",
+     "status": "UPSTREAM_DISCLOSURE_NOT_EVALUATED",
+     "params": null,
+     "earnings_thresholds": null
+    }
+   },
+   "instruments": [
+    {
+     "ticker": "SOXL",
+     "name": "SOXL"
+    }
+   ]
+  }
+ },
+ "coverage": {
+  "disclosure": {
+   "KOSPI": {
+    "development": {
+     "features_n": 5,
+     "min_non_missing_pct": 100.0
+    },
+    "validation": {
+     "features_n": 5,
+     "min_non_missing_pct": 100.0
+    },
+    "diagnostic": {
+     "features_n": 5,
+     "min_non_missing_pct": 100.0
+    }
+   },
+   "KOSDAQ": {
+    "development": {
+     "features_n": 5,
+     "min_non_missing_pct": 100.0
+    },
+    "validation": {
+     "features_n": 5,
+     "min_non_missing_pct": 100.0
+    },
+    "diagnostic": {
+     "features_n": 5,
+     "min_non_missing_pct": 100.0
+    }
+   },
+   "TIGER_ETF": {
+    "development": {
+     "features_n": 5,
+     "min_non_missing_pct": 0.0
+    },
+    "validation": {
+     "features_n": 5,
+     "min_non_missing_pct": 0.0
+    },
+    "diagnostic": {
+     "features_n": 5,
+     "min_non_missing_pct": 0.0
+    }
+   },
+   "SOXL": {
+    "development": {
+     "features_n": 5,
+     "min_non_missing_pct": 0.0
+    },
+    "validation": {
+     "features_n": 5,
+     "min_non_missing_pct": 0.0
+    },
+    "diagnostic": {
+     "features_n": 5,
+     "min_non_missing_pct": 0.0
+    }
+   }
+  },
+  "earnings": {
+   "key_present": true,
+   "source": "OpenDART fnlttSinglAcntAll.json; CFS then OFS on status 013",
+   "used_fields": [
+    "rev_yoy_pct",
+    "op_yoy_pct",
+    "ni_yoy_pct",
+    "rev_qoq_pct",
+    "op_qoq_pct",
+    "opm_pct",
+    "opm_yoy_delta_pp",
+    "earnings_momentum"
+   ],
+   "collection": {
+    "requested_symbols_n": 60,
+    "attempted_symbols_n": 0,
+    "available_symbols_n": 60,
+    "total_requests_n": 0,
+    "budget_exhausted": false,
+    "cap_reached": false,
+    "request_limit": 6000,
+    "workers": 4
+   },
+   "cohorts": {
+    "KOSPI": {
+     "requested_symbols_n": 30,
+     "available_symbols_n": 30,
+     "coverage_pct": 100.0,
+     "missing_tickers": [],
+     "not_applicable_tickers": [],
+     "development_non_missing_pct": {
+      "opm_pct": 74.22,
+      "op_yoy_pct": 59.89,
+      "earnings_momentum": 62.74
+     }
+    },
+    "KOSDAQ": {
+     "requested_symbols_n": 30,
+     "available_symbols_n": 30,
+     "coverage_pct": 100.0,
+     "missing_tickers": [],
+     "not_applicable_tickers": [],
+     "development_non_missing_pct": {
+      "opm_pct": 94.02,
+      "op_yoy_pct": 61.77,
+      "earnings_momentum": 72.81
+     }
+    },
+    "TIGER_ETF": {
+     "requested_symbols_n": 0,
+     "available_symbols_n": 0,
+     "coverage_pct": null,
+     "missing_tickers": [],
+     "not_applicable_tickers": [
+      "472150",
+      "0262B0"
+     ],
+     "development_non_missing_pct": {
+      "opm_pct": 0.0,
+      "op_yoy_pct": 0.0,
+      "earnings_momentum": 0.0
+     }
+    },
+    "SOXL": {
+     "requested_symbols_n": 0,
+     "available_symbols_n": 0,
+     "coverage_pct": null,
+     "missing_tickers": [],
+     "not_applicable_tickers": [
+      "00SOXL"
+     ],
+     "development_non_missing_pct": {
+      "opm_pct": 0.0,
+      "op_yoy_pct": 0.0,
+      "earnings_momentum": 0.0
+     }
+    }
+   }
+  },
+  "slb": {
+   "source": "data.go.kr B552481/SlbSvc XML",
+   "backtest_status": "NOT_EVALUATED",
+   "reason": "The dealing endpoint exposes only the latest five trading days; rank is top-100 for one requested date and the API limit is 100 calls/day. No SLB value is imputed or used in historical backtests.",
+   "available_range": {
+    "dealing_first_date": "20261118",
+    "dealing_last_date": "20261124",
+    "dealing_observed_days_n": 5,
+    "rank_cached_dates": [
+     "20261125"
+    ]
+   },
+   "traffic_limit": {
+    "calls_per_day": 100,
+    "minimum_interval_seconds": 0.3
+   }
+  }
+ },
+ "direction3": {
+  "KOSPI": {
+   "development": {
+    "evaluation_rows_n": 10510,
+    "accuracy_pct": 35.0333,
+    "majority_class_baseline_accuracy_pct": 35.785,
+    "accuracy_delta_vs_majority_pp": -0.7517,
+    "multiclass_brier": 0.675,
+    "prior_brier": 0.6638,
+    "class_metrics": {
+     "UP": {
+      "precision_pct": 34.5371,
+      "recall_pct": 55.9426
+     },
+     "DOWN": {
+      "precision_pct": 35.074,
+      "recall_pct": 21.7544
+     },
+     "SIDEWAYS": {
+      "precision_pct": 36.4151,
+      "recall_pct": 25.3614
+     }
+    }
+   },
+   "validation": {
+    "evaluation_rows_n": 465,
+    "accuracy_pct": 49.8925,
+    "majority_class_baseline_accuracy_pct": 49.6774,
+    "accuracy_delta_vs_majority_pp": 0.2151,
+    "multiclass_brier": 0.6448,
+    "prior_brier": 0.6236,
+    "class_metrics": {
+     "UP": {
+      "precision_pct": 57.7049,
+      "recall_pct": 76.1905
+     },
+     "DOWN": {
+      "precision_pct": 21.9178,
+      "recall_pct": 16.1616
+     },
+     "SIDEWAYS": {
+      "precision_pct": 45.977,
+      "recall_pct": 29.6296
+     }
+    }
+   },
+   "diagnostic": {
+    "evaluation_rows_n": 651,
+    "accuracy_pct": 30.5684,
+    "majority_class_baseline_accuracy_pct": 41.6283,
+    "accuracy_delta_vs_majority_pp": -11.0599,
+    "multiclass_brier": 0.7287,
+    "prior_brier": 0.6563,
+    "class_metrics": {
+     "UP": {
+      "precision_pct": 29.8986,
+      "recall_pct": 94.6524
+     },
+     "DOWN": {
+      "precision_pct": 0.0,
+      "recall_pct": 0.0
+     },
+     "SIDEWAYS": {
+      "precision_pct": 37.2881,
+      "recall_pct": 11.399
+     }
+    }
+   }
+  },
+  "KOSDAQ": {
+   "development": {
+    "evaluation_rows_n": 9877,
+    "accuracy_pct": 36.6103,
+    "majority_class_baseline_accuracy_pct": 35.7295,
+    "accuracy_delta_vs_majority_pp": 0.8808,
+    "multiclass_brier": 0.669,
+    "prior_brier": 0.6649,
+    "class_metrics": {
+     "UP": {
+      "precision_pct": 36.4555,
+      "recall_pct": 41.9099
+     },
+     "DOWN": {
+      "precision_pct": 35.7175,
+      "recall_pct": 46.2947
+     },
+     "SIDEWAYS": {
+      "precision_pct": 39.7902,
+      "recall_pct": 19.2165
+     }
+    }
+   },
+   "validation": {
+    "evaluation_rows_n": 455,
+    "accuracy_pct": 45.4945,
+    "majority_class_baseline_accuracy_pct": 51.6484,
+    "accuracy_delta_vs_majority_pp": -6.1538,
+    "multiclass_brier": 0.6578,
+    "prior_brier": 0.6098,
+    "class_metrics": {
+     "UP": {
+      "precision_pct": 70.0,
+      "recall_pct": 38.7234
+     },
+     "DOWN": {
+      "precision_pct": 29.1339,
+      "recall_pct": 44.0476
+     },
+     "SIDEWAYS": {
+      "precision_pct": 39.899,
+      "recall_pct": 58.0882
+     }
+    }
+   },
+   "diagnostic": {
+    "evaluation_rows_n": 646,
+    "accuracy_pct": 29.8762,
+    "majority_class_baseline_accuracy_pct": 44.582,
+    "accuracy_delta_vs_majority_pp": -14.7059,
+    "multiclass_brier": 0.6769,
+    "prior_brier": 0.6476,
+    "class_metrics": {
+     "UP": {
+      "precision_pct": 27.7328,
+      "recall_pct": 78.7356
+     },
+     "DOWN": {
+      "precision_pct": 44.4444,
+      "recall_pct": 2.7778
+     },
+     "SIDEWAYS": {
+      "precision_pct": 35.8209,
+      "recall_pct": 26.087
+     }
+    }
+   }
+  },
+  "US": {
+   "development": {
+    "evaluation_rows_n": 308,
+    "accuracy_pct": 37.013,
+    "majority_class_baseline_accuracy_pct": 38.961,
+    "accuracy_delta_vs_majority_pp": -1.9481,
+    "multiclass_brier": 0.6622,
+    "prior_brier": 0.6617,
+    "class_metrics": {
+     "UP": {
+      "precision_pct": 42.0168,
+      "recall_pct": 41.6667
+     },
+     "DOWN": {
+      "precision_pct": 39.1304,
+      "recall_pct": 18.5567
+     },
+     "SIDEWAYS": {
+      "precision_pct": 32.1678,
+      "recall_pct": 50.5495
+     }
+    }
+   },
+   "validation": {
+    "evaluation_rows_n": 14,
+    "accuracy_pct": 35.7143,
+    "majority_class_baseline_accuracy_pct": 50.0,
+    "accuracy_delta_vs_majority_pp": -14.2857,
+    "multiclass_brier": 0.6441,
+    "prior_brier": 0.6224,
+    "class_metrics": {
+     "UP": {
+      "precision_pct": 50.0,
+      "recall_pct": 28.5714
+     },
+     "DOWN": {
+      "precision_pct": 0.0,
+      "recall_pct": 0.0
+     },
+     "SIDEWAYS": {
+      "precision_pct": 37.5,
+      "recall_pct": 75.0
+     }
+    }
+   },
+   "diagnostic": {
+    "evaluation_rows_n": 12,
+    "accuracy_pct": 41.6667,
+    "majority_class_baseline_accuracy_pct": 50.0,
+    "accuracy_delta_vs_majority_pp": -8.3333,
+    "multiclass_brier": 0.6721,
+    "prior_brier": 0.6111,
+    "class_metrics": {
+     "UP": {
+      "precision_pct": 100.0,
+      "recall_pct": 33.3333
+     },
+     "DOWN": {
+      "precision_pct": 50.0,
+      "recall_pct": 50.0
+     },
+     "SIDEWAYS": {
+      "precision_pct": 16.6667,
+      "recall_pct": 50.0
+     }
+    }
+   }
+  }
+ },
+ "earnings_ablation": {
+  "KOSPI": {
+   "status": "EVALUATED_SAME_MODEL_TARGET_AND_SHARED_ROWS",
+   "target_variant": "pooled",
+   "delta_plus_earnings_minus_plus_flow": {
+    "development": {
+     "mean_net_pct": 0.0,
+     "rank_spearman_datewise": -0.0022,
+     "rank_spearman_pooled": -0.0012,
+     "auroc": 0.0005,
+     "brier": -0.0,
+     "ece": -0.0053
+    },
+    "validation": {
+     "mean_net_pct": 0.0,
+     "rank_spearman_datewise": 0.0,
+     "rank_spearman_pooled": 0.0,
+     "auroc": 0.0,
+     "brier": 0.0,
+     "ece": -0.0001
+    },
+    "diagnostic": {
+     "mean_net_pct": 0.0,
+     "rank_spearman_datewise": 0.1193,
+     "rank_spearman_pooled": 0.0181,
+     "auroc": 0.001,
+     "brier": 0.0,
+     "ece": 0.0001
+    }
+   }
+  },
+  "KOSDAQ": {
+   "status": "EVALUATED_SAME_MODEL_TARGET_AND_SHARED_ROWS",
+   "target_variant": "pooled",
+   "delta_plus_earnings_minus_plus_flow": {
+    "development": {
+     "mean_net_pct": 0.0,
+     "rank_spearman_datewise": -0.0082,
+     "rank_spearman_pooled": -0.0048,
+     "auroc": 0.0002,
+     "brier": -0.0001,
+     "ece": -0.0053
+    },
+    "validation": {
+     "mean_net_pct": 0.0,
+     "rank_spearman_datewise": -0.0837,
+     "rank_spearman_pooled": 0.0187,
+     "auroc": 0.0049,
+     "brier": -0.0001,
+     "ece": 0.0002
+    },
+    "diagnostic": {
+     "mean_net_pct": 0.0,
+     "rank_spearman_datewise": 0.022,
+     "rank_spearman_pooled": 0.0012,
+     "auroc": 0.011,
+     "brier": -0.0008,
+     "ece": -0.002
+    }
+   }
+  }
+ },
+ "universe_note": {
+  "policy_evaluated": "selected_policy",
+  "benchmark_unchanged": true,
+  "selection_rule": {
+   "liquidity_rank": "descending median daily close×volume, development only; ticker ascending ties",
+   "eligibility": {
+    "development_window_start": "2015-12-01",
+    "development_end_exclusive": "2025-11-01",
+    "data_completeness_pct_min": 95.0,
+    "first_development_bar_before": "2016-01-05",
+    "minimum_development_bars": 200
+   },
+   "universe_sizes_per_korean_cohort": [
+    10,
+    20,
+    30
+   ],
+   "etf_soxl_always_retained": true,
+   "policy": "policy selected_policy trades of the 63-symbol benchmark, filtered per subset; no refitting, no selection on validation/diagnostic"
+  }
+ },
+ "notes": [
+  "SLB(공매도 잔고)는 백테스트에 반영되지 않았습니다: NOT_EVALUATED",
+  "코스피: 실적 피처를 더해도 3방향 모델 성능 변화가 사실상 없습니다(Brier·AUROC 차이 < 0.001/0.01).",
+  "코스닥: 실적 피처를 더해도 3방향 모델 성능 변화가 사실상 없습니다(Brier·AUROC 차이 < 0.001/0.01).",
+  "코스피: 선택 정책 검증 거래가 6건뿐이라 검증 성과를 확정으로 보지 않습니다.",
+  "코스닥: 선택 정책 검증 거래가 0건뿐이라 검증 성과를 확정으로 보지 않습니다.",
+  "TIGER ETF: 선택 정책 검증 거래가 0건뿐이라 검증 성과를 확정으로 보지 않습니다.",
+  "SOXL: 선택 정책 검증 거래가 0건뿐이라 검증 성과를 확정으로 보지 않습니다.",
+  "모든 수치는 이미 열람한 과거 구간의 연구 적합도이며 미래 승률 보장이 아닙니다."
+ ]
+}
