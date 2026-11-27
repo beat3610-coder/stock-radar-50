@@ -7,12 +7,13 @@ import numpy as np
 import pandas as pd
 
 from expanded_direction_audit import (
-    FEATURES, FLOW_FEATURES, MIN_DEVELOPMENT_IC, MODEL_KINDS, REFIT_MONTH, _collect_extended_pool_flows,
-    _comparison_fit_spec, _edge_label_status, _features, _flow_ablation_metadata,
-    _make_rows, _mandatory_market_items, _metrics,
-    _trade_perf, direction_label, _freeze_volatility_labels, _fit_temperature,
-    _model, _training_rows_for, _selection_rows_for, _refit_anchor, _causal_prior_baseline,
-    _probability_skill, BandRegressionModel,
+    FEATURES, FLOW_FEATURES, MIN_DEVELOPMENT_IC, MODEL_KINDS, PRIOR_SHRINKAGE_WINDOW_DAYS,
+    REFIT_MONTH, _apply_prior_mix, _beats_causal_prior_on_development, _causal_class_priors,
+    _collect_extended_pool_flows, _comparison_fit_spec, _edge_label_status, _features,
+    _fit_calibration, _flow_ablation_metadata, _make_rows, _mandatory_market_items, _metrics,
+    _prior_corrected_decisions, _trade_perf, direction_label, _freeze_volatility_labels,
+    _fit_temperature, _band_z, _band_pct, _model, _training_rows_for, _selection_rows_for,
+    _refit_anchor, _causal_prior_baseline, _probability_skill, BandRegressionModel,
 )
 from providers import get_historical_investor_flows
 from universe import MANDATORY_KR, MANDATORY_US, AUDIT_63_BENCHMARK
@@ -323,6 +324,97 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
         self.assertEqual(first["label_available_date"],str(dates[205].date()))
         self.assertEqual(first["exit_date"],first["label_available_date"])
         self.assertEqual({r["horizon"] for r in rows},{5,10,20})
+
+    def test_causal_priors_only_use_labels_observable_before_each_signal(self):
+        train=[{"label_vol":"UP","label_available_date":"2025-12-01"} for _ in range(40)]
+        train+=[{"label_vol":"DOWN","label_available_date":"2026-05-10"} for _ in range(40)]
+        early=[{"signal_date":"2026-04-01"}]
+        late=[{"signal_date":"2026-06-01"}]
+        early_prior=_causal_class_priors(train,early)[0]
+        late_prior=_causal_class_priors(train,late)[0]
+        self.assertAlmostEqual(early_prior[2],1.0)
+        # A label maturing after the signal date (or on the same day) must not leak in.
+        self.assertAlmostEqual(late_prior[0],40/80,places=6)
+        same_day=[{"signal_date":"2026-05-10"}]
+        self.assertAlmostEqual(_causal_class_priors(train,same_day)[0][2],1.0)
+        self.assertEqual(PRIOR_SHRINKAGE_WINDOW_DAYS,250)
+
+    def test_prior_mix_and_class_balanced_decision_are_bounded(self):
+        probs=np.asarray([[.6,.3,.1],[.2,.5,.3],[.1,.2,.7]])
+        priors=np.asarray([[.3,.4,.3]]*3)
+        self.assertTrue(np.allclose(_apply_prior_mix(probs,priors,0.),probs))
+        mixed=_apply_prior_mix(probs,priors,1.)
+        self.assertTrue(np.allclose(mixed,priors))
+        np.testing.assert_allclose(mixed.sum(axis=1),1.0)
+        self.assertTrue(np.array_equal(_prior_corrected_decisions(probs,priors,0.),probs.argmax(axis=1)))
+        # A rare class the prior does not expect can win once tau > 0.
+        skewed=np.asarray([[.36,.34,.30]])
+        rare=np.asarray([[.40,.40,.20]])
+        self.assertEqual(int(_prior_corrected_decisions(skewed,rare,0.)[0]),0)
+        # Dividing by the causal prior lifts the class the prior does not expect.
+        self.assertEqual(int(_prior_corrected_decisions(skewed,rare,1.)[0]),2)
+
+    def test_calibration_is_fitted_on_development_and_reports_its_scope(self):
+        rng=np.random.default_rng(11); rows=[];probs=[]
+        names=("DOWN","SIDEWAYS","UP")
+        for i in range(600):
+            truth=names[i%3];rows.append({"label_vol":truth})
+            sharp=np.zeros(3);sharp[i%3]=.8;sharp[(i+1)%3]=.15;sharp[(i+2)%3]=.05
+            probs.append(sharp)
+        priors=np.tile([1/3,1/3,1/3],(600,1))
+        report=_fit_calibration(rows,np.asarray(probs),priors)
+        self.assertEqual(report["fit_n"],600)
+        self.assertGreaterEqual(report["prior_mix"],0.);self.assertLessEqual(report["prior_mix"],1.)
+        self.assertIn(report["decision_tau"],[0.,0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5])
+        self.assertEqual(report["prior_window_days"],PRIOR_SHRINKAGE_WINDOW_DAYS)
+        self.assertIn("development_brier_after_prior_mix",report)
+
+    def test_winsor_and_normalised_band_models_use_the_frozen_band(self):
+        rng=np.random.default_rng(3);rows=[]
+        for i in range(500):
+            x=float(rng.normal());z=1.2*x+float(rng.normal())*.8
+            rows.append({"x":x,"z":z})
+        X=np.asarray([[r["x"]] for r in rows]);z=np.asarray([r["z"] for r in rows])
+        for kind in ("band_winsor","band_z"):
+            model=_model(kind).fit(X,z)
+            probs=model.predict_proba(np.asarray([[-2.],[0.],[2.]]),np.asarray([1.6,1.6,1.6]))
+            self.assertEqual(probs.shape,(3,3))
+            np.testing.assert_allclose(probs.sum(axis=1),1.0)
+            self.assertGreater(probs[2,2],probs[0,2])
+        self.assertIn("band_winsor",MODEL_KINDS);self.assertIn("band_z",MODEL_KINDS)
+        self.assertAlmostEqual(_band_z({"label_vol_band_pct":3.0,"volatility_unit_pct":1.5}),2.0)
+        self.assertEqual(_band_pct({"label_vol_band_pct":-3.0}),3.0)
+
+    def test_development_selection_requires_beating_the_causal_prior(self):
+        strong={"metrics":{"datewise_spearman_mean":.02,
+            "class_balanced_decision":{"accuracy_pct":37.0},
+            "probability_skill":{"causal_prior_accuracy_pct":36.0}}}
+        weak={"metrics":{"datewise_spearman_mean":.02,
+            "class_balanced_decision":{"accuracy_pct":35.9},
+            "probability_skill":{"causal_prior_accuracy_pct":36.0}}}
+        negative={"metrics":{"datewise_spearman_mean":-.01,
+            "class_balanced_decision":{"accuracy_pct":40.0},
+            "probability_skill":{"causal_prior_accuracy_pct":36.0}}}
+        self.assertTrue(_beats_causal_prior_on_development(strong))
+        self.assertFalse(_beats_causal_prior_on_development(weak))
+        self.assertFalse(_beats_causal_prior_on_development(negative))
+
+    def test_three_way_report_exposes_causal_prior_and_plain_argmax(self):
+        from audit_63_fast import _three_way_report
+        samples=[]
+        for i in range(30):
+            label="DOWN" if i<15 else "UP"
+            samples.append({"label":label,"prediction":"UP" if i<10 else ("DOWN" if i<15 else "UP"),
+                "argmax_prediction":"UP",
+                "probabilities":{"UP":.5,"DOWN":.3,"SIDEWAYS":.2},
+                "causal_prior":{"UP":.3,"DOWN":.4,"SIDEWAYS":.3}})
+        report=_three_way_report(samples)
+        self.assertIn("causal_prior_brier",report)
+        self.assertIn("brier_skill_vs_causal_prior",report)
+        self.assertEqual(report["causal_prior_accuracy_pct"],50.0)
+        self.assertEqual(report["plain_argmax_decision"]["predicted_counts"]["UP"],30)
+        self.assertIn(report["causal_probability_edge_status"],
+                      ("PROBABILITY_SKILL_PRESENT_VS_CAUSAL_PRIOR","NO_DEMONSTRATED_EDGE_WORSE_THAN_CAUSAL_PRIOR"))
 
 
 if __name__ == "__main__":

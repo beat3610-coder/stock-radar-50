@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, timedelta
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -39,8 +40,15 @@ SAMPLE_START="2016-01-01"; COST_PCT=.35; THETAS=(.3,.5,1.0)
 HORIZONS=(5,10,20); MIN_TRAIN=500; REFIT_MONTH=24; SIGNAL_STEP=5
 # band_regression maps a predicted volatility-scaled return through the same band
 # that defines the label, so it uses magnitudes rather than only the class label.
-MODEL_KINDS=("multinomial_logistic","random_forest","band_regression")
+# band_winsor clips the regression target at development tails and band_z regresses
+# the volatility-normalised return, so neither is dominated by extreme moves.
+MODEL_KINDS=("multinomial_logistic","random_forest","band_regression","band_winsor","band_z")
 CAUSAL_PRIOR_WINDOW_DAYS=365
+# Shrinkage target for probability calibration: class frequencies of labels that
+# were already observable before each signal date (chosen on development only).
+PRIOR_SHRINKAGE_WINDOW_DAYS=250
+MIN_PRIOR_ROWS=30
+DECISION_TAU_GRID=(0.,.05,.1,.15,.2,.25,.3,.35,.4,.45,.5,.55,.6,.65,.7,.75,.8,.85,.9,.95,1.,1.05,1.1,1.15,1.2)
 SIDEWAYS_TARGET_SHARE=.30
 MIN_DEVELOPMENT_IC=.01
 SPREAD_CUTS=(.05,.10,.15); SIDEWAYS_MAX=(.25,.35,.45); EV_FLOORS=(0.0,.10,.20)
@@ -123,6 +131,24 @@ def korean_flow_targets(universe):
             targets.append({"ticker":code,"name":str(name),"cohort":cohort,"market":market})
             seen.add(code)
     return targets
+
+def _development_accuracy(development_result):
+    """Three-way accuracy of the development-calibrated decision rule."""
+    metrics=(development_result or {}).get("metrics") or {}
+    decision=metrics.get("class_balanced_decision") or {}
+    value=decision.get("accuracy_pct")
+    return float(value) if value is not None else None
+
+def _beats_causal_prior_on_development(development_result):
+    """Model must beat the causal prior on development accuracy AND on IC sign."""
+    metrics=(development_result or {}).get("metrics") or {}
+    if not (metrics.get("datewise_spearman_mean") or 0)>0:
+        return False
+    accuracy=_development_accuracy(development_result)
+    causal=(metrics.get("probability_skill") or {}).get("causal_prior_accuracy_pct")
+    if accuracy is None or causal is None:
+        return False
+    return accuracy>=float(causal)
 
 def _edge_label_status(model_selected,chosen_ic):
     if not model_selected:
@@ -368,18 +394,39 @@ class BandRegressionModel:
 
     The audit's SIDEWAYS band is ``k * signal-day volatility`` and is known at
     the signal close, so a predicted return ``mu`` with residual scale ``sigma``
-    gives P(UP)=1-Phi((band-mu)/sigma) and P(DOWN)=Phi((-band-mu)/sigma).
+    gives P(UP)=1-Phi((band-mu)/sigma) then P(DOWN)=Phi((-band-mu)/sigma).
     Uses return magnitudes instead of only the discrete class label.
+
+    ``winsor`` clips the training target at its own lower/upper percentiles (fit
+    on the same past-only rows) and ``normalise`` divides the target by the
+    signal-day volatility unit, so a single extreme move cannot dominate the
+    fit; ``scale="mad"`` replaces the residual std with a robust MAD estimate.
     """
     classes_=np.asarray([0,1,2])
-    def __init__(self,alpha=1.0):
-        self.alpha=float(alpha)
+    def __init__(self,alpha=1.0,winsor=None,normalise=False,scale="std",huber=False):
+        self.alpha=float(alpha);self.winsor=winsor;self.normalise=bool(normalise)
+        self.scale=scale;self.huber=bool(huber)
+        from sklearn.linear_model import HuberRegressor
+        estimator=(HuberRegressor(epsilon=1.35,alpha=max(self.alpha,1e-4),max_iter=500)
+                   if self.huber else Ridge(alpha=self.alpha))
         self.routine=make_pipeline(SimpleImputer(strategy="constant",fill_value=0),
-                                   StandardScaler(),Ridge(alpha=self.alpha))
+                                   StandardScaler(),estimator)
     def fit(self,X,y):
-        self.routine.fit(X,np.asarray(y,dtype=float))
-        residual=np.asarray(y,dtype=float)-self.routine.predict(X)
-        self.sigma=float(max(np.std(residual),1e-6))
+        y=np.asarray(y,dtype=float)
+        if self.winsor is not None:
+            lower,upper=np.nanpercentile(y,self.winsor)
+            y=np.clip(y,lower,upper);self.winsor_bounds=(float(lower),float(upper))
+        try:
+            self.routine.fit(X,y)
+        except Exception:
+            self.routine=make_pipeline(SimpleImputer(strategy="constant",fill_value=0),
+                                       StandardScaler(),Ridge(alpha=max(self.alpha,1e-6))).fit(X,y)
+        residual=y-self.routine.predict(X)
+        if self.scale=="mad":
+            mad=float(np.median(np.abs(residual-np.median(residual))))*1.4826
+            self.sigma=float(max(mad,np.std(residual)*.25,1e-6))
+        else:
+            self.sigma=float(max(np.std(residual),1e-6))
         return self
     def predict_proba(self,X,band=None):
         from scipy.stats import norm
@@ -395,9 +442,23 @@ def _band_pct(row):
     """SIDEWAYS band in net-return percentage points, known at the signal close."""
     return abs(float(row.get("label_vol_band_pct",0.) or 0.))
 
+def _volatility_unit(row):
+    value=float(row.get("volatility_unit_pct",0.) or 0.)
+    return value if np.isfinite(value) and value>1e-9 else 1e-9
+
+def _band_z(row):
+    """SIDEWAYS band in volatility units (== cohort k) for normalised targets."""
+    return _band_pct(row)/_volatility_unit(row)
+
 def _model(kind):
     if kind=="band_regression":
         return BandRegressionModel()
+    if kind=="band_winsor":
+        return BandRegressionModel(winsor=(1.,99.),scale="mad")
+    if kind=="band_huber":
+        return BandRegressionModel(huber=True,scale="mad")
+    if kind=="band_z":
+        return BandRegressionModel(normalise=True,winsor=(1.,99.),scale="mad")
     if kind=="multinomial_logistic":
         return make_pipeline(SimpleImputer(strategy="constant",fill_value=0),StandardScaler(),
              LogisticRegression(C=.15,max_iter=300,class_weight=None,random_state=3610))
@@ -450,6 +511,106 @@ def _fit_temperature(rows,probs,label_key="label_vol"):
 def _choose_development_k(rows):
     """Compatibility alias for callers/tests; returns frozen cohort settings."""
     return _freeze_volatility_labels(rows)
+
+def _causal_class_priors(all_train,eval_rows,window_days=PRIOR_SHRINKAGE_WINDOW_DAYS):
+    """Per-signal-date class prior from labels already observable at that date.
+
+    Only labels with ``label_available_date`` strictly before the signal date are
+    counted, so the prior can be computed live. The window is a choice made on
+    development rows only; when the window holds fewer than MIN_PRIOR_ROWS
+    labels the expanding history before the signal date is used, and only when
+    that is also too small does the prior fall back to uniform.
+    """
+    names=("DOWN","SIDEWAYS","UP")
+    labelled=[r for r in all_train if r.get("label_vol") in names]
+    if not labelled or not eval_rows:
+        return np.full((len(eval_rows),3),1/3,dtype=float)
+    dates=np.asarray([r["label_available_date"] for r in labelled])
+    order=np.argsort(dates,kind="mergesort");dates=dates[order]
+    onehot=np.zeros((len(labelled),3),dtype=float)
+    for i,row in enumerate(labelled):
+        onehot[i,names.index(row["label_vol"])]=1.
+    cumulative=np.vstack([np.zeros(3),np.cumsum(onehot[order],axis=0)])
+    cache={};out=np.full((len(eval_rows),3),1/3,dtype=float)
+    for i,row in enumerate(eval_rows):
+        signal=str(row["signal_date"])
+        if signal not in cache:
+            floor=(date.fromisoformat(signal)-timedelta(days=int(window_days))).isoformat()
+            low=int(np.searchsorted(dates,floor,"left"));high=int(np.searchsorted(dates,signal,"left"))
+            counts=cumulative[high]-cumulative[low]
+            if counts.sum()<MIN_PRIOR_ROWS:
+                counts=cumulative[high]
+            cache[signal]=counts/counts.sum() if counts.sum()>0 else None
+        value=cache[signal]
+        if value is not None:
+            out[i]=value
+    return out
+
+def _multiclass_brier(rows,probs,label_key="label_vol"):
+    names=("DOWN","SIDEWAYS","UP")
+    y=np.asarray([names.index(r[label_key]) for r in rows],dtype=int)
+    actual=np.zeros((len(y),3),dtype=float);actual[np.arange(len(y)),y]=1.
+    return float(np.mean(np.sum((np.asarray(probs,dtype=float)-actual)**2,axis=1)))
+
+def _fit_prior_mix(rows,probs,priors):
+    """Weight on the causal prior that minimises development out-of-fold Brier."""
+    if len(rows)<100:return 0.
+    def objective(weight):
+        weight=float(min(max(weight,0.),1.))
+        return _multiclass_brier(rows,(1-weight)*np.asarray(probs,dtype=float)+weight*np.asarray(priors,dtype=float))
+    fit=minimize_scalar(objective,bounds=(0.,1.),method="bounded",options={"xatol":1e-4})
+    return float(min(max(fit.x,0.),1.))
+
+def _apply_prior_mix(probs,priors,weight):
+    weight=float(min(max(weight or 0.,0.),1.))
+    if weight<=0:
+        return np.asarray(probs,dtype=float)
+    mixed=(1-weight)*np.asarray(probs,dtype=float)+weight*np.asarray(priors,dtype=float)
+    return mixed/mixed.sum(axis=1,keepdims=True)
+
+def _prior_corrected_decisions(probs,priors,tau):
+    """Argmax of p/q^tau: a class-balanced decision under a prior shift.
+
+    tau=0 reproduces the plain probability argmax. A positive tau lowers classes
+    the causal prior already expects, so a rare class can still be chosen.
+    """
+    tau=float(tau or 0.)
+    if tau<=0:
+        return np.asarray(probs,dtype=float).argmax(axis=1)
+    adjusted=np.clip(np.asarray(probs,dtype=float),1e-9,1.)/\
+        np.power(np.clip(np.asarray(priors,dtype=float),1e-3,1.),tau)
+    return adjusted.argmax(axis=1)
+
+def _fit_decision_tau(rows,probs,priors):
+    """Decision threshold chosen on development accuracy only."""
+    names=("DOWN","SIDEWAYS","UP")
+    y=np.asarray([names.index(r["label_vol"]) for r in rows],dtype=int)
+    best=(-1.,0.)
+    for tau in DECISION_TAU_GRID:
+        accuracy=float(np.mean(_prior_corrected_decisions(probs,priors,tau)==y))
+        if accuracy>best[0]+1e-12:best=(accuracy,float(tau))
+    return best[1],best[0]
+
+def _fit_calibration(rows,probs,priors):
+    """Development-only temperature, prior shrinkage and decision threshold."""
+    base=_fit_temperature(rows,probs)
+    temperature=float(base.get("temperature",1.0))
+    scaled=_apply_temperature(probs,temperature)
+    weight=_fit_prior_mix(rows,scaled,priors)
+    mixed=_apply_prior_mix(scaled,priors,weight)
+    tau,accuracy=_fit_decision_tau(rows,mixed,priors)
+    result=dict(base)
+    result.update({"prior_mix":float(weight),"prior_window_days":PRIOR_SHRINKAGE_WINDOW_DAYS,
+        "decision_tau":float(tau),
+        "development_brier_before_prior_mix":_multiclass_brier(rows,scaled),
+        "development_brier_after_prior_mix":_multiclass_brier(rows,mixed),
+        "development_accuracy_argmax_pct":100*float(np.mean(mixed.argmax(axis=1)==
+            np.asarray([("DOWN","SIDEWAYS","UP").index(r["label_vol"]) for r in rows]))),
+        "development_accuracy_after_decision_pct":100*float(accuracy),
+        "scope":"development out-of-fold predictions only; applied unchanged to validation and diagnostic"})
+    if result.get("status")=="INSUFFICIENT_DEV_OOF_FOR_CALIBRATION":
+        result.update({"prior_mix":0.,"decision_tau":0.})
+    return result
 
 def _ece(y,p,klass):
     confidence=p[:,klass]; actual=(y==klass).astype(float); ece=0.; bins=[]
@@ -574,8 +735,13 @@ def _causal_prior_baseline(all_train,eval_rows,window_days=CAUSAL_PRIOR_WINDOW_D
         "class_distribution":counts,
         "label":"ROLLING_PRIOR_PLURALITY_BEFORE_EACH_REFIT_ANCHOR"}
 
-def _probability_skill(eval_rows,probs):
-    """Brier skill against the constant-prior forecast of the SAME evaluation period."""
+def _probability_skill(eval_rows,probs,priors=None):
+    """Brier skill against a constant-prior forecast of the SAME evaluation period.
+
+    ``priors`` (per-row causal class priors) adds the comparison a live system
+    can actually run: the period prior is an oracle that uses the block's own
+    labels, the causal prior uses only labels observable before each signal.
+    """
     names=("DOWN","SIDEWAYS","UP")
     if not len(eval_rows):return {"n":0,"model_brier":None,"period_prior_brier":None,"brier_skill":None}
     y=np.asarray([names.index(r["label_vol"]) for r in eval_rows],dtype=int)
@@ -584,9 +750,19 @@ def _probability_skill(eval_rows,probs):
     prior=np.bincount(y,minlength=3)/len(y)
     model_brier=float(np.mean(np.sum((p-actual)**2,axis=1)))
     prior_brier=float(np.mean(np.sum((np.broadcast_to(prior,actual.shape)-actual)**2,axis=1)))
-    return {"n":len(y),"model_brier":model_brier,"period_prior_brier":prior_brier,
+    out={"n":len(y),"model_brier":model_brier,"period_prior_brier":prior_brier,
         "brier_skill":prior_brier-model_brier,
         "label":"positive skill means the model beats a constant class-prior forecast of the same rows"}
+    if priors is not None and len(priors)==len(eval_rows):
+        causal=np.asarray(priors,dtype=float)
+        causal_brier=float(np.mean(np.sum((causal-actual)**2,axis=1)))
+        out.update({"causal_prior_brier":causal_brier,
+            "causal_prior_accuracy_pct":100*float(np.mean(causal.argmax(axis=1)==y)),
+            "brier_skill_vs_causal_prior":causal_brier-model_brier,
+            "causal_prior_label":"per-signal-date prior computed only from labels observable before each signal date",
+            "causal_probability_edge_status":("PROBABILITY_SKILL_PRESENT_VS_CAUSAL_PRIOR"
+                if model_brier<causal_brier else "NO_DEMONSTRATED_EDGE_WORSE_THAN_CAUSAL_PRIOR")})
+    return out
 
 def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,payoffs=None,
                     exclude_features=(),include_samples=False):
@@ -606,11 +782,16 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
         active=tuple(k for k in _active_features(past) if k not in set(exclude_features))
         if not active:continue
         Xpast=_features(past,active);Xeval=_features([eval_rows[i] for i in idx],active)
-        if kind=="band_regression":
+        if kind in ("band_regression","band_winsor","band_z"):
             model=_model(kind)
-            target=np.asarray([float(r["net_pct"]) for r in past])
+            if kind=="band_z":
+                target=np.asarray([float(r["net_pct"])/_volatility_unit(r) for r in past])
+                bands=np.asarray([_band_z(eval_rows[i]) for i in idx])
+            else:
+                target=np.asarray([float(r["net_pct"]) for r in past])
+                bands=np.asarray([_band_pct(eval_rows[i]) for i in idx])
             model.fit(Xpast,target)
-            p=model.predict_proba(Xeval,np.asarray([_band_pct(eval_rows[i]) for i in idx]))
+            p=model.predict_proba(Xeval,bands)
         else:
             model=_model(kind);model.fit(Xpast,np.asarray([classes.index(r["label_vol"]) for r in past]))
             raw=model.predict_proba(Xeval); cls=list(model.classes_)
@@ -629,9 +810,18 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
     eval_rows=[r for r,v in zip(eval_rows,valid) if v];probs=probs[valid];target_probs=target_probs[valid]
     if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None,"temperature":temperature_info}
     if period=="development" and temperature_info is None:
-        temperature_info=_fit_temperature(eval_rows,probs)
+        priors=_causal_class_priors(all_train,eval_rows)
+        temperature_info=_fit_calibration(eval_rows,probs,priors)
+    elif period=="development":
+        priors=_causal_class_priors(all_train,eval_rows)
+    else:
+        priors=_causal_class_priors(all_train,eval_rows)
     temperature=float((temperature_info or {}).get("temperature",1.0))
     probs=_apply_temperature(probs,temperature)
+    prior_mix=float((temperature_info or {}).get("prior_mix",0.) or 0.)
+    probs=_apply_prior_mix(probs,priors,prior_mix)
+    decision_tau=float((temperature_info or {}).get("decision_tau",0.) or 0.)
+    balanced_predictions=_prior_corrected_decisions(probs,priors,decision_tau)
     payoffs=payoffs or (_class_payoffs(eval_rows) if period=="development" else {"DOWN":-1.,"SIDEWAYS":0.,"UP":1.})
     theta_results={}
     for theta in THETAS:
@@ -643,7 +833,10 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
       "mean_predicted_probability_pct":100*float(target_probs.mean()),"brier":float(np.mean((target_probs-target_actual)**2))}
     vol_metrics["target_hit_probability"]=target_report
     vol_metrics["causal_prior_baseline"]=_causal_prior_baseline(all_train,eval_rows)
-    vol_metrics["probability_skill"]=_probability_skill(eval_rows,probs)
+    vol_metrics["probability_skill"]=_probability_skill(eval_rows,probs,priors)
+    vol_metrics["class_balanced_decision"]=_balanced_decision_report(eval_rows,balanced_predictions,priors,
+        decision_tau)
+    vol_metrics["plain_argmax_decision"]=_balanced_decision_report(eval_rows,probs.argmax(axis=1),priors,0.)
     policies=_policy_table(eval_rows,probs,payoffs)
     result={"n":len(eval_rows),"metrics":vol_metrics,"fixed_band_metrics":{k:v["metrics"] for k,v in theta_results.items()},
       "theta_results":theta_results,"buy_policy_candidates":policies,"buy_policy":None,
@@ -654,11 +847,39 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
         "p_sideways_p10_p50_p90":np.percentile(probs[:,1],[10,50,90]).tolist()}}
     if include_samples:
         result["evaluation_samples"]=[{"label":row["label_vol"],
-            "prediction":classes[int(np.argmax(prob))],
+            "prediction":classes[int(balanced)],
+            "argmax_prediction":classes[int(np.argmax(prob))],
             "probabilities":{"DOWN":float(prob[0]),"SIDEWAYS":float(prob[1]),"UP":float(prob[2])},
+            "causal_prior":{"DOWN":float(prior[0]),"SIDEWAYS":float(prior[1]),"UP":float(prior[2])},
             "earnings_momentum":row.get("earnings_momentum")}
-            for row,prob in zip(eval_rows,probs)]
+            for row,prob,prior,balanced in zip(eval_rows,probs,priors,balanced_predictions)]
     return result
+
+def _balanced_decision_report(rows,predictions,priors,tau):
+    """Argmax versus class-balanced decision on the SAME calibrated probabilities.
+
+    The plain argmax of a calibrated model can stay pinned to one class when its
+    class prior is skewed. The balanced rule divides by the causal prior so a
+    class the prior already expects has to clear a higher probability bar; it is
+    reported next to the argmax instead of replacing it, so the accuracy cost of
+    un-skewing the predictions stays visible.
+    """
+    names=("DOWN","SIDEWAYS","UP")
+    if not len(rows or []):
+        return {"n":0}
+    y=np.asarray([names.index(r["label_vol"]) for r in rows],dtype=int)
+    predictions=np.asarray(predictions,dtype=int)
+    out={"n":len(y),"tau":float(tau),"rule":"argmax(p / causal_prior**tau)",
+         "predicted_counts":{name:int(np.sum(predictions==j)) for j,name in enumerate(names)},
+         "accuracy_pct":100*float(np.mean(predictions==y)),
+         "class_metrics":{}}
+    for j,name in enumerate(names):
+        correct=int(np.sum((predictions==j)&(y==j)))
+        predicted=int(np.sum(predictions==j));actual=int(np.sum(y==j))
+        out["class_metrics"][name]={"predicted":predicted,"actual":actual,"correct":correct,
+            "precision_pct":100*correct/predicted if predicted else 0.,
+            "recall_pct":100*correct/actual if actual else 0.}
+    return out
 
 def _ablation_period_summary(result,policy_key):
     metrics=result.get("metrics") or {}
@@ -789,7 +1010,7 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
         "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC},
       "extended_pool_collection":extended_pool_collection,
       "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC,
-      "selection_rule":"Development-only walk-forward: select one model/horizon by mean datewise Spearman(P(UP), realized net return), requiring positive IC and at least 100 top-15% development candidates. Model grid covers multinomial logistic, random forest and band regression (predicted net return mapped through the frozen volatility band). Calibrate multiclass probabilities with development OOF temperature scaling. Select spread + sideways-probability + net expected-value policy on development only; all selected policy OOS results are reported.",
+      "selection_rule":"Development-only walk-forward: select one model/horizon by mean datewise Spearman(P(UP), realized net return), requiring positive IC, at least 100 top-15% development candidates, and development three-way accuracy at least the live-computable causal class prior. Model grid covers multinomial logistic, random forest, band regression (predicted net return mapped through the frozen volatility band), a winsorised/MAD variant and a volatility-normalised (z-return) variant. Calibrate multiclass probabilities on development OOF: temperature, shrinkage toward the per-signal-date causal class prior (weight fitted on development Brier), and a class-balanced decision threshold fitted on development accuracy. Select spread + sideways-probability + net expected-value policy on development only; all selected policy OOS results are reported.",
       "feature_coverage":{"feature_names":list(FEATURES),"fixed_centers":CENTERS,"fixed_scales":SCALES,"feature_count":len(FEATURES),"cross_section_count_key":"xs_count","constant_column_policy":"recomputed from each past-only training snapshot and excluded when std is zero"}}
     direction3_eval_samples_by_cohort={}
     for cohort,pool in bycohort.items():
@@ -830,7 +1051,12 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
             # gate below still prevents a buy policy from being selected.
             eligible_choices=[x for x in choices if x[0]>-1e8 and (development_cache[(x[1],x[2])].get("n",0)>0)]
         else:
-            eligible_choices=[x for x in choices if x[0]>0 and (development_cache[(x[1],x[2])].get("metrics") or {}).get("datewise_spearman_mean",0)>0]
+            # Selection stays development-only; the added requirement is that the
+            # calibrated model must also beat the live-computable causal prior on
+            # development three-way accuracy, so a variant that only wins the
+            # ranking proxy cannot displace a model that classifies better.
+            eligible_choices=[x for x in choices if x[0]>0 and _beats_causal_prior_on_development(
+                development_cache[(x[1],x[2])])]
         chosen=max(eligible_choices,default=(-1e9,None,None))
         chosen_ic=((development_cache[(chosen[1],chosen[2])].get("metrics") or {}).get("datewise_spearman_mean")
                    if chosen[1] is not None else None)
@@ -983,7 +1209,9 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
         out["direction3"][cohort]=cohort_report
     out["direction3"]["TIGER_ETF"]={"status":"NO_INDEPENDENT_TRAINING_UNIVERSE","evaluation_rows_n":len(special_eval.get("TIGER_ETF",[])),
       "reason":"ETFs are kept as a separate cohort; the expanded 300-equity pool does not mix them with Korean ordinary shares."}
-    out["direction3"]["calibration_scope"]="development OOF probabilities only; one scalar temperature per selected model/horizon/training universe; applied unchanged to validation and diagnostic"
+    out["direction3"]["calibration_scope"]=("development OOF probabilities only: one scalar temperature, one causal-prior shrinkage weight "
+        f"(prior window {PRIOR_SHRINKAGE_WINDOW_DAYS} days from labels observable before each signal date) and one class-balanced "
+        "decision threshold per selected model/horizon/training universe; applied unchanged to validation and diagnostic")
     out["direction3"]["probability_calibration"]={cohort:value.get("calibration_by_universe",{})
         for cohort,value in out["direction3"].items() if isinstance(value,dict) and "universe_comparison" in value}
     out["direction3"]["policy_results"]={cohort:{universe_name:periods for universe_name,periods in value.get("universe_comparison",{}).items()}

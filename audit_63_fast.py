@@ -297,10 +297,16 @@ def _three_way_report(samples):
             values=np.asarray([probs[name] for name in names],dtype=float) if isinstance(probs,dict) else np.asarray(probs,dtype=float)
         except (TypeError,ValueError):continue
         if truth not in names or pred not in names or values.shape!=(3,) or not np.isfinite(values).all():continue
-        usable.append((truth,pred,values))
+        prior=row.get("causal_prior");prior_values=None
+        try:
+            prior_values=np.asarray([prior[name] for name in names],dtype=float) if isinstance(prior,dict) else None
+        except (TypeError,ValueError):prior_values=None
+        if prior_values is not None and (prior_values.shape!=(3,) or not np.isfinite(prior_values).all()):prior_values=None
+        argmax=row.get("argmax_prediction")
+        usable.append((truth,pred,values,prior_values,argmax if argmax in names else None))
     n=len(usable);counts={name:sum(row[0]==name for row in usable) for name in names}
     predicted={name:sum(row[1]==name for row in usable) for name in names}
-    confusion={truth:{pred:sum(t==truth and p==pred for t,p,_ in usable) for pred in names} for truth in names}
+    confusion={truth:{pred:sum(row[0]==truth and row[1]==pred for row in usable) for pred in names} for truth in names}
     class_metrics={}
     for name in names:
         correct=confusion[name][name];precision=correct/predicted[name] if predicted[name] else 0.0
@@ -315,13 +321,14 @@ def _three_way_report(samples):
             "accuracy_standard_error_pp":None,
             "class_metrics":class_metrics,"mean_probabilities_pct":{name:None for name in names},
             "confusion_matrix":confusion}
-    accuracy=sum(truth==pred for truth,pred,_ in usable)/n
+    accuracy=sum(row[0]==row[1] for row in usable)/n
     priors=np.asarray([counts[name]/n for name in names],dtype=float)
-    probs=np.asarray([values for _,_,values in usable],dtype=float)
-    actual=np.asarray([[int(truth==name) for name in names] for truth,_,_ in usable],dtype=float)
+    probs=np.asarray([row[2] for row in usable],dtype=float)
+    actual=np.asarray([[int(row[0]==name) for name in names] for row in usable],dtype=float)
+    truth_all=np.asarray([row[0] for row in usable])
     brier=float(np.mean(np.sum((probs-actual)**2,axis=1)))
     prior_brier=float(np.mean(np.sum((np.broadcast_to(priors,actual.shape)-actual)**2,axis=1)))
-    return {"evaluation_rows_n":n,"accuracy_pct":100*accuracy,
+    report={"evaluation_rows_n":n,"accuracy_pct":100*accuracy,
         "majority_class_baseline_accuracy_pct":100*max(counts.values())/n,
         "accuracy_delta_vs_majority_pp":100*(accuracy-max(counts.values())/n),
         "accuracy_standard_error_pp":100*float(np.sqrt(max(accuracy*(1-accuracy),0.)/n)),
@@ -332,6 +339,29 @@ def _three_way_report(samples):
         "class_metrics":class_metrics,
         "mean_probabilities_pct":{name:100*float(probs[:,i].mean()) for i,name in enumerate(names)},
         "confusion_matrix":confusion}
+    causal=[row[3] for row in usable]
+    if all(value is not None for value in causal):
+        causal_probs=np.asarray(causal,dtype=float)
+        causal_argmax=np.asarray([names[int(j)] for j in causal_probs.argmax(axis=1)])
+        causal_brier=float(np.mean(np.sum((causal_probs-actual)**2,axis=1)))
+        report.update({"causal_prior_accuracy_pct":100*float(np.mean(causal_argmax==truth_all)),
+            "causal_prior_brier":causal_brier,
+            "brier_skill_vs_causal_prior":causal_brier-brier,
+            "causal_probability_edge_status":("PROBABILITY_SKILL_PRESENT_VS_CAUSAL_PRIOR" if brier<causal_brier
+                else "NO_DEMONSTRATED_EDGE_WORSE_THAN_CAUSAL_PRIOR")})
+    argmax=[row[4] for row in usable]
+    if all(value is not None for value in argmax):
+        argmax=np.asarray(argmax);argmax_metrics={}
+        for name in names:
+            correct=int(np.sum((argmax==name)&(truth_all==name)))
+            chosen=int(np.sum(argmax==name));actual_n=int(np.sum(truth_all==name))
+            argmax_metrics[name]={"predicted":chosen,"actual":actual_n,"correct":correct,
+                "precision_pct":100*correct/chosen if chosen else 0.,
+                "recall_pct":100*correct/actual_n if actual_n else 0.}
+        report["plain_argmax_decision"]={"accuracy_pct":100*float(np.mean(argmax==truth_all)),
+            "predicted_counts":{name:int(np.sum(argmax==name)) for name in names},
+            "class_metrics":argmax_metrics}
+    return report
 
 
 def _paired_earnings_ablation(base_rows,earnings_rows):
