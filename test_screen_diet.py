@@ -73,6 +73,10 @@ shown = tables_with_core(at)
 assert len(shown) == 2, [list(getattr(d.value, "columns", []))[:5] for d in at.dataframe]
 for frame in shown:
     assert list(frame.columns) == CORE, list(frame.columns)
+# 빈값이 'None' 글자로 그려지지 않도록 숫자 열은 숫자형으로 그린다(원본 데이터는 그대로).
+assert str(shown[0]["통합 목표가"].dtype).startswith("float"), shown[0]["통합 목표가"].dtype
+assert str(shown[0]["전일대비 %"].dtype).startswith("float"), shown[0]["전일대비 %"].dtype
+assert shown[0]["매매 판단"].dtype == object, shown[0]["매매 판단"].dtype
 
 # 2) 상세 열은 기본으로 숨고, 체크박스로 펼친다.
 detail_boxes = [c for c in at.checkbox if c.label.startswith("🔧 상세 진단 열")]

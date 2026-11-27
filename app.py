@@ -27,6 +27,18 @@ def core_detail_columns(columns):
     core=[col for col in CORE_DISPLAY_COLUMNS if col in columns]
     return core,[col for col in columns if col not in core]
 
+def display_frame(frame):
+    """표에 그릴 사본. 숫자와 빈값만으로 이루어진 object 열을 숫자형으로 되돌린다.
+    Streamlit은 object 열의 빈값을 'None' 글자로 그리기 때문에, 되돌려야 '—'로 보인다.
+    원본 df·세션 상태·CSV는 건드리지 않는 표시 전용 변환이다."""
+    view=frame.copy()
+    for col in view.columns:
+        if view[col].dtype==object:
+            numeric=pd.to_numeric(view[col],errors="coerce")
+            if numeric.notna().sum()==view[col].notna().sum():
+                view[col]=numeric
+    return view
+
 st.set_page_config(page_title="STOCK RADAR | 투자분석",page_icon="📈",layout="wide")
 # Gate before loading universe or any third-party data for private customers.
 enforce_access(st)
@@ -784,7 +796,7 @@ def ranking_page(mkt):
                     f"핵심 {len(core_cols)}개만 표시 · 상세 {len(detail_cols)}개는 접힘")+
                    " · CSV 저장은 전체 열")
         shown_fmt={col:f for col,f in number_formats.items() if col in display_cols}
-        styled=shown[display_cols].style.format(shown_fmt,na_rep="—")
+        styled=display_frame(shown[display_cols]).style.format(shown_fmt,na_rep="—")
         st.dataframe(styled,hide_index=True,use_container_width=True,
                      height=max(260,min(510,60+len(shown)*26)) if show_details else max(220,min(420,60+len(shown)*22)))
         st.download_button("📥 분석 결과 CSV 저장",df.fillna("—").to_csv(index=False).encode("utf-8-sig"),f"STOCK_RADAR200_{mkt}.csv","text/csv",key="csv"+mkt)
@@ -851,7 +863,7 @@ with candidate_tab:
                 "(전략 진입 조건·시장 위험국면·표본 수·판단 근거 등)",
                 value=False,key="candidate_detail_cols_"+active)
             display_cols=core_cols+detail_cols if show_details else core_cols
-            st.dataframe(candidates[display_cols].style.format(
+            st.dataframe(display_frame(candidates[display_cols]).style.format(
                              {col:f for col,f in fmt_cols.items() if col in display_cols},na_rep="—"),
                          hide_index=True,use_container_width=True,
                          height=max(260,min(520,80+len(candidates)*26)) if show_details else max(220,min(420,80+len(candidates)*22)))
