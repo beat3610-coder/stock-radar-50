@@ -1,5 +1,5 @@
 {
-  "time": "2026-11-27T02:56:58.542291+00:00",
+  "time": "2026-11-27T03:25:42.154910+00:00",
   "kosdaq": {
     "count": 100,
     "source": "Naver stock API KOSDAQ marketSum current ranking / 2026-11-27 / research-only snapshot (not PIT)",
@@ -36,24 +36,24 @@
       "code": "196170",
       "name": "알테오젠",
       "source": "FinanceDataReader NAVER:196170 (566 bars)",
-      "close": 182000.0,
+      "close": 182700.0,
       "signal": "매수 보류",
       "score": 28,
       "target": 187900.0,
       "upside": 8.297154533368811,
-      "rr": 0.5705145307852714,
+      "rr": 0.5727088174421379,
       "gate": "기술적 추세·위험 경고 우선"
     },
     {
       "code": "277810",
       "name": "레인보우로보틱스",
       "source": "FinanceDataReader NAVER:277810 (566 bars)",
-      "close": 509000.0,
+      "close": 507000.0,
       "signal": "매수 보류",
       "score": 59,
       "target": 531000.0,
       "upside": 21.625437214642346,
-      "rr": 0.8729062285688304,
+      "rr": 0.8827775094866072,
       "gate": "기술적 추세·위험 경고 우선"
     },
     {
@@ -72,12 +72,12 @@
       "code": "086520",
       "name": "에코프로",
       "source": "FinanceDataReader NAVER:086520 (566 bars)",
-      "close": 70500.0,
+      "close": 70600.0,
       "signal": "매수 보류",
       "score": 38,
       "target": 76800.0,
       "upside": 6.254646826936883,
-      "rr": 0.39363726506125346,
+      "rr": 0.39419561579183604,
       "gate": "기술적 추세·위험 경고 우선"
     }
   ]
