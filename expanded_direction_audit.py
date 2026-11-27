@@ -20,7 +20,7 @@ from scipy.stats import spearmanr
 from scipy.optimize import minimize_scalar
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import (accuracy_score, balanced_accuracy_score,
     confusion_matrix, f1_score, log_loss, precision_recall_fscore_support,
     roc_auc_score)
@@ -36,7 +36,11 @@ from market_context import build_market_context
 TRAIN_END="2025-11-01"; VALID_END="2026-04-01"; HOLDOUT_END="2026-11-01"
 MIN_END_DATE=(date.fromisoformat(HOLDOUT_END)+timedelta(days=12)).isoformat()
 SAMPLE_START="2016-01-01"; COST_PCT=.35; THETAS=(.3,.5,1.0)
-HORIZONS=(5,10,20); MIN_TRAIN=500; REFIT_MONTH=1; SIGNAL_STEP=5
+HORIZONS=(5,10,20); MIN_TRAIN=500; REFIT_MONTH=24; SIGNAL_STEP=5
+# band_regression maps a predicted volatility-scaled return through the same band
+# that defines the label, so it uses magnitudes rather than only the class label.
+MODEL_KINDS=("multinomial_logistic","random_forest","band_regression")
+CAUSAL_PRIOR_WINDOW_DAYS=365
 SIDEWAYS_TARGET_SHARE=.30
 MIN_DEVELOPMENT_IC=.01
 SPREAD_CUTS=(.05,.10,.15); SIDEWAYS_MAX=(.25,.35,.45); EV_FLOORS=(0.0,.10,.20)
@@ -345,7 +349,55 @@ def _features(rows,active=None):
         return float(np.clip((value-CENTERS[key])/SCALES[key],-5,5)) if np.isfinite(value) else np.nan
     return np.asarray([[scaled(r,k) for k in active] for r in rows],dtype=np.float32)
 
+def _refit_anchor(signal_date):
+    """Calendar anchor of the refit block that a signal belongs to.
+
+    Blocks are fixed-length in months counted from year 0, so REFIT_MONTH=24
+    reproduces the historical two-year snapshots (2024-2025 -> 2024-01-01).
+    Labels used for a block must be observed strictly before this anchor, so a
+    shorter cadence can only see the past and never the block itself.
+    """
+    year=int(signal_date[:4]); month=int(signal_date[5:7])
+    step=max(1,int(REFIT_MONTH))
+    absolute=year*12+(month-1)
+    first=(absolute//step)*step
+    return f"{first//12:04d}-{first%12+1:02d}-01"
+
+class BandRegressionModel:
+    """Ridge on the net percentage return, mapped through the label band.
+
+    The audit's SIDEWAYS band is ``k * signal-day volatility`` and is known at
+    the signal close, so a predicted return ``mu`` with residual scale ``sigma``
+    gives P(UP)=1-Phi((band-mu)/sigma) and P(DOWN)=Phi((-band-mu)/sigma).
+    Uses return magnitudes instead of only the discrete class label.
+    """
+    classes_=np.asarray([0,1,2])
+    def __init__(self,alpha=1.0):
+        self.alpha=float(alpha)
+        self.routine=make_pipeline(SimpleImputer(strategy="constant",fill_value=0),
+                                   StandardScaler(),Ridge(alpha=self.alpha))
+    def fit(self,X,y):
+        self.routine.fit(X,np.asarray(y,dtype=float))
+        residual=np.asarray(y,dtype=float)-self.routine.predict(X)
+        self.sigma=float(max(np.std(residual),1e-6))
+        return self
+    def predict_proba(self,X,band=None):
+        from scipy.stats import norm
+        mu=np.asarray(self.routine.predict(X),dtype=float)
+        band=np.abs(np.asarray(band if band is not None else np.ones(len(mu)),dtype=float))
+        up=1-norm.cdf((band-mu)/self.sigma)
+        down=norm.cdf((-band-mu)/self.sigma)
+        probs=np.column_stack([down,np.clip(1-up-down,0.,1.),up])
+        probs=np.clip(probs,1e-6,1.)
+        return probs/probs.sum(axis=1,keepdims=True)
+
+def _band_pct(row):
+    """SIDEWAYS band in net-return percentage points, known at the signal close."""
+    return abs(float(row.get("label_vol_band_pct",0.) or 0.))
+
 def _model(kind):
+    if kind=="band_regression":
+        return BandRegressionModel()
     if kind=="multinomial_logistic":
         return make_pipeline(SimpleImputer(strategy="constant",fill_value=0),StandardScaler(),
              LogisticRegression(C=.15,max_iter=300,class_weight=None,random_state=3610))
@@ -494,6 +546,48 @@ def _policy_table(rows,probs,payoffs):
         table[key]=value
     return table
 
+def _causal_prior_baseline(all_train,eval_rows,window_days=CAUSAL_PRIOR_WINDOW_DAYS):
+    """Plurality class of labels that were already observable before each block.
+
+    Unlike the majority-class baseline (which is computed from the block's own
+    labels and is therefore an oracle), this baseline can be computed in real
+    time. If the model cannot beat it, the model adds no usable edge.
+    """
+    if not eval_rows:return {"n":0,"window_days":window_days,"accuracy_pct":None,
+        "label":"NO_ROWS"}
+    by_anchor={}
+    hits=0;counts={"DOWN":0,"SIDEWAYS":0,"UP":0};covered=0
+    for row in eval_rows:
+        anchor=_refit_anchor(row["signal_date"])
+        if anchor not in by_anchor:
+            floor=(date.fromisoformat(anchor)-timedelta(days=window_days)).isoformat()
+            tallies={"DOWN":0,"SIDEWAYS":0,"UP":0}
+            for past in all_train:
+                if floor<=past["label_available_date"]<anchor:tallies[past["label_vol"]]+=1
+            by_anchor[anchor]=max(("DOWN","SIDEWAYS","UP"),key=lambda c:(tallies[c],c)) if any(tallies.values()) else None
+        prediction=by_anchor[anchor]
+        counts[row["label_vol"]]+=1
+        if prediction is None:continue
+        covered+=1;hits+=int(prediction==row["label_vol"])
+    return {"n":len(eval_rows),"covered_n":covered,"window_days":window_days,
+        "accuracy_pct":100*hits/covered if covered else None,
+        "class_distribution":counts,
+        "label":"ROLLING_PRIOR_PLURALITY_BEFORE_EACH_REFIT_ANCHOR"}
+
+def _probability_skill(eval_rows,probs):
+    """Brier skill against the constant-prior forecast of the SAME evaluation period."""
+    names=("DOWN","SIDEWAYS","UP")
+    if not len(eval_rows):return {"n":0,"model_brier":None,"period_prior_brier":None,"brier_skill":None}
+    y=np.asarray([names.index(r["label_vol"]) for r in eval_rows],dtype=int)
+    actual=np.asarray([[1. if i==j else 0. for j in range(3)] for i in y])
+    p=np.asarray(probs,dtype=float)
+    prior=np.bincount(y,minlength=3)/len(y)
+    model_brier=float(np.mean(np.sum((p-actual)**2,axis=1)))
+    prior_brier=float(np.mean(np.sum((np.broadcast_to(prior,actual.shape)-actual)**2,axis=1)))
+    return {"n":len(y),"model_brier":model_brier,"period_prior_brier":prior_brier,
+        "brier_skill":prior_brier-model_brier,
+        "label":"positive skill means the model beats a constant class-prior forecast of the same rows"}
+
 def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,payoffs=None,
                     exclude_features=(),include_samples=False):
     lo,hi={"development":(SAMPLE_START,TRAIN_END),"validation":(TRAIN_END,VALID_END),"diagnostic":(VALID_END,HOLDOUT_END)}[period]
@@ -502,25 +596,33 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
     eval_rows.sort(key=lambda r:(r["signal_date"],r["ticker"]))
     all_train=sorted([r for r in train_rows if r["horizon"]==horizon and "label_vol" in r],key=lambda r:(r["label_available_date"],r["ticker"]))
     classes=("DOWN","SIDEWAYS","UP"); probs=np.full((len(eval_rows),3),1/3,dtype=float)
-    target_probs=np.full(len(eval_rows),.5,dtype=float);valid_years=set()
-    for year in sorted({int(r["signal_date"][:4]) for r in eval_rows}):
-        snapshot_year=year-(year%2); anchor=f"{snapshot_year}-01-01"
-        idx=[i for i,r in enumerate(eval_rows) if int(r["signal_date"][:4])//2==snapshot_year//2]
+    target_probs=np.full(len(eval_rows),.5,dtype=float);valid_anchors=set()
+    blocks=defaultdict(list)
+    for i,r in enumerate(eval_rows):blocks[_refit_anchor(r["signal_date"])].append(i)
+    for anchor in sorted(blocks):
+        idx=blocks[anchor]
         past=[r for r in all_train if r["label_available_date"]<anchor and r["signal_date"]<anchor]
         if len(past)<MIN_TRAIN or len({r["label_vol"] for r in past})<3:continue
         active=tuple(k for k in _active_features(past) if k not in set(exclude_features))
         if not active:continue
-        model=_model(kind);model.fit(_features(past,active),np.asarray([classes.index(r["label_vol"]) for r in past]))
-        raw=model.predict_proba(_features([eval_rows[i] for i in idx],active)); cls=list(model.classes_)
-        p=np.zeros((len(idx),3))
-        for j,c in enumerate(cls):p[:,int(c)]=raw[:,j]
-        probs[idx]=p;valid_years.add(str(year))
+        Xpast=_features(past,active);Xeval=_features([eval_rows[i] for i in idx],active)
+        if kind=="band_regression":
+            model=_model(kind)
+            target=np.asarray([float(r["net_pct"]) for r in past])
+            model.fit(Xpast,target)
+            p=model.predict_proba(Xeval,np.asarray([_band_pct(eval_rows[i]) for i in idx]))
+        else:
+            model=_model(kind);model.fit(Xpast,np.asarray([classes.index(r["label_vol"]) for r in past]))
+            raw=model.predict_proba(Xeval); cls=list(model.classes_)
+            p=np.zeros((len(idx),3))
+            for j,c in enumerate(cls):p[:,int(c)]=raw[:,j]
+        probs[idx]=p;valid_anchors.add(anchor)
         yhit=np.asarray([int(r.get("target_touch_theta_0.5")=="TARGET_FIRST") for r in past])
         if np.unique(yhit).size==2:
-            hit_model=_model(kind);hit_model.fit(_features(past,active),yhit)
-            hit_raw=hit_model.predict_proba(_features([eval_rows[i] for i in idx],active));hit_classes=list(hit_model.classes_)
+            hit_model=_model("multinomial_logistic");hit_model.fit(Xpast,yhit)
+            hit_raw=hit_model.predict_proba(Xeval);hit_classes=list(hit_model.classes_)
             if 1 in hit_classes:target_probs[idx]=hit_raw[:,hit_classes.index(1)]
-    valid=np.asarray([r["signal_date"][:4] in valid_years for r in eval_rows])
+    valid=np.asarray([_refit_anchor(r["signal_date"]) in valid_anchors for r in eval_rows])
     eval_rows=[r for r,v in zip(eval_rows,valid) if v];probs=probs[valid];target_probs=target_probs[valid]
     if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None,"temperature":temperature_info}
     valid=np.asarray([r["label_available_date"]<(TRAIN_END if period=="development" else VALID_END if period=="validation" else HOLDOUT_END) for r in eval_rows])
@@ -540,6 +642,8 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
     target_report={"n":len(eval_rows),"observed_target_first_pct":100*float(target_actual.mean()),
       "mean_predicted_probability_pct":100*float(target_probs.mean()),"brier":float(np.mean((target_probs-target_actual)**2))}
     vol_metrics["target_hit_probability"]=target_report
+    vol_metrics["causal_prior_baseline"]=_causal_prior_baseline(all_train,eval_rows)
+    vol_metrics["probability_skill"]=_probability_skill(eval_rows,probs)
     policies=_policy_table(eval_rows,probs,payoffs)
     result={"n":len(eval_rows),"metrics":vol_metrics,"fixed_band_metrics":{k:v["metrics"] for k,v in theta_results.items()},
       "theta_results":theta_results,"buy_policy_candidates":policies,"buy_policy":None,
@@ -685,7 +789,7 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
         "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC},
       "extended_pool_collection":extended_pool_collection,
       "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC,
-      "selection_rule":"Development-only walk-forward: select one model/horizon by mean datewise Spearman(P(UP), realized net return), requiring positive IC and at least 100 top-15% development candidates. Calibrate multiclass probabilities with development OOF temperature scaling. Select spread + sideways-probability + net expected-value policy on development only; all selected policy OOS results are reported.",
+      "selection_rule":"Development-only walk-forward: select one model/horizon by mean datewise Spearman(P(UP), realized net return), requiring positive IC and at least 100 top-15% development candidates. Model grid covers multinomial logistic, random forest and band regression (predicted net return mapped through the frozen volatility band). Calibrate multiclass probabilities with development OOF temperature scaling. Select spread + sideways-probability + net expected-value policy on development only; all selected policy OOS results are reported.",
       "feature_coverage":{"feature_names":list(FEATURES),"fixed_centers":CENTERS,"fixed_scales":SCALES,"feature_count":len(FEATURES),"cross_section_count_key":"xs_count","constant_column_policy":"recomputed from each past-only training snapshot and excluded when std is zero"}}
     direction3_eval_samples_by_cohort={}
     for cohort,pool in bycohort.items():
@@ -710,7 +814,7 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
         selection_rows=_selection_rows_for(cohort,pool,eval_rows)
         choices=[];development_cache={}
         for horizon in HORIZONS:
-          for model in ("multinomial_logistic","random_forest"):
+          for model in MODEL_KINDS:
             # Select the US model/horizon on walk-forward development forecasts
             # across the same-cohort ordinary-stock pool. SOXL is then a truly
             # separate one-symbol evaluation set, not the model-selection set.

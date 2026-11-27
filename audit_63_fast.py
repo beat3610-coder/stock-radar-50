@@ -311,6 +311,8 @@ def _three_way_report(samples):
     if not n:
         return {"evaluation_rows_n":0,"accuracy_pct":None,"majority_class_baseline_accuracy_pct":None,
             "accuracy_delta_vs_majority_pp":None,"multiclass_brier":None,"prior_brier":None,
+            "brier_skill_vs_period_prior":None,"probability_edge_status":"NO_ROWS",
+            "accuracy_standard_error_pp":None,
             "class_metrics":class_metrics,"mean_probabilities_pct":{name:None for name in names},
             "confusion_matrix":confusion}
     accuracy=sum(truth==pred for truth,pred,_ in usable)/n
@@ -322,7 +324,11 @@ def _three_way_report(samples):
     return {"evaluation_rows_n":n,"accuracy_pct":100*accuracy,
         "majority_class_baseline_accuracy_pct":100*max(counts.values())/n,
         "accuracy_delta_vs_majority_pp":100*(accuracy-max(counts.values())/n),
+        "accuracy_standard_error_pp":100*float(np.sqrt(max(accuracy*(1-accuracy),0.)/n)),
         "multiclass_brier":brier,"prior_brier":prior_brier,
+        "brier_skill_vs_period_prior":prior_brier-brier,
+        "probability_edge_status":("PROBABILITY_SKILL_PRESENT" if brier<prior_brier
+            else "NO_DEMONSTRATED_EDGE_WORSE_THAN_CLASS_PRIOR"),
         "class_metrics":class_metrics,
         "mean_probabilities_pct":{name:100*float(probs[:,i].mean()) for i,name in enumerate(names)},
         "confusion_matrix":confusion}
