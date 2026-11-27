@@ -7,11 +7,12 @@ import numpy as np
 import pandas as pd
 
 from expanded_direction_audit import (
-    FEATURES, FLOW_FEATURES, MIN_DEVELOPMENT_IC, _collect_extended_pool_flows,
+    FEATURES, FLOW_FEATURES, MIN_DEVELOPMENT_IC, MODEL_KINDS, REFIT_MONTH, _collect_extended_pool_flows,
     _comparison_fit_spec, _edge_label_status, _features, _flow_ablation_metadata,
     _make_rows, _mandatory_market_items, _metrics,
     _trade_perf, direction_label, _freeze_volatility_labels, _fit_temperature,
-    _model, _training_rows_for, _selection_rows_for,
+    _model, _training_rows_for, _selection_rows_for, _refit_anchor, _causal_prior_baseline,
+    _probability_skill, BandRegressionModel,
 )
 from providers import get_historical_investor_flows
 from universe import MANDATORY_KR, MANDATORY_US, AUDIT_63_BENCHMARK
@@ -228,6 +229,68 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
             self.assertEqual(diag["first_date"],"2023-06-01")
             self.assertEqual(diag["requests_n"],2)
             self.assertEqual(diag["failures"],[])
+
+    def test_refit_anchor_is_calendar_aligned_and_never_reaches_the_block(self):
+        self.assertEqual(REFIT_MONTH,24)
+        self.assertEqual(_refit_anchor("2024-05-01"),"2024-01-01")
+        self.assertEqual(_refit_anchor("2025-11-03"),"2024-01-01")
+        self.assertEqual(_refit_anchor("2026-07-15"),"2026-01-01")
+        self.assertEqual(_refit_anchor("2023-12-29"),"2022-01-01")
+        for day in ("2016-01-04","2021-06-30","2026-10-30"):
+            self.assertLess(_refit_anchor(day)[:4]+"-01-01",day)
+            self.assertLessEqual(_refit_anchor(day),day)
+
+    def test_band_regression_probabilities_follow_the_band(self):
+        rows=[]
+        rng=np.random.default_rng(7)
+        for i in range(400):
+            x=float(rng.normal());net=2.0*x+float(rng.normal())
+            rows.append({"x":x,"net_pct":net})
+        X=np.asarray([[r["x"]] for r in rows]);y=np.asarray([r["net_pct"] for r in rows])
+        model=BandRegressionModel().fit(X,y)
+        probs=model.predict_proba(np.asarray([[-5.],[0.],[5.]]),np.asarray([1.,1.,1.]))
+        self.assertEqual(probs.shape,(3,3))
+        np.testing.assert_allclose(probs.sum(axis=1),1.0)
+        self.assertGreater(probs[2,2],probs[0,2])
+        self.assertGreater(probs[0,0],probs[2,0])
+        # A wider SIDEWAYS band must not increase the probability of an extreme move.
+        narrow=model.predict_proba(np.asarray([[3.]]),np.asarray([1.]))[0]
+        wide=model.predict_proba(np.asarray([[3.]]),np.asarray([6.]))[0]
+        self.assertGreater(narrow[2],wide[2])
+        self.assertIsNone(_model("multinomial_logistic")[-1].class_weight)
+        self.assertIn("band_regression",MODEL_KINDS)
+
+    def test_causal_prior_baseline_uses_only_labels_before_the_anchor(self):
+        train=[]
+        for i in range(30):
+            train.append({"label_vol":"UP","label_available_date":"2023-03-01"})
+        for i in range(30):
+            train.append({"label_vol":"DOWN","label_available_date":"2025-03-01"})
+        eval_rows=[{"label_vol":"DOWN","signal_date":"2026-04-01"} for _ in range(10)]
+        report=_causal_prior_baseline(train,eval_rows)
+        self.assertEqual(report["n"],10)
+        # 2025-03 labels sit inside the 365-day window ending 2026-01-01 only for
+        # the 2025 block; the 2026 anchor window is 2025-01-01..2026-01-01.
+        self.assertEqual(report["class_distribution"]["DOWN"],10)
+        self.assertIsNotNone(report["accuracy_pct"])
+
+    def test_probability_skill_is_positive_only_when_brier_beats_the_period_prior(self):
+        rows=[{"label_vol":"UP"},{"label_vol":"UP"},{"label_vol":"DOWN"},{"label_vol":"UP"}]
+        sharp=np.asarray([[.05,.05,.9],[.05,.05,.9],[.8,.1,.1],[.2,.2,.6]])
+        flat=np.full((4,3),1/3)
+        self.assertGreater(_probability_skill(rows,sharp)["brier_skill"],0)
+        self.assertLess(_probability_skill(rows,flat)["brier_skill"],0)
+
+    def test_three_way_report_flags_a_model_worse_than_the_class_prior(self):
+        from audit_63_fast import _three_way_report
+        samples=([{"label":"DOWN","prediction":"UP","probabilities":{"UP":.9,"DOWN":.05,"SIDEWAYS":.05}}
+                  for _ in range(20)]+
+                 [{"label":"DOWN","prediction":"DOWN","probabilities":{"UP":.05,"DOWN":.9,"SIDEWAYS":.05}}
+                  for _ in range(20)])
+        report=_three_way_report(samples)
+        self.assertLess(report["brier_skill_vs_period_prior"],0)
+        self.assertEqual(report["probability_edge_status"],"NO_DEMONSTRATED_EDGE_WORSE_THAN_CLASS_PRIOR")
+        self.assertGreater(report["accuracy_standard_error_pp"],0)
 
     def test_three_class_metrics_and_confusion_labels(self):
         rows=[{"label_0.5":"DOWN","net_pct":-1,"signal_date":"2025-01-01"},
