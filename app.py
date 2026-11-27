@@ -17,6 +17,16 @@ from bde_dashboard import load_summary as load_bde_summary,load_live as load_bde
 import audit_runtime
 audit_runtime.ensure_started()
 
+# 화면 다이어트 원칙: 기본 표에는 매매 판단에 바로 쓰는 9개 열만 보여준다.
+# 나머지 진단·산정 근거 열은 계산·CSV·세션 상태에 그대로 남기고 화면에서만 접는다.
+CORE_DISPLAY_COLUMNS=("구분","종목","매매 판단","종가","전일대비 %",
+                      "통합 목표가","손절 참고","기대손익비(R)","점수")
+
+def core_detail_columns(columns):
+    """표시 대상 열 목록을 (핵심 열, 상세 열)로 나눈다. 순서는 원래 열 순서를 따른다."""
+    core=[col for col in CORE_DISPLAY_COLUMNS if col in columns]
+    return core,[col for col in columns if col not in core]
+
 st.set_page_config(page_title="STOCK RADAR | 투자분석",page_icon="📈",layout="wide")
 # Gate before loading universe or any third-party data for private customers.
 enforce_access(st)
@@ -30,8 +40,38 @@ st.warning(
     "이용자 본인에게 귀속됩니다. 실제 주문 전 공식 시세와 관련 정보를 직접 확인하세요."
 )
 # B+D+E(위험국면 + 공시 + 실적) 최근 필터와 오늘의 후보. 값은 커밋된 감사 요약에서만 읽는다.
-with st.expander("🧭 B+D+E 실전 필터 · 최근 후보",expanded=True):
-    render_bde(st,load_bde_summary(),load_bde_live())
+# 패널은 접힌 채로 두고, 접힌 상태에서도 오늘 후보 수와 시장 국면이 한 줄로 보이게 한다.
+def bde_headline(live):
+    if not live or not isinstance(live,dict):
+        return ""
+    try:
+        labels={"KOSPI":"코스피","KOSDAQ":"코스닥","TIGER_ETF":"TIGER","SOXL":"SOXL"}
+        counts={};regimes={}
+        for cohort,block in (live.get("cohorts") or {}).items():
+            name=labels.get(cohort,cohort)
+            stage=(block.get("counts_by_stage") or {}).get("B+D+E")
+            if isinstance(stage,(int,float)):counts[name]=stage
+            regime=(block.get("diagnostics") or {}).get("market_regime")
+            if regime:regimes[name]=regime
+        parts=[]
+        if counts:
+            parts.append(f"오늘 B+D+E 후보 {sum(counts.values()):,.0f}건")
+            if any(counts.values()):
+                parts.append("통과 "+" · ".join(f"{k} {v:,.0f}" for k,v in counts.items() if v))
+        if regimes:
+            distinct=sorted(set(regimes.values()))
+            parts.append("시장국면 "+(distinct[0] if len(distinct)==1 else
+                                        " · ".join(f"{k} {v}" for k,v in regimes.items())))
+        if live.get("signal_bar_date"):
+            parts.append("기준일 "+str(live.get("signal_bar_date")))
+        return (" — "+" | ".join(parts)) if parts else ""
+    except Exception:
+        return ""
+
+bde_summary=load_bde_summary()
+bde_live=load_bde_live()
+with st.expander("🧭 B+D+E 실전 필터 · 최근 후보"+bde_headline(bde_live),expanded=False):
+    render_bde(st,bde_summary,bde_live)
 # Historical model research is displayed separately from live trade signals.
 # These are dated, already-inspected research windows, not independent forward tests.
 with st.expander("🔬 예측모델 개선 현황 · 2025~2026년 과거 검증", expanded=False):
@@ -63,7 +103,7 @@ if readiness_path.exists():
         readiness=json.loads(readiness_path.read_text(encoding="utf-8"))
         if readiness.get("release_status")!="LIVE_APPROVED":
             st.warning("실전 투자 검증: 미승인 · 계좌 손익·최대낙폭·신뢰도 기준을 충족하지 못했습니다.")
-        with st.expander("🧪 실전 투자 합격 검증표 · 실제 계좌 시뮬레이션 결과"):
+        with st.expander(f"🧪 실전 투자 합격 검증표 · 실제 계좌 시뮬레이션 결과 — {readiness.get('release_status') or '확인 필요'}",expanded=False):
             st.caption("이 자료는 과거 일봉으로 산정한 가상 계좌 결과입니다. 실제 증권사 체결 내역이 아닙니다.")
             details=[]
             for k,name in (("KR","코스피"),("KQ","코스닥"),("US","나스닥")):
@@ -98,7 +138,7 @@ def _certification_view():
             st.success("실전·판매 검증 승인 — 근거 자료의 유효성 및 이용권한을 추가 확인하세요.")
         else:
             st.error("실전·판매 검증 미승인 | 통과하지 못한 기준 "+str(len(verdict["reasons"]))+"개")
-        with st.expander("🔍 독립 검증·판매 적합성 자동 판정 상세",expanded=False):
+        with st.expander(f"🔍 독립 검증·판매 적합성 자동 판정 상세 — 미충족 {len(verdict['reasons'])}개",expanded=False):
             st.caption("과거 개발 과정에서 이미 확인한 평가구간은 신규 독립 검증으로 인정하지 않습니다.")
             st.dataframe(pd.DataFrame([{"미충족 기준":reason} for reason in verdict["reasons"]]),
                          hide_index=True,use_container_width=True)
@@ -150,7 +190,7 @@ if strategy_report.exists():
             else:
                 st.info("60% 모델의 실제 역사적 성능 평가 결과가 없습니다.")
             st.caption("과거 진단기간 수치로 모델을 선택하지 않으며, 수익률 개선이 확인되기 전까지 운영 매수 신호는 유지됩니다.")
-        with st.expander("📊 시장별 매매전략 비교 · 100종목 역사적 평가"):
+        with st.expander("📊 시장별 매매전략 비교 · 100종목 역사적 평가",expanded=False):
             st.caption("고점 돌파·눌림목 반등·MACD 재상승 전략을 과거 자료에서 개발·검증·평가로 나누어 비교합니다. 이미 검토한 과거 기간이므로 실전 독립 검증은 아닙니다.")
             table=[]
             names={"KR":"코스피","KQ":"코스닥","US":"나스닥"}
@@ -206,7 +246,7 @@ with st.expander("🛠️ 검증·승인·지속학습 센터",expanded=False):
     c2.metric("최신 온라인 학습 결과",str(online.get("created_utc","확인 필요"))[:10])
     c3.metric("실전·유료 승인","차단","독립 검증 및 운영 요건 미충족")
     st.warning(f"{learning_target:g}%는 승률만으로 합격하지 않습니다. 비용 반영 평균 순손익 양수, 손익비 1.1 이상, 진단거래 300건 이상, 신호 coverage 10% 이상을 모두 충족해야 합니다.")
-    with st.expander("📚 저작권 안전 오픈소스 참고 범위"):
+    with st.expander("📚 저작권 안전 오픈소스 참고 범위",expanded=False):
         st.markdown("""
 - **TA-Lib (BSD-3-Clause):** Wilder RSI·ATR·ADX의 공개 수학식 동작을 독립 구현
 - **ta (MIT):** CMF·Donchian·ROC·볼린저 폭 지표 목록과 공개 정의 참고
@@ -732,15 +772,28 @@ def ranking_page(mkt):
         missing_targets=int(shown["통합 목표가"].isna().sum()) if "통합 목표가" in shown else 0
         if missing_targets:
             st.info(f"현재 묶음 {missing_targets}개 종목은 과거 경로 부족 또는 상승 목표가 미성립으로 목표가를 산정하지 않았습니다. 저항선은 별도 참고치입니다.")
-        styled=shown.style.format(number_formats,na_rep="—")
-        st.dataframe(styled,hide_index=True,use_container_width=True,height=510)
+        # 화면 다이어트: 기본 표는 핵심 9개 열만 보여 가로 스크롤 없이 한눈에 보이게 한다.
+        # 계산·CSV 저장은 아래 전체 열(df)을 그대로 유지한다.
+        core_cols,detail_cols=core_detail_columns(list(shown.columns))
+        show_details=st.checkbox(
+            f"🔧 상세 진단 열 {len(detail_cols)}개 펼쳐 보기 (20~200일선·RSI·매물대·표본 수·산정 근거 등)",
+            value=False,key="detail_cols_"+mkt+("_flow" if with_flow else "_tech"))
+        display_cols=core_cols+detail_cols if show_details else core_cols
+        st.caption(f"표시 열 {len(display_cols)}개 — "+
+                   (f"핵심 {len(core_cols)}개 + 상세 {len(detail_cols)}개(가로 스크롤 필요)" if show_details else
+                    f"핵심 {len(core_cols)}개만 표시 · 상세 {len(detail_cols)}개는 접힘")+
+                   " · CSV 저장은 전체 열")
+        shown_fmt={col:f for col,f in number_formats.items() if col in display_cols}
+        styled=shown[display_cols].style.format(shown_fmt,na_rep="—")
+        st.dataframe(styled,hide_index=True,use_container_width=True,
+                     height=max(260,min(510,60+len(shown)*26)) if show_details else max(220,min(420,60+len(shown)*22)))
         st.download_button("📥 분석 결과 CSV 저장",df.fillna("—").to_csv(index=False).encode("utf-8-sig"),f"STOCK_RADAR200_{mkt}.csv","text/csv",key="csv"+mkt)
     else:
         st.info("위 버튼을 눌러 종목별 시세 분석을 시작하세요. 항목을 추측해서 채우지 않습니다.")
     if fail:
-        with st.expander(f"⚠️ 조회 실패 {fail}개 — 원인 확인"):
+        with st.expander(f"⚠️ 조회 실패 {fail}개 — 원인 확인",expanded=False):
             st.dataframe(pd.DataFrame(list(state["errors"].values())),hide_index=True,use_container_width=True)
-    with st.expander(f"전체 구성 종목 {len(ordered)}개 보기 (50개씩)"):
+    with st.expander(f"전체 구성 종목 {len(ordered)}개 보기 (50개씩)",expanded=False):
         listing_pages=max(1,(len(ordered)+49)//50)
         listing_page=st.selectbox("종목 목록 페이지",list(range(1,listing_pages+1)),key="listing_page_"+mkt,
                                    format_func=lambda p:f"{p}페이지 / {listing_pages}페이지")
@@ -782,7 +835,7 @@ with candidate_tab:
                               key="candidate_sort_"+active)
         candidates=candidates.sort_values(sort_col,ascending=False,na_position="last")
         columns=["구분","종목","코드","전략 검증 통과 후보","전략 진입 조건","전략 연구 목표상승 %","전략 연구 손절폭 %","매매 판단","기술 판단(목표 검증 전)",
-                 "시장 위험국면","실전 전략 승인","종가","통합 목표가","손절 참고","목표 상승여력 %","손절폭 %",
+                 "시장 위험국면","실전 전략 승인","종가","전일대비 %","통합 목표가","손절 참고","목표 상승여력 %","손절폭 %",
                  "기대손익비(R)","과거 비용 반영 손익 %",
                  "과거 1차 익절 우선 %","과거 전체 표본","학습 표본","독립 평가 표본",
                  "점수","종가 교차검증","매매 판단 근거","거래일"]
@@ -790,9 +843,18 @@ with candidate_tab:
         st.caption(f"조건에 해당하는 종목 {len(candidates)}개")
         if len(candidates):
             fmt_cols={col:("{:,.2f}" if active=="US" and col!="점수" else "{:,.0f}") for col in ("종가","통합 목표가","손절 참고","점수") if col in columns}
-            fmt_cols.update({col:"{:.2f}" for col in ("목표 상승여력 %","손절폭 %","기대손익비(R)","과거 1차 익절 우선 %","과거 비용 반영 손익 %","전략 연구 목표상승 %","전략 연구 손절폭 %") if col in columns})
-            st.dataframe(candidates[columns].style.format(fmt_cols,na_rep="—"),
-                         hide_index=True,use_container_width=True,height=520)
+            fmt_cols.update({col:"{:.2f}" for col in ("전일대비 %","목표 상승여력 %","손절폭 %","기대손익비(R)","과거 1차 익절 우선 %","과거 비용 반영 손익 %","전략 연구 목표상승 %","전략 연구 손절폭 %") if col in columns})
+            # 결과표와 같은 원칙: 핵심 열만 보이고, 진단 열은 필요할 때만 펼친다.
+            core_cols,detail_cols=core_detail_columns(columns)
+            show_details=st.checkbox(
+                f"🔧 후보 상세 열 {len(detail_cols)}개 펼쳐 보기 "
+                "(전략 진입 조건·시장 위험국면·표본 수·판단 근거 등)",
+                value=False,key="candidate_detail_cols_"+active)
+            display_cols=core_cols+detail_cols if show_details else core_cols
+            st.dataframe(candidates[display_cols].style.format(
+                             {col:f for col,f in fmt_cols.items() if col in display_cols},na_rep="—"),
+                         hide_index=True,use_container_width=True,
+                         height=max(260,min(520,80+len(candidates)*26)) if show_details else max(220,min(420,80+len(candidates)*22)))
             st.download_button("📥 조건별 후보 CSV",candidates.to_csv(index=False).encode("utf-8-sig"),
                                f"STOCK_RADAR_candidates_{active}.csv","text/csv",key="candidate_csv_"+active)
         else:
@@ -1055,7 +1117,7 @@ with guide_tab:
             audit100=json.loads(audit100_path.read_text(encoding="utf8"))
             intended=audit100.get("requested_tickers",7)
             verified=audit100.get("analysed_tickers")
-            with st.expander("📊 코스피·코스닥·나스닥 각 100종목 (총 300종목) 백테스트"):
+            with st.expander("📊 코스피·코스닥·나스닥 각 100종목 (총 300종목) 백테스트",expanded=False):
                 if intended!=300:
                     st.info("300종목 검증 결과는 아직 저장되지 않았습니다. 아래 정보는 최신 완료된 이전 표본 자료입니다.")
                 else:
@@ -1123,7 +1185,7 @@ with guide_tab:
                                "유료 판매의 정확성·성과 인증 결과로 사용할 수 없습니다.")
         except Exception as e:
             st.warning("300종목 백테스트 결과 조회 오류: "+str(e)[:120])
-    with st.expander("🧪 시세 교차확인·과거신호 검증 결과 (제한된 표본)"):
+    with st.expander("🧪 시세 교차확인·과거신호 검증 결과 (제한된 표본)",expanded=False):
         audit_path=Path("data/accuracy-audit.json")
         if audit_path.exists():
             audit=json.loads(audit_path.read_text(encoding="utf8"))
