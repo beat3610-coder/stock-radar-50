@@ -1,8 +1,8 @@
 {
-  "time": "2026-11-26T08:22:00.635019+00:00",
+  "time": "2026-11-27T02:56:58.542291+00:00",
   "kosdaq": {
     "count": 100,
-    "source": "Naver stock API KOSDAQ marketSum current ranking / 2026-11-26 / research-only snapshot (not PIT)",
+    "source": "Naver stock API KOSDAQ marketSum current ranking / 2026-11-27 / research-only snapshot (not PIT)",
     "sample": [
       [
         "196170",
@@ -36,48 +36,48 @@
       "code": "196170",
       "name": "알테오젠",
       "source": "FinanceDataReader NAVER:196170 (566 bars)",
-      "close": 170900.0,
-      "signal": "하락 추세·매수 보류",
-      "score": 11,
-      "target": 181700.0,
-      "upside": 8.379034561553844,
-      "rr": 0.5383950422464532,
+      "close": 182000.0,
+      "signal": "매수 보류",
+      "score": 28,
+      "target": 187900.0,
+      "upside": 8.297154533368811,
+      "rr": 0.5705145307852714,
       "gate": "기술적 추세·위험 경고 우선"
     },
     {
       "code": "277810",
       "name": "레인보우로보틱스",
       "source": "FinanceDataReader NAVER:277810 (566 bars)",
-      "close": 479500.0,
+      "close": 509000.0,
       "signal": "매수 보류",
-      "score": 65,
-      "target": 495500.0,
+      "score": 59,
+      "target": 531000.0,
       "upside": 21.625437214642346,
-      "rr": 0.9949049790761337,
+      "rr": 0.8729062285688304,
       "gate": "기술적 추세·위험 경고 우선"
     },
     {
       "code": "247540",
       "name": "에코프로비엠",
       "source": "FinanceDataReader NAVER:247540 (566 bars)",
-      "close": 81900.0,
+      "close": 89500.0,
       "signal": "매수 보류",
-      "score": 12,
-      "target": 86500.0,
-      "upside": 9.978580608310716,
-      "rr": 0.5742127152538297,
+      "score": 38,
+      "target": 96400.0,
+      "upside": 9.753477600909054,
+      "rr": 0.6013675358311709,
       "gate": "기술적 추세·위험 경고 우선"
     },
     {
       "code": "086520",
       "name": "에코프로",
       "source": "FinanceDataReader NAVER:086520 (566 bars)",
-      "close": 64600.0,
+      "close": 70500.0,
       "signal": "매수 보류",
-      "score": 0,
-      "target": 68880.0,
+      "score": 38,
+      "target": 76800.0,
       "upside": 6.254646826936883,
-      "rr": 0.36776056611036456,
+      "rr": 0.39363726506125346,
       "gate": "기술적 추세·위험 경고 우선"
     }
   ]
