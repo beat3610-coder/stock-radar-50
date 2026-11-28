@@ -5,7 +5,7 @@ import pandas as pd
 from audit_63_fast import (_calibration,_equal_weight_replay,_overlap_report,
                            _auc,_development_legacy_coefficient,_policy_results,_policy_thresholds,
                            _select_config,_select_policy,_select_r_policy,_rank_metrics,_decorate_features,
-                           _target_variant_choices,_legacy_policy_rows)
+                           _target_variant_choices,_legacy_policy_rows,_three_way_report)
 
 def trade(ticker,entry,exit_date,net,prob=.4,ev=-1.0):
     return {"ticker":ticker,"signal_date":entry,"entry_date":entry,"exit_date":exit_date,
@@ -155,5 +155,29 @@ class Audit63MetricsTests(unittest.TestCase):
         self.assertEqual(result["trades_executed"],5)
         self.assertEqual(result["max_concurrent_positions"],5)
         self.assertIn("equal initial",result["method"])
+
+    def test_three_way_report_shows_the_regime_gate_beside_the_ungated_decision(self):
+        def sample(label,pred,gated,override=False):
+            return {"label":label,"prediction":pred,"gated_prediction":gated,
+                    "regime_gate_active":override,"regime_gate_override":override,
+                    "probabilities":{"UP":.4,"DOWN":.3,"SIDEWAYS":.3},
+                    "raw_probabilities":{"UP":.4,"DOWN":.3,"SIDEWAYS":.3},
+                    "argmax_prediction":"UP","causal_prior":{"UP":.3,"DOWN":.4,"SIDEWAYS":.3}}
+        samples=[sample("DOWN","UP","DOWN",True) for _ in range(6)]+\
+                [sample("UP","UP","UP") for _ in range(4)]
+        report=_three_way_report(samples)
+        # Headline is the gated decision; the ungated one stays beside it.
+        self.assertEqual(report["accuracy_pct"],100.)
+        self.assertEqual(report["regime_gate_decision"]["predicted_counts"]["DOWN"],6)
+        self.assertAlmostEqual(report["ungated_decision"]["accuracy_pct"],40.)
+        self.assertAlmostEqual(report["accuracy_gate_minus_ungated_pp"],60.)
+        self.assertEqual(report["regime_gate_overrides_n"],6)
+        self.assertEqual(report["decision_collapse_status"],"DISTRIBUTED")
+        # Samples without a gated column keep the previous report untouched.
+        legacy=_three_way_report([{k:v for k,v in row.items()
+            if k not in ("gated_prediction","regime_gate_active","regime_gate_override")}
+            for row in samples])
+        self.assertNotIn("regime_gate_decision",legacy)
+        self.assertAlmostEqual(legacy["accuracy_pct"],40.)
 
 if __name__=="__main__":unittest.main()

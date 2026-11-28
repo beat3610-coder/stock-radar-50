@@ -66,6 +66,38 @@ PRIOR_HALF_LIFE_GRID=(40.,80.,160.,250.,400.)
 DECISION_DOMINANT_SHARE=.90
 DECISION_PINNED_SHARE=.99
 SIDEWAYS_TARGET_SHARE=.30
+# Causal regime/trend gate on the direction3 decision. After the calibration and
+# decision stages were separated the raw model still put p(UP)-p(DOWN) at
+# +0.57..+0.93 on the 2026 diagnostics, so no monotone correction can move the
+# decision and the model calls UP for almost every instrument while the market
+# trend has turned down. A separate trend rule may therefore move an UP decision
+# to the conservative class when the signal day's own index state is risk-off.
+# Every threshold is fitted on development OOF decisions only and then applied
+# unchanged to validation and diagnostic, so this is a risk rule, not a leak.
+#
+# Risk-off means the short-term trend is weak and the longer trend is broken.
+# Three pre-declared states are available, and the development fit chooses one:
+#   index                 cohort index: 20-day return weak AND (below its 200-day
+#                         mean OR more than a set drawdown below its 120-day high)
+#   index_and_instrument  the same index state AND the instrument itself below
+#                         its own 200-day mean
+#   instrument            the instrument's own 20-day return weak AND it is below
+#                         its own 200-day mean
+# The drawdown clause exists because an index can sit above its 200-day mean
+# while the stocks underneath it are already falling.
+REGIME_GATE_STATES=("index","index_and_instrument","instrument")
+REGIME_GATE_MA200_GAP_GRID=(-4.,-2.,-1.,0.,2.)
+REGIME_GATE_DRAWDOWN_GRID=(-4.,-8.,-12.,-16.)
+REGIME_GATE_INDEX_RET20_GRID=(2.,0.,-1.,-2.,-4.)
+REGIME_GATE_TARGETS=("DOWN","SIDEWAYS","SECOND_CHOICE")
+# A gate that fires on only a handful of development rows is a coincidence, not
+# a rule; and a gate that pins the whole development decision to one class trades
+# the UP pin for a DOWN pin, which the F1 guard below rejects.
+REGIME_GATE_MIN_DEV_OVERRIDES=200
+REGIME_GATE_MIN_ACCURACY_GAIN_PP=.2
+REGIME_GATE_MAX_MACRO_F1_DROP_PP=.5
+REGIME_GATE_FEATURES=("market_index_ma200_gap_pct","market_drawdown_120_pct",
+    "market_index_return_20d_pct")
 MIN_DEVELOPMENT_IC=.01
 SPREAD_CUTS=(.05,.10,.15); SIDEWAYS_MAX=(.25,.35,.45); EV_FLOORS=(0.0,.10,.20)
 BASE_FEATURES=("ret5","ret20","ret60","ret120","atr_pct","vol20_pct",
@@ -767,6 +799,183 @@ def _decision_diversity(predictions):
         "largest_class_share_pct":largest,"distinct_classes":int(sum(c>0 for c in counts.values())),
         "prediction_entropy_nats":entropy,"collapse_status":status}
 
+def _finite(value):
+    try:value=float(value)
+    except (TypeError,ValueError):return float("nan")
+    return value if np.isfinite(value) else float("nan")
+
+def _regime_off(row,params):
+    """Risk-off trend state from the row's own signal-day features.
+
+    Every input is computed through the signal-day close only: the cohort index
+    features `market_index_ma200_gap_pct` (index versus its 200-day mean),
+    `market_drawdown_120_pct` (index versus its 120-day high) and
+    `market_index_return_20d_pct`, plus the instrument's own `ma200_gap` and
+    `ret20`. Nothing later than the signal date is read, and no other row is
+    consulted. A missing input makes the state False rather than guessing.
+    """
+    if not params or params.get("mode") in (None,"none"):return False
+    def value(key):
+        try:number=float(row.get(key))
+        except (TypeError,ValueError):return float("nan")
+        return number if math.isfinite(number) else float("nan")
+    state=str(params.get("state","index"))
+    weak_ret=float(params["index_return_20d_max_pct"])
+    gap_max=float(params["ma200_gap_max_pct"])
+    if state=="instrument":
+        stock_ret=value("ret20");stock_gap=value("ma200_gap")
+        if not (math.isfinite(stock_ret) and math.isfinite(stock_gap)):return False
+        return stock_ret<=weak_ret and stock_gap<=gap_max
+    index_ret=value("market_index_return_20d_pct")
+    if not math.isfinite(index_ret) or index_ret>weak_ret:return False
+    broken=[]
+    index_gap=value("market_index_ma200_gap_pct")
+    if math.isfinite(index_gap):broken.append(index_gap<=gap_max)
+    index_drawdown=value("market_drawdown_120_pct")
+    if math.isfinite(index_drawdown):broken.append(index_drawdown<=float(params["drawdown_120_min_pct"]))
+    if not (broken and any(broken)):return False
+    if state=="index_and_instrument":
+        stock_gap=value("ma200_gap")
+        return math.isfinite(stock_gap) and stock_gap<=0.
+    return True
+
+def _apply_regime_gate(rows,probs,predictions,params):
+    """Move UP decisions to a conservative class while the index trend is risk-off.
+
+    Returns (gated_predictions, active_mask, override_mask). Probabilities are
+    untouched: the gate acts on the decision only, so its effect on Brier and on
+    the probability diagnostics is exactly zero by construction.
+    """
+    pred=np.asarray(predictions,dtype=int).copy()
+    n=len(pred)
+    active=np.asarray([_regime_off(row,params) for row in rows],dtype=bool) if n else np.zeros(0,dtype=bool)
+    override=np.zeros(n,dtype=bool)
+    if not n or not params or params.get("mode") in (None,"none"):
+        return pred,active,override
+    override=active&(pred==2)
+    if override.any():
+        target=str(params.get("target","DOWN")).upper()
+        if target=="SECOND_CHOICE":
+            p=np.asarray(probs,dtype=float)
+            pick=np.where(p[:,0]>=p[:,1],0,1)
+            pred[override]=pick[override]
+        else:
+            pred[override]=1 if target.startswith("SIDE") else 0
+    return pred,active,override
+
+def _macro_f1_predictions(y,pred):
+    scores=[]
+    for klass in range(3):
+        tp=float(np.sum((pred==klass)&(y==klass)))
+        predicted=float(np.sum(pred==klass));actual=float(np.sum(y==klass))
+        precision=tp/predicted if predicted else 0.
+        recall=tp/actual if actual else 0.
+        scores.append(2*precision*recall/(precision+recall) if precision+recall else 0.)
+    return sum(scores)/len(scores)
+
+def _fit_regime_gate(rows,probs,predictions):
+    """Fit the trend gate on development OOF decisions only.
+
+    The objective is development three-way accuracy of the resulting decision,
+    under three guards: the gate must override a meaningful number of development
+    rows, it may not pin the decision to fewer than two classes, and it may not
+    drop macro-F1 by more than REGIME_GATE_MAX_MACRO_F1_DROP_PP (so trading an UP
+    pin for a DOWN pin is rejected). Without a positive development gain the gate
+    stays off (`mode: none`) and the decision is the ungated one.
+    """
+    names=("DOWN","SIDEWAYS","UP")
+    pred=np.asarray(predictions,dtype=int)
+    if not len(rows):
+        return {"chosen":{"mode":"none","reason":"NO_ROWS"},
+                "selection":{"status":"NO_ROWS","candidates":[]}}
+    y=np.asarray([names.index(r["label_vol"]) for r in rows],dtype=int)
+    base_accuracy=float(np.mean(pred==y));base_f1=_macro_f1_predictions(y,pred)
+    index_gap=np.asarray([_finite(r.get("market_index_ma200_gap_pct")) for r in rows],dtype=float)
+    drawdown=np.asarray([_finite(r.get("market_drawdown_120_pct")) for r in rows],dtype=float)
+    index_ret=np.asarray([_finite(r.get("market_index_return_20d_pct")) for r in rows],dtype=float)
+    stock_gap=np.asarray([_finite(r.get("ma200_gap")) for r in rows],dtype=float)
+    stock_ret=np.asarray([_finite(r.get("ret20")) for r in rows],dtype=float)
+    up=pred==2
+    p=np.asarray(probs,dtype=float)
+    second=np.where(p[:,0]>=p[:,1],0,1)
+    candidates=[]
+    for state in REGIME_GATE_STATES:
+        drawdown_grid=REGIME_GATE_DRAWDOWN_GRID if state!="instrument" else (REGIME_GATE_DRAWDOWN_GRID[0],)
+        for gap_max in REGIME_GATE_MA200_GAP_GRID:
+            for drawdown_min in drawdown_grid:
+                for ret_max in REGIME_GATE_INDEX_RET20_GRID:
+                    if state=="instrument":
+                        active=np.isfinite(stock_ret)&(stock_ret<=ret_max)&\
+                            np.isfinite(stock_gap)&(stock_gap<=gap_max)
+                    else:
+                        trend_broken=np.zeros(len(rows),dtype=bool)
+                        if np.isfinite(index_gap).any():trend_broken|=np.isfinite(index_gap)&(index_gap<=gap_max)
+                        if np.isfinite(drawdown).any():trend_broken|=np.isfinite(drawdown)&(drawdown<=drawdown_min)
+                        active=np.isfinite(index_ret)&(index_ret<=ret_max)&trend_broken
+                        if state=="index_and_instrument":
+                            active&=np.isfinite(stock_gap)&(stock_gap<=0.)
+                    override=active&up
+                    overrides=int(override.sum())
+                    if not overrides:
+                        continue
+                    for target in REGIME_GATE_TARGETS:
+                        gated=pred.copy()
+                        if target=="SECOND_CHOICE":gated[override]=second[override]
+                        else:gated[override]=1 if target=="SIDEWAYS" else 0
+                        accuracy=float(np.mean(gated==y));f1=_macro_f1_predictions(y,gated)
+                        counts={names[j]:int(np.sum(gated==j)) for j in range(3)}
+                        candidates.append({"state":state,
+                            "ma200_gap_max_pct":float(gap_max),
+                            "drawdown_120_min_pct":float(drawdown_min),
+                            "index_return_20d_max_pct":float(ret_max),"target":target,
+                            "overrides_n":overrides,"activated_rows_n":int(active.sum()),
+                            "activation_share_pct":100*float(active.mean()),
+                            "accuracy_pct":100*accuracy,"accuracy_gain_pp":100*(accuracy-base_accuracy),
+                            "macro_f1_pct":100*f1,"macro_f1_delta_pp":100*(f1-base_f1),
+                            "predicted_counts":counts,
+                            "distinct_classes":int(sum(1 for c in counts.values() if c))})
+    eligible=[c for c in candidates if c["overrides_n"]>=REGIME_GATE_MIN_DEV_OVERRIDES
+              and c["distinct_classes"]>=2
+              and c["macro_f1_delta_pp"]>=-REGIME_GATE_MAX_MACRO_F1_DROP_PP]
+    improving=[c for c in eligible if c["accuracy_gain_pp"]>=REGIME_GATE_MIN_ACCURACY_GAIN_PP]
+    chosen=max(improving,key=lambda c:(c["accuracy_pct"],c["macro_f1_pct"],-c["overrides_n"])) if improving else None
+    top=sorted(candidates,key=lambda c:(c["accuracy_pct"],c["macro_f1_pct"]),reverse=True)[:12]
+    selection={"status":("DEVELOPMENT_GAIN_FOUND" if chosen else "NO_DEVELOPMENT_GAIN"),
+        "scope":"development OOF decisions only; validation and diagnostic never enter this fit",
+        "constraints":{"min_development_overrides":REGIME_GATE_MIN_DEV_OVERRIDES,
+            "min_accuracy_gain_pp":REGIME_GATE_MIN_ACCURACY_GAIN_PP,
+            "max_macro_f1_drop_pp":REGIME_GATE_MAX_MACRO_F1_DROP_PP,
+            "require_at_least_two_predicted_classes":True,
+            "require_positive_accuracy_gain":True},
+        "objective":"maximum development three-way accuracy; ties -> macro-F1, then fewer overrides",
+        "candidate_count":len(candidates),
+        "base_development_accuracy_pct":100*base_accuracy,
+        "base_development_macro_f1_pct":100*base_f1,
+        "grid":{"state":list(REGIME_GATE_STATES),
+            "ma200_gap_max_pct":list(REGIME_GATE_MA200_GAP_GRID),
+            "drawdown_120_min_pct":list(REGIME_GATE_DRAWDOWN_GRID),
+            "index_return_20d_max_pct":list(REGIME_GATE_INDEX_RET20_GRID),
+            "target":list(REGIME_GATE_TARGETS)},
+        "gate_features":list(REGIME_GATE_FEATURES),
+        "candidates":candidates,"top_candidates":top}
+    if chosen is None:
+        return {"chosen":{"mode":"none",
+            "reason":"NO_DEVELOPMENT_GAIN_UNDER_GUARDS","fitted_on":"development_only"},
+            "selection":selection}
+    params={"mode":"trend_override","state":chosen["state"],
+        "ma200_gap_max_pct":chosen["ma200_gap_max_pct"],
+        "drawdown_120_min_pct":chosen["drawdown_120_min_pct"],
+        "index_return_20d_max_pct":chosen["index_return_20d_max_pct"],
+        "target":chosen["target"],"fitted_on":"development_out_of_fold_decisions_only",
+        "development_accuracy_pct":chosen["accuracy_pct"],
+        "development_accuracy_gain_pp":chosen["accuracy_gain_pp"],
+        "development_macro_f1_delta_pp":chosen["macro_f1_delta_pp"],
+        "development_overrides_n":chosen["overrides_n"],
+        "rule":("risk_off per the fitted state (index 20-day return weak and the longer trend broken, "
+            "optionally requiring the instrument itself below its own 200-day mean); "
+            "an UP decision under risk_off becomes target")}
+    return {"chosen":params,"selection":selection}
+
 def _fit_calibration(rows,probs,priors,train_prior=None):
     """Development-only probability calibration, separate from the decision.
 
@@ -1027,7 +1236,11 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
     eval_rows=[r for r,v in zip(eval_rows,valid) if v];probs=probs[valid];target_probs=target_probs[valid]
     if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None,"temperature":temperature_info}
     raw_probs=probs.copy()
-    if period=="development" and temperature_info is None:
+    # A development call that fits its own calibration also owns the regime-gate
+    # fit; calls that receive an existing temperature_info never refit it, so the
+    # gate params reach validation and diagnostic unchanged.
+    owns_calibration=period=="development" and temperature_info is None
+    if owns_calibration:
         half_life,half_life_report=_select_prior_half_life(all_train,eval_rows)
         priors=_causal_class_priors(all_train,eval_rows,half_life_days=half_life)
         temperature_info=_fit_calibration(eval_rows,probs,priors,_class_prior(eval_rows))
@@ -1044,6 +1257,19 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
     decision_predictions=_prior_shift_decisions(probs,priors,train_prior_array,decision_tau)
     prior_divide_tau=float((temperature_info or {}).get("decision_tau_prior_divide",0.) or 0.)
     prior_divide_predictions=_prior_corrected_decisions(probs,priors,prior_divide_tau)
+    # Regime/trend gate: a causal index-state rule that may turn an UP decision
+    # into DOWN/SIDEWAYS. Fitted on this development sample only.
+    gate_info=(temperature_info or {}).get("regime_gate") or {"mode":"none"}
+    gate_selection=(temperature_info or {}).get("regime_gate_selection")
+    if owns_calibration:
+        gate_fit=_fit_regime_gate(eval_rows,probs,decision_predictions)
+        gate_info=gate_fit["chosen"]
+        gate_selection=gate_fit["selection"]
+        temperature_info["regime_gate"]=gate_info
+        temperature_info["regime_gate_selection"]=gate_selection
+    gated_predictions,gate_active,gate_override=_apply_regime_gate(
+        eval_rows,probs,decision_predictions,gate_info)
+    gate_override_n=int(gate_override.sum())
     payoffs=payoffs or (_class_payoffs(eval_rows) if period=="development" else {"DOWN":-1.,"SIDEWAYS":0.,"UP":1.})
     theta_results={}
     for theta in THETAS:
@@ -1061,6 +1287,21 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
     vol_metrics["plain_argmax_decision"]=_balanced_decision_report(eval_rows,probs.argmax(axis=1),priors,0.)
     vol_metrics["prior_divide_decision"]=_balanced_decision_report(eval_rows,prior_divide_predictions,priors,
         prior_divide_tau,rule="argmax(p / causal_prior**tau) [PR #18 rule]")
+    vol_metrics["regime_gate_decision"]=_balanced_decision_report(eval_rows,gated_predictions,priors,decision_tau,
+        rule=(gate_info or {}).get("rule","regime trend gate on the label-shift decision"))
+    gated_counts={classes[j]:int(np.sum(gated_predictions==j)) for j in range(3)}
+    vol_metrics["regime_gate"]={"params":gate_info,
+        "gate_features":list(REGIME_GATE_FEATURES),
+        "activated_rows_n":int(gate_active.sum()),
+        "activated_share_pct":100*float(gate_active.mean()) if len(gate_active) else 0.,
+        "overrides_n":gate_override_n,
+        "overrides_share_pct":100*gate_override_n/len(eval_rows) if eval_rows else 0.,
+        "predicted_counts":gated_counts,
+        "accuracy_gain_vs_ungated_pp":(100*float(np.mean(gated_predictions==np.asarray(
+            [classes.index(r["label_vol"]) for r in eval_rows],dtype=int)))
+            -float(vol_metrics["decision"].get("accuracy_pct") or 0.)),
+        "scope":"development OOF fit only" if owns_calibration else "fitted parameters reused unchanged from development",
+        "selection":gate_selection if owns_calibration else None}
     # Where does the collapse start: the model itself or the calibration? The raw
     # argmax is the out-of-fold model output before temperature and decision.
     vol_metrics["raw_argmax_decision"]=_balanced_decision_report(eval_rows,raw_probs.argmax(axis=1),priors,0.,
@@ -1081,17 +1322,26 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
         "p_sideways_p10_p50_p90":np.percentile(probs[:,1],[10,50,90]).tolist()},
       "decision_summary":{"rule":(temperature_info or {}).get("decision_rule"),"tau":decision_tau,
         "prior_half_life_days":(temperature_info or {}).get("prior_half_life_days"),
-        **_decision_diversity(decision_predictions)}}
+        **_decision_diversity(decision_predictions)},
+      "gated_decision_summary":{"rule":(gate_info or {}).get("rule"),
+        "gate_mode":(gate_info or {}).get("mode"),"overrides_n":gate_override_n,
+        **_decision_diversity(gated_predictions)}}
     if include_samples:
         result["evaluation_samples"]=[{"label":row["label_vol"],
             "prediction":classes[int(decision)],
+            "gated_prediction":classes[int(gated)],
+            "regime_gate_active":bool(active),
+            "regime_gate_override":bool(override),
             "argmax_prediction":classes[int(np.argmax(prob))],
             "probabilities":{"DOWN":float(prob[0]),"SIDEWAYS":float(prob[1]),"UP":float(prob[2])},
             "raw_probabilities":{"DOWN":float(raw[0]),"SIDEWAYS":float(raw[1]),"UP":float(raw[2])},
             "causal_prior":{"DOWN":float(prior[0]),"SIDEWAYS":float(prior[1]),"UP":float(prior[2])},
             "decision_rule":(temperature_info or {}).get("decision_rule"),
+            "market_index_ma200_gap_pct":row.get("market_index_ma200_gap_pct"),
+            "market_index_return_20d_pct":row.get("market_index_return_20d_pct"),
             "earnings_momentum":row.get("earnings_momentum")}
-            for row,prob,raw,prior,decision in zip(eval_rows,probs,raw_probs,priors,decision_predictions)]
+            for row,prob,raw,prior,decision,active,override,gated in zip(
+                eval_rows,probs,raw_probs,priors,decision_predictions,gate_active,gate_override,gated_predictions)]
     return result
 
 def _balanced_decision_report(rows,predictions,priors,tau,rule="argmax(p / causal_prior**tau)"):
@@ -1247,7 +1497,7 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
         "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC},
       "extended_pool_collection":extended_pool_collection,
       "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC,
-      "selection_rule":"Development-only walk-forward: select one model/horizon by mean datewise Spearman(P(UP), realized net return), requiring positive IC, at least 100 top-15% development candidates, a development three-way accuracy at least the live-computable causal class prior, and a decision that names at least two classes on development. Model grid covers multinomial logistic, random forest, band regression (predicted net return mapped through the frozen volatility band), a winsorised/MAD variant and a volatility-normalised (z-return) variant. Probabilities are calibrated on development OOF with temperature scaling only; the class prior is applied at the decision stage as a label-shift correction argmax(p * (causal_prior/development_prior)**tau), and the causal-prior memory (exponential half-life) and tau are both chosen on development only. Select spread + sideways-probability + net expected-value policy on development only; all selected policy OOS results are reported.",
+      "selection_rule":"Development-only walk-forward: select one model/horizon by mean datewise Spearman(P(UP), realized net return), requiring positive IC, at least 100 top-15% development candidates, a development three-way accuracy at least the live-computable causal class prior, and a decision that names at least two classes on development. Model grid covers multinomial logistic, random forest, band regression (predicted net return mapped through the frozen volatility band), a winsorised/MAD variant and a volatility-normalised (z-return) variant. Probabilities are calibrated on development OOF with temperature scaling only; the class prior is applied at the decision stage as a label-shift correction argmax(p * (causal_prior/development_prior)**tau), and the causal-prior memory (exponential half-life) and tau are both chosen on development only. A causal regime/trend gate (signal-day cohort-index 20-day return, 200-day gap and 120-day drawdown, with an optional instrument-trend confirmation) may then move an UP decision to DOWN/SIDEWAYS; its state, thresholds and target class are fitted on development OOF decisions only, with minimum-override, two-class and macro-F1 guards. Select spread + sideways-probability + net expected-value policy on development only; all selected policy OOS results are reported.",
       "feature_coverage":{"feature_names":list(FEATURES),"fixed_centers":CENTERS,"fixed_scales":SCALES,"feature_count":len(FEATURES),"cross_section_count_key":"xs_count","constant_column_policy":"recomputed from each past-only training snapshot and excluded when std is zero"}}
     direction3_eval_samples_by_cohort={}
     for cohort,pool in bycohort.items():
@@ -1450,7 +1700,8 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
     out["direction3"]["calibration_scope"]=("development OOF probabilities only: one temperature per selected model/horizon/training universe "
         f"(log-space bounds {list(TEMPERATURE_LOG_BOUNDS)}), one causal-prior memory (exponential half-life from labels observable before each signal date, window "
         f"{PRIOR_SHRINKAGE_WINDOW_DAYS} days) and one label-shift decision exponent, each chosen on development data and applied unchanged to validation and diagnostic. "
-        "The probability-level prior mixture is reported as a reference only and does not feed the decision.")
+        "The probability-level prior mixture is reported as a reference only and does not feed the decision. "
+        "The regime/trend gate is fitted on development OOF decisions only (state plus thresholds on the signal-day cohort-index 20-day return, 200-day gap and 120-day drawdown, and the conservative target class) and is applied unchanged out of sample; it never changes a probability.")
     out["direction3"]["probability_calibration"]={cohort:value.get("calibration_by_universe",{})
         for cohort,value in out["direction3"].items() if isinstance(value,dict) and "universe_comparison" in value}
     out["direction3"]["policy_results"]={cohort:{universe_name:periods for universe_name,periods in value.get("universe_comparison",{}).items()}
