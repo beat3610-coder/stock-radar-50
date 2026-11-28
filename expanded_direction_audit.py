@@ -48,7 +48,23 @@ CAUSAL_PRIOR_WINDOW_DAYS=365
 # were already observable before each signal date (chosen on development only).
 PRIOR_SHRINKAGE_WINDOW_DAYS=250
 MIN_PRIOR_ROWS=30
-DECISION_TAU_GRID=(0.,.05,.1,.15,.2,.25,.3,.35,.4,.45,.5,.55,.6,.65,.7,.75,.8,.85,.9,.95,1.,1.05,1.1,1.15,1.2)
+DECISION_TAU_GRID=(0.,.05,.1,.15,.2,.25,.3,.35,.4,.45,.5,.55,.6,.65,.7,.75,.8,.85,.9,.95,
+                   1.,1.05,1.1,1.15,1.2,1.3,1.4,1.5)
+# Temperature is fitted in log space. The old (-1.5, 1.5) box capped T at e^1.5
+# = 4.48 and every cohort in the PR #18 audit saturated there, so the shipped
+# temperature was a boundary value rather than a fitted one.
+TEMPERATURE_LOG_BOUNDS=(-2.,4.)
+# The probability-level prior mixture is reported as a reference but no longer
+# feeds the decision: mixing toward the per-date prior at weight ~0.7 compressed
+# p(UP)-p(DOWN) to +-0.03, which is what pinned every row to one class.
+MAX_REFERENCE_PRIOR_MIX=.5
+# Candidate causal-prior memories (exponential half-life in days) for the class
+# prior used by the decision rule. Chosen on development log-loss only.
+PRIOR_HALF_LIFE_GRID=(40.,80.,160.,250.,400.)
+# A decision whose single most predicted class exceeds these shares is reported
+# as pinned/dominant instead of being passed off as a calibrated classifier.
+DECISION_DOMINANT_SHARE=.90
+DECISION_PINNED_SHARE=.99
 SIDEWAYS_TARGET_SHARE=.30
 MIN_DEVELOPMENT_IC=.01
 SPREAD_CUTS=(.05,.10,.15); SIDEWAYS_MAX=(.25,.35,.45); EV_FLOORS=(0.0,.10,.20)
@@ -135,16 +151,25 @@ def korean_flow_targets(universe):
 def _development_accuracy(development_result):
     """Three-way accuracy of the development-calibrated decision rule."""
     metrics=(development_result or {}).get("metrics") or {}
-    decision=metrics.get("class_balanced_decision") or {}
+    decision=metrics.get("decision") or metrics.get("class_balanced_decision") or {}
     value=decision.get("accuracy_pct")
     return float(value) if value is not None else None
 
 def _beats_causal_prior_on_development(development_result):
-    """Model must beat the causal prior on development accuracy AND on IC sign."""
+    """Model must beat the causal prior on development accuracy AND on IC sign.
+
+    The decision also has to be non-degenerate: a rule that names one class for
+    every development row is not a classifier, even when that class happens to
+    carry the development base rate.
+    """
     metrics=(development_result or {}).get("metrics") or {}
     if not (metrics.get("datewise_spearman_mean") or 0)>0:
         return False
-    accuracy=_development_accuracy(development_result)
+    decision=metrics.get("decision") or metrics.get("class_balanced_decision") or {}
+    accuracy=decision.get("accuracy_pct")
+    diversity=decision.get("predicted_share_pct") or {}
+    if len([v for v in diversity.values() if v>=1.])<2:
+        return False
     causal=(metrics.get("probability_skill") or {}).get("causal_prior_accuracy_pct")
     if accuracy is None or causal is None:
         return False
@@ -421,13 +446,42 @@ class BandRegressionModel:
         except Exception:
             self.routine=make_pipeline(SimpleImputer(strategy="constant",fill_value=0),
                                        StandardScaler(),Ridge(alpha=max(self.alpha,1e-6))).fit(X,y)
-        residual=y-self.routine.predict(X)
+        residual=self._residual_scale(X,y)
         if self.scale=="mad":
             mad=float(np.median(np.abs(residual-np.median(residual))))*1.4826
             self.sigma=float(max(mad,np.std(residual)*.25,1e-6))
         else:
             self.sigma=float(max(np.std(residual),1e-6))
         return self
+    def _residual_scale(self,X,y,folds=5):
+        """Out-of-fold residual vector, so sigma is a forecast error.
+
+        In-sample residuals shrink with the number of fitted coefficients and
+        make P(UP)/P(DOWN) far too sharp; that overconfidence is what pushed the
+        development-fitted temperature to its upper bound. Folds are contiguous
+        blocks of the (time-ordered) training rows, so a held-out block is
+        always scored by a model that could not see it while still using only
+        the training snapshot itself.
+        """
+        n=len(y)
+        if n<folds*20:
+            self.sigma_source="in_sample_small_n"
+            return np.asarray(y,dtype=float)-self.routine.predict(X)
+        edges=np.linspace(0,n,folds+1).astype(int);residual=np.empty(n,dtype=float)
+        filled=np.zeros(n,dtype=bool);ok=True
+        for a,b in zip(edges[:-1],edges[1:]):
+            keep=np.ones(n,dtype=bool);keep[a:b]=False
+            try:
+                model=make_pipeline(SimpleImputer(strategy="constant",fill_value=0),StandardScaler(),
+                                    Ridge(alpha=max(self.alpha,1e-6)))
+                model.fit(X[keep],y[keep]);residual[a:b]=y[a:b]-model.predict(X[a:b]);filled[a:b]=True
+            except Exception:
+                ok=False;break
+        if not ok or not filled.all():
+            self.sigma_source="in_sample_fallback"
+            return np.asarray(y,dtype=float)-self.routine.predict(X)
+        self.sigma_source=f"out_of_fold_{folds}fold"
+        return residual
     def predict_proba(self,X,band=None):
         from scipy.stats import norm
         mu=np.asarray(self.routine.predict(X),dtype=float)
@@ -504,15 +558,21 @@ def _fit_temperature(rows,probs,label_key="label_vol"):
     def objective(log_t):
         calibrated=_apply_temperature(p,np.exp(log_t))
         return float(log_loss(y,calibrated,labels=[0,1,2]))
-    fit=minimize_scalar(objective,bounds=(-1.5,1.5),method="bounded",options={"xatol":1e-5})
-    return {"temperature":float(np.exp(fit.x)),"fit_n":len(y),"status":"DEVELOPMENT_OOF_TEMPERATURE_SCALING",
+    fit=minimize_scalar(objective,bounds=TEMPERATURE_LOG_BOUNDS,method="bounded",options={"xatol":1e-5})
+    log_t=float(fit.x)
+    at_bound=bool(log_t>=TEMPERATURE_LOG_BOUNDS[1]-1e-3 or log_t<=TEMPERATURE_LOG_BOUNDS[0]+1e-3)
+    return {"temperature":float(np.exp(log_t)),"temperature_log":log_t,"fit_n":len(y),
+            "status":"DEVELOPMENT_OOF_TEMPERATURE_SCALING",
+            "temperature_log_bounds":list(TEMPERATURE_LOG_BOUNDS),
+            "temperature_at_bound":at_bound,
             "development_oof_logloss_before":objective(0.),"development_oof_logloss_after":float(fit.fun)}
 
 def _choose_development_k(rows):
     """Compatibility alias for callers/tests; returns frozen cohort settings."""
     return _freeze_volatility_labels(rows)
 
-def _causal_class_priors(all_train,eval_rows,window_days=PRIOR_SHRINKAGE_WINDOW_DAYS):
+def _causal_class_priors(all_train,eval_rows,window_days=PRIOR_SHRINKAGE_WINDOW_DAYS,
+                         half_life_days=None):
     """Per-signal-date class prior from labels already observable at that date.
 
     Only labels with ``label_available_date`` strictly before the signal date are
@@ -520,6 +580,13 @@ def _causal_class_priors(all_train,eval_rows,window_days=PRIOR_SHRINKAGE_WINDOW_
     development rows only; when the window holds fewer than MIN_PRIOR_ROWS
     labels the expanding history before the signal date is used, and only when
     that is also too small does the prior fall back to uniform.
+
+    ``half_life_days`` turns the flat window into an exponentially decayed one:
+    a label that matured ``H`` days ago counts half as much as one that matured
+    today. Since the decay factor separates into a per-row weight and a
+    per-signal factor that cancels in the normalisation, the prior stays an
+    exact causal quantity (labels before the signal date, nothing else) and a
+    short half-life lets it follow a regime turn instead of averaging over it.
     """
     names=("DOWN","SIDEWAYS","UP")
     labelled=[r for r in all_train if r.get("label_vol") in names]
@@ -530,7 +597,12 @@ def _causal_class_priors(all_train,eval_rows,window_days=PRIOR_SHRINKAGE_WINDOW_
     onehot=np.zeros((len(labelled),3),dtype=float)
     for i,row in enumerate(labelled):
         onehot[i,names.index(row["label_vol"])]=1.
-    cumulative=np.vstack([np.zeros(3),np.cumsum(onehot[order],axis=0)])
+    prior_counts=onehot[order]
+    if half_life_days:
+        reference=date.fromisoformat(str(dates[-1]))
+        age=np.asarray([(date.fromisoformat(str(d))-reference).days for d in dates],dtype=float)
+        prior_counts=prior_counts*(2.0**(age/float(half_life_days)))[:,None]
+    cumulative=np.vstack([np.zeros(3),np.cumsum(prior_counts,axis=0)])
     cache={};out=np.full((len(eval_rows),3),1/3,dtype=float)
     for i,row in enumerate(eval_rows):
         signal=str(row["signal_date"])
@@ -538,13 +610,44 @@ def _causal_class_priors(all_train,eval_rows,window_days=PRIOR_SHRINKAGE_WINDOW_
             floor=(date.fromisoformat(signal)-timedelta(days=int(window_days))).isoformat()
             low=int(np.searchsorted(dates,floor,"left"));high=int(np.searchsorted(dates,signal,"left"))
             counts=cumulative[high]-cumulative[low]
-            if counts.sum()<MIN_PRIOR_ROWS:
+            if high-low<MIN_PRIOR_ROWS:
                 counts=cumulative[high]
             cache[signal]=counts/counts.sum() if counts.sum()>0 else None
         value=cache[signal]
         if value is not None:
             out[i]=value
     return out
+
+def _select_prior_half_life(all_train,eval_rows,grid=PRIOR_HALF_LIFE_GRID):
+    """Pick the causal-prior memory on development log-loss only.
+
+    The prior is a forecast of the realised class of each development row that
+    uses nothing but labels observable before that row's signal date, so scoring
+    it on development rows cannot leak. Validation and diagnostic rows only ever
+    receive the half-life chosen here.
+    """
+    names=("DOWN","SIDEWAYS","UP")
+    if not eval_rows:
+        return None,{"status":"NO_DEVELOPMENT_ROWS"}
+    y=np.asarray([names.index(r["label_vol"]) for r in eval_rows],dtype=int)
+    best=(None,None);table={}
+    for half_life in tuple(grid)+(None,):
+        priors=_causal_class_priors(all_train,eval_rows,half_life_days=half_life)
+        picked=np.clip(priors[np.arange(len(y)),y],1e-6,1.)
+        logloss=float(-np.mean(np.log(picked)))
+        argmax_accuracy=100*float(np.mean(priors.argmax(axis=1)==y))
+        table["flat_250d" if half_life is None else f"half_life_{int(half_life)}d"]={
+            "prior_log_loss_nats":logloss,"prior_argmax_accuracy_pct":argmax_accuracy}
+        if best[1] is None or logloss<best[1]-1e-12:best=(half_life,logloss)
+    return best[0],{"selected_half_life_days":best[0],"basis":"minimum development causal-prior log-loss",
+        "candidates":table,"window_days":PRIOR_SHRINKAGE_WINDOW_DAYS}
+
+def _class_prior(rows):
+    names=("DOWN","SIDEWAYS","UP")
+    if not rows:return {name:1/3 for name in names}
+    counts={name:sum(1 for r in rows if r.get("label_vol")==name) for name in names}
+    total=sum(counts.values())
+    return {name:(counts[name]/total if total else 1/3) for name in names}
 
 def _multiclass_brier(rows,probs,label_key="label_vol"):
     names=("DOWN","SIDEWAYS","UP")
@@ -569,10 +672,12 @@ def _apply_prior_mix(probs,priors,weight):
     return mixed/mixed.sum(axis=1,keepdims=True)
 
 def _prior_corrected_decisions(probs,priors,tau):
-    """Argmax of p/q^tau: a class-balanced decision under a prior shift.
+    """Argmax of p/q^tau (the PR #18 rule), kept for a like-for-like comparison.
 
-    tau=0 reproduces the plain probability argmax. A positive tau lowers classes
-    the causal prior already expects, so a rare class can still be chosen.
+    tau=0 reproduces the plain probability argmax. This rule divides by the
+    causal prior alone even though the model already learned the training class
+    prior, so on a development period with a different class mix it can look
+    balanced while never expressing the model's own ranking differences.
     """
     tau=float(tau or 0.)
     if tau<=0:
@@ -581,8 +686,49 @@ def _prior_corrected_decisions(probs,priors,tau):
         np.power(np.clip(np.asarray(priors,dtype=float),1e-3,1.),tau)
     return adjusted.argmax(axis=1)
 
-def _fit_decision_tau(rows,probs,priors):
+def _prior_shift_decisions(probs,priors,train_prior,tau):
+    """Argmax of p * (causal_prior / training_prior)^tau.
+
+    This is the standard label-shift correction: the model's probabilities
+    already carry the training class mix, so only the *change* in the class mix
+    between training and the signal date may move a decision. It is a
+    multiplicative reweighting, so the within-row ordering of the model's
+    likelihood ratios is preserved instead of being averaged away by a mixture.
+    tau=0 is the plain argmax of the calibrated probabilities.
+    """
+    tau=float(tau or 0.)
+    p=np.asarray(probs,dtype=float)
+    if tau<=0:
+        return p.argmax(axis=1)
+    base=np.asarray(train_prior,dtype=float)
+    if base.ndim==1:
+        base=base.reshape(1,-1)
+    elif base.shape[0]!=len(p):
+        base=base.reshape(-1)[:3].reshape(1,3)
+    base=np.clip(base,1e-6,1.)
+    now=np.clip(np.asarray(priors,dtype=float),1e-6,1.)
+    return (p*np.power(now/base,tau)).argmax(axis=1)
+
+def _fit_decision_tau(rows,probs,priors,train_prior=None):
     """Decision threshold chosen on development accuracy only."""
+    names=("DOWN","SIDEWAYS","UP")
+    y=np.asarray([names.index(r["label_vol"]) for r in rows],dtype=int)
+    if train_prior is None:
+        train_prior=np.asarray([_class_prior(rows)[n] for n in names],dtype=float)
+    elif isinstance(train_prior,dict):
+        train_prior=np.asarray([float(train_prior.get(n,1/3)) for n in names],dtype=float)
+    else:
+        train_prior=np.asarray(train_prior,dtype=float).reshape(-1)
+    if train_prior.shape!=(3,):
+        train_prior=np.asarray([_class_prior(rows)[n] for n in names],dtype=float)
+    best=(-1.,0.)
+    for tau in DECISION_TAU_GRID:
+        accuracy=float(np.mean(_prior_shift_decisions(probs,priors,train_prior,tau)==y))
+        if accuracy>best[0]+1e-12:best=(accuracy,float(tau))
+    return best[1],best[0]
+
+def _fit_decision_tau_prior_divide(rows,probs,priors):
+    """Same grid for the PR #18 rule, so the two decision rules are compared."""
     names=("DOWN","SIDEWAYS","UP")
     y=np.asarray([names.index(r["label_vol"]) for r in rows],dtype=int)
     best=(-1.,0.)
@@ -591,25 +737,95 @@ def _fit_decision_tau(rows,probs,priors):
         if accuracy>best[0]+1e-12:best=(accuracy,float(tau))
     return best[1],best[0]
 
-def _fit_calibration(rows,probs,priors):
-    """Development-only temperature, prior shrinkage and decision threshold."""
+def _stance_dispersion(probs):
+    """How far the model's UP-minus-DOWN stance actually varies row to row."""
+    p=np.asarray(probs,dtype=float)
+    if not len(p):return {"n":0}
+    stance=p[:,2]-p[:,0]
+    q=np.percentile(stance,[10,50,90])
+    return {"n":int(len(p)),"p_up_minus_p_down_p10_p50_p90":[float(q[0]),float(q[1]),float(q[2])],
+        "stance_iqr":float(np.percentile(stance,75)-np.percentile(stance,25)),
+        "stance_std":float(np.std(stance))}
+
+def _decision_diversity(predictions):
+    """Distribution of the decision itself, with an explicit collapse label."""
+    names=("DOWN","SIDEWAYS","UP")
+    pred=np.asarray(predictions,dtype=int)
+    n=len(pred)
+    if not n:return {"n":0,"collapse_status":"NO_ROWS"}
+    counts={name:int(np.sum(pred==j)) for j,name in enumerate(names)}
+    shares={name:(100*counts[name]/n) for name in names}
+    largest=max(shares.values())
+    if largest>=100*DECISION_PINNED_SHARE:
+        status="ONE_CLASS_PINNED"
+    elif largest>=100*DECISION_DOMINANT_SHARE:
+        status="ONE_CLASS_DOMINANT"
+    else:
+        status="DISTRIBUTED"
+    entropy=float(-sum((c/n)*math.log(c/n) for c in counts.values() if c))
+    return {"n":n,"predicted_counts":counts,"predicted_share_pct":shares,
+        "largest_class_share_pct":largest,"distinct_classes":int(sum(c>0 for c in counts.values())),
+        "prediction_entropy_nats":entropy,"collapse_status":status}
+
+def _fit_calibration(rows,probs,priors,train_prior=None):
+    """Development-only probability calibration, separate from the decision.
+
+    Two products with two jobs:
+
+    * probability: development-OOF temperature scaling (fitted on log-loss).
+    * decision: a label-shift rule argmax(p * (causal_prior/train_prior)**tau)
+      with tau fitted on development three-way accuracy.
+
+    The PR #18 pipeline mixed the probability toward the causal prior and then
+    divided the mixture by that same prior, so the two corrections nearly
+    cancelled while the mixture compressed the model's per-row differences to
+    a few hundredths. Both effects are removed here; the mixture is reported as
+    a reference (its development Brier gain and its dispersion cost) so the
+    trade-off stays visible.
+    """
     base=_fit_temperature(rows,probs)
     temperature=float(base.get("temperature",1.0))
     scaled=_apply_temperature(probs,temperature)
+    names=("DOWN","SIDEWAYS","UP")
+    train_prior=train_prior if train_prior is not None else _class_prior(rows)
+    if isinstance(train_prior,dict):
+        train_prior=np.asarray([float(train_prior.get(name,1/3)) for name in names],dtype=float)
+    else:
+        train_prior=np.asarray(train_prior,dtype=float).reshape(-1)
+    if train_prior.shape!=(3,):
+        train_prior=np.asarray([_class_prior(rows)[name] for name in names],dtype=float)
+    y=np.asarray([names.index(r["label_vol"]) for r in rows],dtype=int)
+    tau,accuracy=_fit_decision_tau(rows,scaled,priors,train_prior)
+    tau_divide,accuracy_divide=_fit_decision_tau_prior_divide(rows,scaled,priors)
+    predictions=_prior_shift_decisions(scaled,priors,train_prior,tau)
     weight=_fit_prior_mix(rows,scaled,priors)
-    mixed=_apply_prior_mix(scaled,priors,weight)
-    tau,accuracy=_fit_decision_tau(rows,mixed,priors)
+    reference_weight=float(min(max(weight,0.),MAX_REFERENCE_PRIOR_MIX))
+    reference_mixed=_apply_prior_mix(scaled,priors,reference_weight)
     result=dict(base)
-    result.update({"prior_mix":float(weight),"prior_window_days":PRIOR_SHRINKAGE_WINDOW_DAYS,
+    result.update({"prior_window_days":PRIOR_SHRINKAGE_WINDOW_DAYS,
         "decision_tau":float(tau),
-        "development_brier_before_prior_mix":_multiclass_brier(rows,scaled),
-        "development_brier_after_prior_mix":_multiclass_brier(rows,mixed),
-        "development_accuracy_argmax_pct":100*float(np.mean(mixed.argmax(axis=1)==
-            np.asarray([("DOWN","SIDEWAYS","UP").index(r["label_vol"]) for r in rows]))),
+        "decision_tau_prior_divide":float(tau_divide),
+        "decision_rule":"argmax(p * (causal_prior / development_prior)**tau)",
+        "decision_rule_prior_divide":"argmax(p / causal_prior**tau) [PR #18 rule, comparison only]",
+        "train_prior":{name:float(train_prior[j]) for j,name in enumerate(names)},
+        "probability_mixing":"NOT_APPLIED: the prior mixture feeds only the reference Brier below",
+        "prior_mix":0.,
+        "reference_prior_mix":reference_weight,
+        "reference_prior_mix_uncapped":float(weight),
+        "reference_prior_mix_cap":MAX_REFERENCE_PRIOR_MIX,
+        "development_brier_temperature_only":_multiclass_brier(rows,scaled),
+        "development_brier_reference_prior_mix":_multiclass_brier(rows,reference_mixed),
+        "development_accuracy_argmax_pct":100*float(np.mean(scaled.argmax(axis=1)==y)),
         "development_accuracy_after_decision_pct":100*float(accuracy),
-        "scope":"development out-of-fold predictions only; applied unchanged to validation and diagnostic"})
+        "development_accuracy_prior_divide_pct":100*float(accuracy_divide),
+        "development_dispersion_temperature_only":_stance_dispersion(scaled),
+        "development_dispersion_reference_prior_mix":_stance_dispersion(reference_mixed),
+        "development_decision_diversity":_decision_diversity(predictions),
+        "scope":"development out-of-fold predictions only; temperature, prior half-life and tau are applied unchanged to validation and diagnostic"})
+    result["development_brier_reference_gain"]=result["development_brier_temperature_only"]-\
+        result["development_brier_reference_prior_mix"]
     if result.get("status")=="INSUFFICIENT_DEV_OOF_FOR_CALIBRATION":
-        result.update({"prior_mix":0.,"decision_tau":0.})
+        result.update({"decision_tau":0.,"decision_tau_prior_divide":0.,"reference_prior_mix":0.})
     return result
 
 def _ece(y,p,klass):
@@ -621,8 +837,9 @@ def _ece(y,p,klass):
             bins.append({"bin":f"{lo:.1f}-{hi:.1f}","n":int(mask.sum()),"confidence":conf,"observed":acc})
     return {"ece":ece,"bins":bins}
 
-def _metrics(rows,probs,theta=.5,label_key=None):
-    names=("DOWN","SIDEWAYS","UP"); label_key=label_key or f"label_{theta}"; y=np.asarray([names.index(r[label_key]) for r in rows]); pred=probs.argmax(axis=1)
+def _metrics(rows,probs,theta=.5,label_key=None,predictions=None):
+    names=("DOWN","SIDEWAYS","UP"); label_key=label_key or f"label_{theta}"; y=np.asarray([names.index(r[label_key]) for r in rows])
+    pred=(np.asarray(predictions,dtype=int) if predictions is not None else probs.argmax(axis=1))
     cm=confusion_matrix(y,pred,labels=[0,1,2]);pr,re,fs,_=precision_recall_fscore_support(y,pred,labels=[0,1,2],zero_division=0)
     briers=[];eces={}
     for j,name in enumerate(names):
@@ -809,34 +1026,51 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
     valid=np.asarray([r["label_available_date"]<(TRAIN_END if period=="development" else VALID_END if period=="validation" else HOLDOUT_END) for r in eval_rows])
     eval_rows=[r for r,v in zip(eval_rows,valid) if v];probs=probs[valid];target_probs=target_probs[valid]
     if not eval_rows:return {"n":0,"metrics":None,"buy_policy":None,"temperature":temperature_info}
+    raw_probs=probs.copy()
     if period=="development" and temperature_info is None:
-        priors=_causal_class_priors(all_train,eval_rows)
-        temperature_info=_fit_calibration(eval_rows,probs,priors)
-    elif period=="development":
-        priors=_causal_class_priors(all_train,eval_rows)
+        half_life,half_life_report=_select_prior_half_life(all_train,eval_rows)
+        priors=_causal_class_priors(all_train,eval_rows,half_life_days=half_life)
+        temperature_info=_fit_calibration(eval_rows,probs,priors,_class_prior(eval_rows))
+        temperature_info["prior_half_life_days"]=half_life
+        temperature_info["prior_half_life_selection"]=half_life_report
     else:
-        priors=_causal_class_priors(all_train,eval_rows)
+        half_life=(temperature_info or {}).get("prior_half_life_days")
+        priors=_causal_class_priors(all_train,eval_rows,half_life_days=half_life)
     temperature=float((temperature_info or {}).get("temperature",1.0))
-    probs=_apply_temperature(probs,temperature)
-    prior_mix=float((temperature_info or {}).get("prior_mix",0.) or 0.)
-    probs=_apply_prior_mix(probs,priors,prior_mix)
+    probs=_apply_temperature(raw_probs,temperature)
+    train_prior=(temperature_info or {}).get("train_prior") or _class_prior(eval_rows)
+    train_prior_array=np.asarray([float(train_prior.get(name,1/3)) for name in classes],dtype=float)
     decision_tau=float((temperature_info or {}).get("decision_tau",0.) or 0.)
-    balanced_predictions=_prior_corrected_decisions(probs,priors,decision_tau)
+    decision_predictions=_prior_shift_decisions(probs,priors,train_prior_array,decision_tau)
+    prior_divide_tau=float((temperature_info or {}).get("decision_tau_prior_divide",0.) or 0.)
+    prior_divide_predictions=_prior_corrected_decisions(probs,priors,prior_divide_tau)
     payoffs=payoffs or (_class_payoffs(eval_rows) if period=="development" else {"DOWN":-1.,"SIDEWAYS":0.,"UP":1.})
     theta_results={}
     for theta in THETAS:
         fixed=_metrics(eval_rows,probs,theta)
         theta_results[str(theta)]={"metrics":fixed}
-    vol_metrics=_metrics(eval_rows,probs,label_key="label_vol")
+    vol_metrics=_metrics(eval_rows,probs,label_key="label_vol",predictions=decision_predictions)
     target_actual=np.asarray([int(r.get("target_touch_theta_0.5")=="TARGET_FIRST") for r in eval_rows],dtype=float)
     target_report={"n":len(eval_rows),"observed_target_first_pct":100*float(target_actual.mean()),
       "mean_predicted_probability_pct":100*float(target_probs.mean()),"brier":float(np.mean((target_probs-target_actual)**2))}
     vol_metrics["target_hit_probability"]=target_report
     vol_metrics["causal_prior_baseline"]=_causal_prior_baseline(all_train,eval_rows)
     vol_metrics["probability_skill"]=_probability_skill(eval_rows,probs,priors)
-    vol_metrics["class_balanced_decision"]=_balanced_decision_report(eval_rows,balanced_predictions,priors,
-        decision_tau)
+    vol_metrics["decision"]=_balanced_decision_report(eval_rows,decision_predictions,priors,decision_tau,
+        rule=(temperature_info or {}).get("decision_rule","argmax(p * (causal_prior / development_prior)**tau)"))
     vol_metrics["plain_argmax_decision"]=_balanced_decision_report(eval_rows,probs.argmax(axis=1),priors,0.)
+    vol_metrics["prior_divide_decision"]=_balanced_decision_report(eval_rows,prior_divide_predictions,priors,
+        prior_divide_tau,rule="argmax(p / causal_prior**tau) [PR #18 rule]")
+    # Where does the collapse start: the model itself or the calibration? The raw
+    # argmax is the out-of-fold model output before temperature and decision.
+    vol_metrics["raw_argmax_decision"]=_balanced_decision_report(eval_rows,raw_probs.argmax(axis=1),priors,0.,
+        rule="argmax(raw development-OOF model probabilities)")
+    vol_metrics["probability_dispersion"]={
+        "raw":_stance_dispersion(raw_probs),"calibrated":_stance_dispersion(probs),
+        "raw_brier":_multiclass_brier(eval_rows,raw_probs),
+        "calibrated_brier":_multiclass_brier(eval_rows,probs),
+        "reference_prior_mix_dispersion":_stance_dispersion(_apply_prior_mix(
+            probs,priors,float((temperature_info or {}).get("reference_prior_mix",0.) or 0.)))}
     policies=_policy_table(eval_rows,probs,payoffs)
     result={"n":len(eval_rows),"metrics":vol_metrics,"fixed_band_metrics":{k:v["metrics"] for k,v in theta_results.items()},
       "theta_results":theta_results,"buy_policy_candidates":policies,"buy_policy":None,
@@ -844,33 +1078,36 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
       "policy_selection_scope":"development only; thresholds are spread, sideways-probability, and net EV after existing costs",
       "probability_sample":{"p_up_p10_p50_p90":np.percentile(probs[:,2],[10,50,90]).tolist(),
         "p_down_p10_p50_p90":np.percentile(probs[:,0],[10,50,90]).tolist(),
-        "p_sideways_p10_p50_p90":np.percentile(probs[:,1],[10,50,90]).tolist()}}
+        "p_sideways_p10_p50_p90":np.percentile(probs[:,1],[10,50,90]).tolist()},
+      "decision_summary":{"rule":(temperature_info or {}).get("decision_rule"),"tau":decision_tau,
+        "prior_half_life_days":(temperature_info or {}).get("prior_half_life_days"),
+        **_decision_diversity(decision_predictions)}}
     if include_samples:
         result["evaluation_samples"]=[{"label":row["label_vol"],
-            "prediction":classes[int(balanced)],
+            "prediction":classes[int(decision)],
             "argmax_prediction":classes[int(np.argmax(prob))],
             "probabilities":{"DOWN":float(prob[0]),"SIDEWAYS":float(prob[1]),"UP":float(prob[2])},
+            "raw_probabilities":{"DOWN":float(raw[0]),"SIDEWAYS":float(raw[1]),"UP":float(raw[2])},
             "causal_prior":{"DOWN":float(prior[0]),"SIDEWAYS":float(prior[1]),"UP":float(prior[2])},
+            "decision_rule":(temperature_info or {}).get("decision_rule"),
             "earnings_momentum":row.get("earnings_momentum")}
-            for row,prob,prior,balanced in zip(eval_rows,probs,priors,balanced_predictions)]
+            for row,prob,raw,prior,decision in zip(eval_rows,probs,raw_probs,priors,decision_predictions)]
     return result
 
-def _balanced_decision_report(rows,predictions,priors,tau):
-    """Argmax versus class-balanced decision on the SAME calibrated probabilities.
-
-    The plain argmax of a calibrated model can stay pinned to one class when its
-    class prior is skewed. The balanced rule divides by the causal prior so a
-    class the prior already expects has to clear a higher probability bar; it is
-    reported next to the argmax instead of replacing it, so the accuracy cost of
-    un-skewing the predictions stays visible.
-    """
+def _balanced_decision_report(rows,predictions,priors,tau,rule="argmax(p / causal_prior**tau)"):
+    """Accuracy and class spread of one decision rule on the same rows."""
     names=("DOWN","SIDEWAYS","UP")
     if not len(rows or []):
-        return {"n":0}
+        return {"n":0,"collapsed":False,"collapse_status":"NO_ROWS"}
     y=np.asarray([names.index(r["label_vol"]) for r in rows],dtype=int)
     predictions=np.asarray(predictions,dtype=int)
-    out={"n":len(y),"tau":float(tau),"rule":"argmax(p / causal_prior**tau)",
+    diversity=_decision_diversity(predictions)
+    out={"n":len(y),"tau":float(tau),"rule":rule,
          "predicted_counts":{name:int(np.sum(predictions==j)) for j,name in enumerate(names)},
+         "predicted_share_pct":diversity["predicted_share_pct"],
+         "largest_class_share_pct":diversity["largest_class_share_pct"],
+         "collapse_status":diversity["collapse_status"],
+         "collapsed":diversity["collapse_status"] in ("ONE_CLASS_PINNED","ONE_CLASS_DOMINANT"),
          "accuracy_pct":100*float(np.mean(predictions==y)),
          "class_metrics":{}}
     for j,name in enumerate(names):
@@ -1010,7 +1247,7 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
         "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC},
       "extended_pool_collection":extended_pool_collection,
       "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC,
-      "selection_rule":"Development-only walk-forward: select one model/horizon by mean datewise Spearman(P(UP), realized net return), requiring positive IC, at least 100 top-15% development candidates, and development three-way accuracy at least the live-computable causal class prior. Model grid covers multinomial logistic, random forest, band regression (predicted net return mapped through the frozen volatility band), a winsorised/MAD variant and a volatility-normalised (z-return) variant. Calibrate multiclass probabilities on development OOF: temperature, shrinkage toward the per-signal-date causal class prior (weight fitted on development Brier), and a class-balanced decision threshold fitted on development accuracy. Select spread + sideways-probability + net expected-value policy on development only; all selected policy OOS results are reported.",
+      "selection_rule":"Development-only walk-forward: select one model/horizon by mean datewise Spearman(P(UP), realized net return), requiring positive IC, at least 100 top-15% development candidates, a development three-way accuracy at least the live-computable causal class prior, and a decision that names at least two classes on development. Model grid covers multinomial logistic, random forest, band regression (predicted net return mapped through the frozen volatility band), a winsorised/MAD variant and a volatility-normalised (z-return) variant. Probabilities are calibrated on development OOF with temperature scaling only; the class prior is applied at the decision stage as a label-shift correction argmax(p * (causal_prior/development_prior)**tau), and the causal-prior memory (exponential half-life) and tau are both chosen on development only. Select spread + sideways-probability + net expected-value policy on development only; all selected policy OOS results are reported.",
       "feature_coverage":{"feature_names":list(FEATURES),"fixed_centers":CENTERS,"fixed_scales":SCALES,"feature_count":len(FEATURES),"cross_section_count_key":"xs_count","constant_column_policy":"recomputed from each past-only training snapshot and excluded when std is zero"}}
     direction3_eval_samples_by_cohort={}
     for cohort,pool in bycohort.items():
@@ -1123,7 +1360,8 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
                   "training_rows_n":len(training),"training_scope":spec["training_scope"],
                   "evaluation_rows_n":len(fixed_eval_rows),"evaluation_tickers_n":spec["evaluation_tickers_n"],
                   "all_development_grid_policy_results":grid if period=="development" else None,
-                  "probability_sample":raw.get("probability_sample")}
+                  "probability_sample":raw.get("probability_sample"),
+                  "decision_summary":raw.get("decision_summary")}
             if fit_name=="63_audit_symbols":
                 cohort_report["selected_policy_thresholds"].update(
                     {"calibration":fit_dev.get("temperature"),"class_payoffs":fit_payoffs})
@@ -1209,9 +1447,10 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
         out["direction3"][cohort]=cohort_report
     out["direction3"]["TIGER_ETF"]={"status":"NO_INDEPENDENT_TRAINING_UNIVERSE","evaluation_rows_n":len(special_eval.get("TIGER_ETF",[])),
       "reason":"ETFs are kept as a separate cohort; the expanded 300-equity pool does not mix them with Korean ordinary shares."}
-    out["direction3"]["calibration_scope"]=("development OOF probabilities only: one scalar temperature, one causal-prior shrinkage weight "
-        f"(prior window {PRIOR_SHRINKAGE_WINDOW_DAYS} days from labels observable before each signal date) and one class-balanced "
-        "decision threshold per selected model/horizon/training universe; applied unchanged to validation and diagnostic")
+    out["direction3"]["calibration_scope"]=("development OOF probabilities only: one temperature per selected model/horizon/training universe "
+        f"(log-space bounds {list(TEMPERATURE_LOG_BOUNDS)}), one causal-prior memory (exponential half-life from labels observable before each signal date, window "
+        f"{PRIOR_SHRINKAGE_WINDOW_DAYS} days) and one label-shift decision exponent, each chosen on development data and applied unchanged to validation and diagnostic. "
+        "The probability-level prior mixture is reported as a reference only and does not feed the decision.")
     out["direction3"]["probability_calibration"]={cohort:value.get("calibration_by_universe",{})
         for cohort,value in out["direction3"].items() if isinstance(value,dict) and "universe_comparison" in value}
     out["direction3"]["policy_results"]={cohort:{universe_name:periods for universe_name,periods in value.get("universe_comparison",{}).items()}
