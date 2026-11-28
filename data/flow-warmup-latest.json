@@ -1,0 +1,115 @@
+{
+  "source": "Naver mobile stock trend API",
+  "requested_start": "2015-12-01",
+  "requested_end": "2026-11-13",
+  "extended_296_pool_attempted": false,
+  "requested_symbols": 2,
+  "preexisting_reused_symbols": 0,
+  "attempted_symbols": 0,
+  "available_symbols": 0,
+  "newly_available_symbols": 0,
+  "total_requests_n": 0,
+  "rows_n": 0,
+  "new_rows_n": 0,
+  "budget_seconds": 0.0,
+  "budget_used_seconds": 0.0,
+  "budget_exhausted": true,
+  "workers": 1,
+  "attempted_tickers": [],
+  "failures": [],
+  "not_attempted": [
+    {
+      "ticker": "005930",
+      "name": "삼성전자",
+      "cohort": "KOSPI",
+      "market": "KR",
+      "reason": "flow time budget exhausted before request"
+    },
+    {
+      "ticker": "247540",
+      "name": "에코프로비엠",
+      "cohort": "KOSDAQ",
+      "market": "KQ",
+      "reason": "flow time budget exhausted before request"
+    }
+  ],
+  "by_ticker": {
+    "005930": {
+      "ticker": "005930",
+      "name": "삼성전자",
+      "cohort": "KOSPI",
+      "market": "KR",
+      "status": "not_attempted_budget",
+      "attempted": false,
+      "available": false,
+      "rows_n": 0,
+      "requests_n": 0,
+      "reason": "flow time budget exhausted before request"
+    },
+    "247540": {
+      "ticker": "247540",
+      "name": "에코프로비엠",
+      "cohort": "KOSDAQ",
+      "market": "KQ",
+      "status": "not_attempted_budget",
+      "attempted": false,
+      "available": false,
+      "rows_n": 0,
+      "requests_n": 0,
+      "reason": "flow time budget exhausted before request"
+    }
+  },
+  "retry_log": [],
+  "coverage_by_cohort": {
+    "KOSPI": {
+      "requested_symbols": 1,
+      "preexisting_reused_symbols": 0,
+      "attempted_symbols": 0,
+      "available_symbols": 0,
+      "coverage_pct": 0.0,
+      "rows_n": 0
+    },
+    "KOSDAQ": {
+      "requested_symbols": 1,
+      "preexisting_reused_symbols": 0,
+      "attempted_symbols": 0,
+      "available_symbols": 0,
+      "coverage_pct": 0.0,
+      "rows_n": 0
+    }
+  },
+  "symbols": {
+    "005930": {
+      "cohort": "KOSPI",
+      "market": "KR",
+      "status": "not_attempted_budget",
+      "first_date": null,
+      "last_date": null,
+      "rows_n": 0,
+      "requests_n": 0,
+      "attempted": false,
+      "available": false,
+      "failure_reason": "flow time budget exhausted before request",
+      "failures": []
+    },
+    "247540": {
+      "cohort": "KOSDAQ",
+      "market": "KQ",
+      "status": "not_attempted_budget",
+      "first_date": null,
+      "last_date": null,
+      "rows_n": 0,
+      "requests_n": 0,
+      "attempted": false,
+      "available": false,
+      "failure_reason": "flow time budget exhausted before request",
+      "failures": []
+    }
+  },
+  "uncompleted_tickers": [
+    "005930",
+    "247540"
+  ],
+  "failure_tickers": [],
+  "exit_policy": "Partial completion is reported and exits successfully; cached pages allow the next dispatch to resume."
+}

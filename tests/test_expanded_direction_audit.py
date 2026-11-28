@@ -7,7 +7,8 @@ import numpy as np
 import pandas as pd
 
 from expanded_direction_audit import (
-    EXCESS_LABEL_FALLBACK_STATUS, LABEL_MODE_BY_COHORT, MIN_EXCESS_GROUP_N, _attach_label_returns,
+    COST_PCT, EXCESS_LABEL_FALLBACK_STATUS, LABEL_MODE_BY_COHORT, MIN_EXCESS_GROUP_N,
+    _attach_label_returns, _cohort_basket_returns,
     _backtest_model, _label_mode, _label_net, _metrics_net_key,
     FEATURES, FLOW_FEATURES, MIN_DEVELOPMENT_IC, MODEL_KINDS, PRIOR_SHRINKAGE_WINDOW_DAYS,
     REFIT_MONTH, _apply_prior_mix, _beats_causal_prior_on_development, _causal_class_priors,
@@ -512,6 +513,32 @@ class DirectionLabelModeTests(unittest.TestCase):
         self.assertEqual({r["label_vol"] for r in rows},{"DOWN","SIDEWAYS","UP"})
         down=[r for r in rows if r["net_label_pct"]<0 and abs(r["net_label_pct"])>report["k"]]
         self.assertTrue(down and all(r["label_vol"]=="DOWN" for r in down))
+
+    def test_cohort_basket_is_priced_from_every_member_on_every_date(self):
+        dates=pd.bdate_range("2024-01-01",periods=40)
+        frames={}
+        for name,drift in (("AAA",.005),("BBB",.01),("CCC",-.004)):
+            px=100*np.cumprod(np.full(len(dates),1+drift))
+            frames[name]=pd.DataFrame({"Open":px*.995,"High":px*1.01,"Low":px*.99,
+                                       "Close":px,"Volume":1000.},index=dates)
+        basket=_cohort_basket_returns(frames,min_members_n=3)
+        day=dates[3].date().isoformat()
+        h=20
+        expected=np.mean([100*(frames[n].Close.iloc[3+h]/frames[n].Open.iloc[4]-1)-COST_PCT
+                          for n in frames])
+        self.assertIn(h,basket)
+        self.assertAlmostEqual(basket[h][day]["mean_net_pct"],float(expected),places=9)
+        self.assertEqual(basket[h][day]["members_n"],3)
+        # A single signal row on that date still gets a full-cohort benchmark.
+        row={"cohort":"KOSDAQ","signal_date":day,"horizon":h,"net_pct":5.0}
+        _attach_label_returns([row],baskets={"KOSDAQ":basket},min_group_n=3)
+        self.assertAlmostEqual(row["net_label_pct"],5.0-float(expected),places=9)
+        self.assertEqual(row["cohort_excess_group_n"],3)
+
+    def test_basket_rows_without_a_priced_date_are_left_unlabelled(self):
+        row={"cohort":"KOSDAQ","signal_date":"2030-01-01","horizon":20,"net_pct":1.0}
+        _attach_label_returns([row],baskets={"KOSDAQ":{20:{}}})
+        self.assertFalse(np.isfinite(row["net_label_pct"]))
 
     def test_thin_basket_rows_are_left_unlabelled_instead_of_substituted(self):
         rows=[{"cohort":"KOSDAQ","label_available_date":"2025-10-01","volatility_unit_pct":1.0,

@@ -168,15 +168,51 @@ def _label_net(row):
     value=row.get("net_label_pct")
     return float(row["net_pct"]) if value is None else float(value)
 
-def _attach_label_returns(rows,min_group_n=MIN_EXCESS_GROUP_N):
+def _cohort_basket_returns(frames,horizons=HORIZONS,min_members_n=MIN_EXCESS_GROUP_N):
+    """Equal-weighted same-cohort basket net return per signal date and horizon.
+
+    Every loaded member of the cohort contributes its own next-open-to-horizon
+    close net return on every date, so the benchmark exists for each signal date
+    even when only a few members emit a signal row on that date (ticker history
+    lengths shift the signal grid). The basket value for a date and horizon uses
+    that horizon's exit close only, i.e. the same prices its member labels need.
+    """
+    sums=defaultdict(dict);counts=defaultdict(dict)
+    for frame in (frames or {}).values():
+        if frame is None or getattr(frame,"empty",True):continue
+        if not {"Open","Close"}.issubset(set(frame.columns)):continue
+        index=pd.DatetimeIndex(frame.index)
+        if len(index)<2:continue
+        open_=np.asarray(frame.Open,dtype=float);close_=np.asarray(frame.Close,dtype=float)
+        days=[pd.Timestamp(day).date().isoformat() for day in index]
+        for horizon in horizons:
+            if len(index)<=horizon+1:continue
+            for i in range(1,len(index)-horizon):
+                day=days[i]
+                if day<SAMPLE_START or day>=HOLDOUT_END:continue
+                entry=open_[i+1];exit_=close_[i+horizon]
+                if not (np.isfinite(entry) and np.isfinite(exit_) and entry>0):continue
+                sums[horizon][day]=sums[horizon].get(day,0.0)+100*(exit_/entry-1)-COST_PCT
+                counts[horizon][day]=counts[horizon].get(day,0)+1
+    result={}
+    for horizon in horizons:
+        result[horizon]={day:{"mean_net_pct":sums[horizon][day]/counts[horizon][day],
+                              "members_n":counts[horizon][day]}
+                         for day in sums[horizon] if counts[horizon][day]>=int(min_members_n)}
+    return result
+
+def _attach_label_returns(rows,baskets=None,min_group_n=MIN_EXCESS_GROUP_N):
     """Attach ``net_label_pct`` for every row and report the label mode used.
 
-    For ``excess_vs_cohort_mean`` cohorts the basket benchmark is the mean of
-    ``net_pct`` over rows that share cohort, signal date and horizon. Those rows
-    also share one exit date, so the benchmark uses only prices a live system
-    already observes when the member labels mature. Nothing earlier in the
-    history is touched and the existing transaction cost stays inside both the
-    row and the basket mean (it cancels in the difference).
+    For ``excess_vs_cohort_mean`` cohorts the basket benchmark is the equal-weighted
+    net return of the same cohort over the same entry and exit dates. When
+    ``baskets`` (cohort -> horizon -> date -> {mean_net_pct, members_n}) is
+    supplied the benchmark is computed from every loaded cohort member's prices;
+    otherwise, and for tests, it falls back to the mean over the cohort's signal
+    rows that share the signal date and horizon. Both variants only ever use the
+    exit close at that same horizon, so the benchmark and the row's own label
+    become knowable at exactly the same moment and never earlier. The transaction
+    cost sits inside both terms and cancels in the difference.
     """
     finite=lambda row:bool(np.isfinite(float(row.get("net_pct",np.nan))))
     groups=defaultdict(list)
@@ -185,22 +221,37 @@ def _attach_label_returns(rows,min_group_n=MIN_EXCESS_GROUP_N):
     report={}
     for cohort in sorted({row["cohort"] for row in rows}):
         mode=_label_mode(cohort)
+        series=(baskets or {}).get(cohort) or {}
         sizes=[];means=[];excluded=0;labelled=0
-        for (c,_day,_horizon),ix in groups.items():
-            if c!=cohort:continue
-            sizes.append(len(ix))
-            if mode!="excess_vs_cohort_mean":continue
-            values=np.asarray([float(rows[i]["net_pct"]) for i in ix],dtype=float)
-            if len(ix)<int(min_group_n):
-                for i in ix:rows[i]["net_label_pct"]=float("nan");excluded+=1
-                continue
-            mean=float(values.mean());means.append(mean)
-            for i in ix:
-                row=rows[i]
-                row["cohort_mean_net_pct"]=mean
-                row["cohort_excess_group_n"]=len(ix)
-                row["net_label_pct"]=float(row["net_pct"])-mean
-                labelled+=1
+        def assign(i,mean,members):
+            row=rows[i]
+            row["cohort_mean_net_pct"]=mean
+            row["cohort_excess_group_n"]=members
+            row["net_label_pct"]=float(row["net_pct"])-mean
+        if mode=="excess_vs_cohort_mean" and series:
+            for i,row in enumerate(rows):
+                if row["cohort"]!=cohort:continue
+                if not finite(row):
+                    row["net_label_pct"]=float("nan");excluded+=1;continue
+                entry=series.get(int(row["horizon"]),{}).get(row["signal_date"])
+                if not entry or entry.get("members_n",0)<int(min_group_n):
+                    row["net_label_pct"]=float("nan");excluded+=1;continue
+                sizes.append(int(entry["members_n"]));means.append(float(entry["mean_net_pct"]))
+                assign(i,float(entry["mean_net_pct"]),int(entry["members_n"]));labelled+=1
+            benchmark_source="equal-weighted net return of every loaded cohort member over the same entry/exit dates"
+        elif mode=="excess_vs_cohort_mean":
+            for (c,_day,_horizon),ix in groups.items():
+                if c!=cohort:continue
+                sizes.append(len(ix))
+                values=np.asarray([float(rows[i]["net_pct"]) for i in ix],dtype=float)
+                if len(ix)<int(min_group_n):
+                    for i in ix:rows[i]["net_label_pct"]=float("nan");excluded+=1
+                    continue
+                mean=float(values.mean());means.append(mean)
+                for i in ix:assign(i,mean,len(ix));labelled+=1
+            benchmark_source="equal-weighted mean net return of the cohort's signal rows sharing the signal date and horizon"
+        else:
+            benchmark_source=None
         for row in rows:
             if row["cohort"]!=cohort:continue
             if mode!="excess_vs_cohort_mean" or "net_label_pct" not in row:
@@ -214,10 +265,11 @@ def _attach_label_returns(rows,min_group_n=MIN_EXCESS_GROUP_N):
                "min_group_n":int(min_group_n),"rows_labelled_n":labelled,
                "rows_without_basket_n":excluded}
         if mode=="excess_vs_cohort_mean":
-            entry.update({"benchmark":"equal-weighted mean net return of the same cohort, signal date and horizon (same exit date)",
-                "definition":"net_label_pct = net_pct - cohort/signal-date/horizon basket mean net_pct; the existing transaction cost is inside both terms and cancels",
+            entry.update({"benchmark":benchmark_source,
+                "definition":"net_label_pct = net_pct - cohort basket mean net_pct for the same entry and exit dates; the existing transaction cost is inside both terms and cancels",
                 "label_available_date":"unchanged: the horizon exit close, identical to the basket members' own reveal date",
-                "basket_mean_p10_p50_p90_pct":(np.percentile(means,[10,50,90]).tolist() if means else None)})
+                "basket_members_median":float(np.median(sizes)) if sizes else None,
+                "basket_mean_p10_p50_p90_pct":([float(x) for x in np.percentile(means,[10,50,90])] if means else None)})
         report[cohort]=entry
     return report
 
@@ -1100,9 +1152,12 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
     for c in ("US","TIGER_ETF"):
         _attach_context_features(special_eval.get(c,[]),{c:frames_by_cohort.get(c,{})},macro_frames,flow_frames)
     # Direction labels: KOSPI keeps its absolute net-return label; KOSDAQ is
-    # labelled on the excess return over its own same-date basket. Attaching it
-    # before the band is frozen keeps one band per cohort on one label return.
-    label_mode_report=_attach_label_returns(rows)
+    # labelled on the excess return over its own same-date basket. The basket is
+    # priced from every loaded cohort member so it does not depend on which
+    # tickers happen to emit a signal row on a given date.
+    excess_baskets={c:_cohort_basket_returns(frames_by_cohort.get(c,{})) for c in bycohort
+                    if _label_mode(c)=="excess_vs_cohort_mean"}
+    label_mode_report=_attach_label_returns(rows,baskets=excess_baskets)
     volatility_k=_freeze_volatility_labels(rows+special_eval.get("US",[])+special_eval.get("TIGER_ETF",[]))
     # Rows a thin basket left unlabelled take no part in fitting or evaluation.
     rows=[r for r in rows if r.get("label_vol") in ("DOWN","SIDEWAYS","UP")]
@@ -1130,6 +1185,9 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
       "label_mode_by_cohort":{c:_label_mode(c) for c in bycohort},
       "excess_return_label":{c:label_mode_report[c] for c in label_mode_report
         if label_mode_report[c].get("mode")=="excess_vs_cohort_mean"},
+      "excess_basket_dates":{c:{"horizons":{str(h):len(days) for h,days in series.items()},
+        "members_n_median":(float(np.median([v["members_n"] for days in series.values() for v in days.values()]))
+          if any(series.values()) else None)} for c,series in excess_baskets.items()},
       "absolute_return_cohorts":[c for c in bycohort if _label_mode(c)=="absolute_return"],
       "volatility_band":{"formula":"k_cohort * signal_day_realized_vol20_pct * sqrt(h/20)","target_development_sideways_share_pct":100*SIDEWAYS_TARGET_SHARE,
         "cohort_parameters":volatility_k}},
