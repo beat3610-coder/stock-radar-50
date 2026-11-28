@@ -302,8 +302,13 @@ def _three_way_report(samples):
             prior_values=np.asarray([prior[name] for name in names],dtype=float) if isinstance(prior,dict) else None
         except (TypeError,ValueError):prior_values=None
         if prior_values is not None and (prior_values.shape!=(3,) or not np.isfinite(prior_values).all()):prior_values=None
+        raw=row.get("raw_probabilities");raw_values=None
+        try:
+            raw_values=np.asarray([raw[name] for name in names],dtype=float) if isinstance(raw,dict) else None
+        except (TypeError,ValueError):raw_values=None
+        if raw_values is not None and (raw_values.shape!=(3,) or not np.isfinite(raw_values).all()):raw_values=None
         argmax=row.get("argmax_prediction")
-        usable.append((truth,pred,values,prior_values,argmax if argmax in names else None))
+        usable.append((truth,pred,values,prior_values,argmax if argmax in names else None,raw_values))
     n=len(usable);counts={name:sum(row[0]==name for row in usable) for name in names}
     predicted={name:sum(row[1]==name for row in usable) for name in names}
     confusion={truth:{pred:sum(row[0]==truth and row[1]==pred for row in usable) for pred in names} for truth in names}
@@ -328,6 +333,9 @@ def _three_way_report(samples):
     truth_all=np.asarray([row[0] for row in usable])
     brier=float(np.mean(np.sum((probs-actual)**2,axis=1)))
     prior_brier=float(np.mean(np.sum((np.broadcast_to(priors,actual.shape)-actual)**2,axis=1)))
+    largest_share=100*max(predicted.values())/n
+    collapse=("ONE_CLASS_PINNED" if largest_share>=99 else "ONE_CLASS_DOMINANT" if largest_share>=90
+              else "DISTRIBUTED")
     report={"evaluation_rows_n":n,"accuracy_pct":100*accuracy,
         "majority_class_baseline_accuracy_pct":100*max(counts.values())/n,
         "accuracy_delta_vs_majority_pp":100*(accuracy-max(counts.values())/n),
@@ -337,8 +345,30 @@ def _three_way_report(samples):
         "probability_edge_status":("PROBABILITY_SKILL_PRESENT" if brier<prior_brier
             else "NO_DEMONSTRATED_EDGE_WORSE_THAN_CLASS_PRIOR"),
         "class_metrics":class_metrics,
+        "predicted_share_pct":{name:100*predicted[name]/n for name in names},
+        "largest_class_share_pct":largest_share,
+        "decision_collapse_status":collapse,
         "mean_probabilities_pct":{name:100*float(probs[:,i].mean()) for i,name in enumerate(names)},
         "confusion_matrix":confusion}
+    stance=probs[:,0]-probs[:,1]
+    dispersion={"p_up_minus_p_down_p10_p50_p90":[float(np.percentile(stance,q)) for q in (10,50,90)],
+        "stance_std":float(np.std(stance))}
+    raw_rows=[row[5] for row in usable]
+    if all(value is not None for value in raw_rows):
+        raw_probs=np.asarray(raw_rows,dtype=float)
+        raw_argmax=np.asarray([names[int(j)] for j in raw_probs.argmax(axis=1)])
+        raw_stance=raw_probs[:,0]-raw_probs[:,1]
+        report["probability_dispersion"]={"calibrated":dispersion,
+            "raw":{"p_up_minus_p_down_p10_p50_p90":[float(np.percentile(raw_stance,q)) for q in (10,50,90)],
+                    "stance_std":float(np.std(raw_stance))},
+            "raw_brier":float(np.mean(np.sum((raw_probs-actual)**2,axis=1))),
+            "calibrated_brier":brier}
+        report["raw_argmax_decision"]={"accuracy_pct":100*float(np.mean(raw_argmax==truth_all)),
+            "predicted_counts":{name:int(np.sum(raw_argmax==name)) for name in names},
+            "predicted_share_pct":{name:100*float(np.mean(raw_argmax==name)) for name in names},
+            "rule":"argmax(raw development-OOF model probabilities, before temperature and decision"}
+    else:
+        report["probability_dispersion"]={"calibrated":dispersion}
     causal=[row[3] for row in usable]
     if all(value is not None for value in causal):
         causal_probs=np.asarray(causal,dtype=float)

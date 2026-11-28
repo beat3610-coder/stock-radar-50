@@ -4,14 +4,17 @@ from pathlib import Path
 import tempfile
 
 import numpy as np
+from sklearn.metrics import log_loss
 import pandas as pd
 
 from expanded_direction_audit import (
-    FEATURES, FLOW_FEATURES, MIN_DEVELOPMENT_IC, MODEL_KINDS, PRIOR_SHRINKAGE_WINDOW_DAYS,
-    REFIT_MONTH, _apply_prior_mix, _beats_causal_prior_on_development, _causal_class_priors,
-    _collect_extended_pool_flows, _comparison_fit_spec, _edge_label_status, _features,
+    DECISION_TAU_GRID, FEATURES, FLOW_FEATURES, MAX_REFERENCE_PRIOR_MIX, MIN_DEVELOPMENT_IC, MODEL_KINDS,
+    PRIOR_HALF_LIFE_GRID, PRIOR_SHRINKAGE_WINDOW_DAYS, REFIT_MONTH, TEMPERATURE_LOG_BOUNDS,
+    _apply_prior_mix, _apply_temperature, _beats_causal_prior_on_development, _causal_class_priors, _class_prior,
+    _collect_extended_pool_flows, _comparison_fit_spec, _decision_diversity, _edge_label_status, _features,
     _fit_calibration, _flow_ablation_metadata, _make_rows, _mandatory_market_items, _metrics,
-    _prior_corrected_decisions, _trade_perf, direction_label, _freeze_volatility_labels,
+    _prior_corrected_decisions, _prior_shift_decisions, _select_prior_half_life, _stance_dispersion,
+    _trade_perf, direction_label, _freeze_volatility_labels,
     _fit_temperature, _band_z, _band_pct, _model, _training_rows_for, _selection_rows_for,
     _refit_anchor, _causal_prior_baseline, _probability_skill, BandRegressionModel,
 )
@@ -364,10 +367,16 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
         priors=np.tile([1/3,1/3,1/3],(600,1))
         report=_fit_calibration(rows,np.asarray(probs),priors)
         self.assertEqual(report["fit_n"],600)
-        self.assertGreaterEqual(report["prior_mix"],0.);self.assertLessEqual(report["prior_mix"],1.)
-        self.assertIn(report["decision_tau"],[0.,0.05,0.1,0.15,0.2,0.25,0.3,0.35,0.4,0.45,0.5])
+        # The prior mixture no longer feeds the probability; only the reference is reported.
+        self.assertEqual(report["prior_mix"],0.)
+        self.assertGreaterEqual(report["reference_prior_mix"],0.)
+        self.assertLessEqual(report["reference_prior_mix"],0.5)
+        self.assertIn(report["decision_tau"],DECISION_TAU_GRID)
         self.assertEqual(report["prior_window_days"],PRIOR_SHRINKAGE_WINDOW_DAYS)
-        self.assertIn("development_brier_after_prior_mix",report)
+        self.assertIn("development_brier_reference_prior_mix",report)
+        self.assertIn("development_brier_temperature_only",report)
+        self.assertEqual(report["development_decision_diversity"]["collapse_status"],"DISTRIBUTED")
+        self.assertIn("temperature_log_bounds",report)
 
     def test_winsor_and_normalised_band_models_use_the_frozen_band(self):
         rng=np.random.default_rng(3);rows=[]
@@ -386,18 +395,17 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
         self.assertEqual(_band_pct({"label_vol_band_pct":-3.0}),3.0)
 
     def test_development_selection_requires_beating_the_causal_prior(self):
-        strong={"metrics":{"datewise_spearman_mean":.02,
-            "class_balanced_decision":{"accuracy_pct":37.0},
-            "probability_skill":{"causal_prior_accuracy_pct":36.0}}}
-        weak={"metrics":{"datewise_spearman_mean":.02,
-            "class_balanced_decision":{"accuracy_pct":35.9},
-            "probability_skill":{"causal_prior_accuracy_pct":36.0}}}
-        negative={"metrics":{"datewise_spearman_mean":-.01,
-            "class_balanced_decision":{"accuracy_pct":40.0},
-            "probability_skill":{"causal_prior_accuracy_pct":36.0}}}
-        self.assertTrue(_beats_causal_prior_on_development(strong))
-        self.assertFalse(_beats_causal_prior_on_development(weak))
-        self.assertFalse(_beats_causal_prior_on_development(negative))
+        def result(accuracy,ic=.02,shares=(30.,30.,40.)):
+            return {"metrics":{"datewise_spearman_mean":ic,
+                "decision":{"accuracy_pct":accuracy,
+                    "predicted_share_pct":{"DOWN":shares[0],"SIDEWAYS":shares[1],"UP":shares[2]}},
+                "probability_skill":{"causal_prior_accuracy_pct":36.0}}}
+        self.assertTrue(_beats_causal_prior_on_development(result(37.0)))
+        self.assertFalse(_beats_causal_prior_on_development(result(35.9)))
+        self.assertFalse(_beats_causal_prior_on_development(result(40.0,ic=-.01)))
+        # A one-class development decision is not a classifier, whatever its accuracy.
+        self.assertFalse(_beats_causal_prior_on_development(result(40.0,shares=(100.,0.,0.))))
+        self.assertFalse(_beats_causal_prior_on_development(result(40.0,shares=(0.5,0.,99.5))))
 
     def test_three_way_report_exposes_causal_prior_and_plain_argmax(self):
         from audit_63_fast import _three_way_report
@@ -415,6 +423,167 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
         self.assertEqual(report["plain_argmax_decision"]["predicted_counts"]["UP"],30)
         self.assertIn(report["causal_probability_edge_status"],
                       ("PROBABILITY_SKILL_PRESENT_VS_CAUSAL_PRIOR","NO_DEMONSTRATED_EDGE_WORSE_THAN_CAUSAL_PRIOR"))
+
+
+class CalibrationDecisionFixTests(unittest.TestCase):
+    """The decision stage must express the model's ranking instead of a class pin."""
+
+    def test_out_of_fold_sigma_is_a_forecast_error_not_an_in_sample_fit(self):
+        rng=np.random.default_rng(5);rows=[]
+        for _ in range(1200):
+            x=float(rng.normal());rows.append((x,2.0*x+float(rng.normal())*2.0))
+        X=np.asarray([[r[0]] for r in rows]);y=np.asarray([r[1] for r in rows])
+        model=BandRegressionModel().fit(X,y)
+        # In-sample residuals of a 2-parameter fit understate a 2.0 noise scale.
+        in_sample=float(np.std(y-model.routine.predict(X)))
+        self.assertGreater(model.sigma,in_sample)
+        self.assertTrue(model.sigma_source.startswith("out_of_fold"))
+        self.assertLess(abs(model.sigma-2.0),0.35)
+        probs=model.predict_proba(np.asarray([[0.],[0.],[0.]]),np.asarray([2.,2.,2.]))
+        self.assertTrue(np.all(np.abs(probs-.5)<.45))
+        self.assertGreater(probs[0,1],0.1)
+
+    def test_temperature_reaches_a_softer_optimum_than_the_old_4_482_bound(self):
+        rng=np.random.default_rng(3);rows=[];probs=[]
+        names=("DOWN","SIDEWAYS","UP")
+        # Labels drawn from probabilities the model overstates by a factor of 10;
+        # the development optimum therefore sits well above the old bound e^1.5.
+        z=rng.normal(0,1.6,(1500,3))
+        p=np.exp(z)/np.exp(z).sum(1,keepdims=True)
+        p_true=np.exp(z/10.)/np.exp(z/10.).sum(1,keepdims=True)
+        for i in range(len(z)):
+            rows.append({"label_vol":names[int(rng.choice(3,p=p_true[i]))]})
+            probs.append(p[i])
+        probs=np.asarray(probs)
+        report=_fit_temperature(rows,probs)
+        self.assertGreater(report["temperature"],4.482)
+        self.assertLess(report["temperature"],54.)
+        self.assertFalse(report["temperature_at_bound"])
+        self.assertEqual(list(report["temperature_log_bounds"]),list(TEMPERATURE_LOG_BOUNDS))
+        y=np.asarray([names.index(r["label_vol"]) for r in rows])
+        self.assertLess(report["development_oof_logloss_after"],
+                        float(log_loss(y,_apply_temperature(probs,4.482),labels=[0,1,2])))
+
+    def test_label_shift_rule_moves_with_the_class_mix_and_keeps_row_differences(self):
+        probs=np.asarray([[.40,.30,.30],[.45,.25,.30],[.30,.30,.40],[.50,.20,.30]])
+        train=np.asarray([.20,.30,.50])
+        # The market's class mix turned DOWN while the model still leans UP.
+        now=np.tile([.55,.30,.15],(4,1))
+        plain=_prior_shift_decisions(probs,now,train,0.)
+        shifted=_prior_shift_decisions(probs,now,train,1.)
+        self.assertTrue(np.array_equal(plain,probs.argmax(axis=1)))
+        self.assertTrue(np.all(shifted==0))
+        # A row the model is genuinely bullish on can still be chosen.
+        strong=np.asarray([[.02,.02,.96]]);now_one=np.asarray([[.55,.30,.15]])
+        self.assertEqual(int(_prior_shift_decisions(strong,now_one,train,1.)[0]),2)
+        # Dividing by the canonical prior alone (PR #18 rule) is a different rule.
+        self.assertFalse(np.array_equal(shifted,_prior_corrected_decisions(probs,now,1.)))
+
+    def test_decision_diversity_labels_pins_dominance_and_spread(self):
+        pinned=_decision_diversity(np.zeros(100,dtype=int))
+        self.assertEqual(pinned["collapse_status"],"ONE_CLASS_PINNED")
+        self.assertEqual(pinned["distinct_classes"],1)
+        dominant=_decision_diversity(np.asarray([0]*95+[1]*5))
+        self.assertEqual(dominant["collapse_status"],"ONE_CLASS_DOMINANT")
+        spread=_decision_diversity(np.asarray([0]*40+[1]*30+[2]*30))
+        self.assertEqual(spread["collapse_status"],"DISTRIBUTED")
+        self.assertEqual(spread["distinct_classes"],3)
+        self.assertGreater(spread["prediction_entropy_nats"],0)
+
+    def test_half_life_prior_follows_a_regime_turn_without_using_unmatured_labels(self):
+        train=[]
+        for i in range(120):
+            train.append({"label_vol":"UP","label_available_date":"2025-12-01"})
+        for i in range(40):
+            train.append({"label_vol":"DOWN","label_available_date":"2026-03-20"})
+        row=[{"signal_date":"2026-04-01"}]
+        flat=_causal_class_priors(train,row)[0]
+        short=_causal_class_priors(train,row,half_life_days=40.)[0]
+        self.assertGreater(flat[2],.6)
+        self.assertGreater(short[0],flat[0])
+        self.assertGreater(short[0],.25)
+        # A label maturing the same day as the signal must never be counted.
+        leaky=train+[{"label_vol":"UP","label_available_date":"2026-04-01"}]*200
+        self.assertAlmostEqual(float(_causal_class_priors(leaky,row,half_life_days=40.)[0][0]),
+                               float(short[0]),places=9)
+
+    def test_half_life_is_chosen_on_development_prior_log_loss_only(self):
+        train=[]
+        for i in range(200):
+            train.append({"label_vol":"UP","label_available_date":"2025-01-01"})
+        for i in range(200):
+            train.append({"label_vol":"DOWN","label_available_date":"2026-03-20"})
+        dev=[{"signal_date":"2026-04-01","label_vol":"DOWN"} for _ in range(50)]
+        dev+=[{"signal_date":"2026-04-01","label_vol":"UP"} for _ in range(10)]
+        half_life,report=_select_prior_half_life(train,dev)
+        self.assertIn(half_life,tuple(PRIOR_HALF_LIFE_GRID)+(None,))
+        table=report["candidates"]
+        self.assertEqual(set(table),{"flat_250d"}|{f"half_life_{int(h)}d" for h in PRIOR_HALF_LIFE_GRID})
+        best=min(table.values(),key=lambda v:v["prior_log_loss_nats"])
+        self.assertAlmostEqual(best["prior_log_loss_nats"],
+            table["flat_250d" if half_life is None else f"half_life_{int(half_life)}d"]["prior_log_loss_nats"],places=12)
+        self.assertLess(half_life or 1e9,250.)
+
+    def test_metrics_score_the_supplied_decision_not_the_probability_argmax(self):
+        rows=[{"label_vol":label,"net_pct":net,"signal_date":"2025-01-01"}
+              for label,net in (("DOWN",-1.),("DOWN",-2.),("UP",1.))]
+        probs=np.asarray([[.1,.1,.8]]*3)
+        report=_metrics(rows,probs,label_key="label_vol",predictions=np.asarray([0,0,2]))
+        self.assertEqual(report["accuracy_pct"],100.)
+        self.assertEqual(report["confusion_matrix"]["counts"],[[2,0,0],[0,0,0],[0,0,1]])
+        argmax_only=_metrics(rows,probs,label_key="label_vol")
+        self.assertAlmostEqual(argmax_only["accuracy_pct"],100/3)
+
+    def test_development_calibration_is_shared_and_future_rows_never_leak(self):
+        import warnings
+        from expanded_direction_audit import _backtest_model
+        warnings.simplefilter("ignore")
+        days=pd.bdate_range("2020-01-02",periods=1250)
+        def build(cohort,future=False):
+            rng=np.random.default_rng(21);rows=[]
+            span=list(days)+([pd.Timestamp("2026-02-02")+pd.Timedelta(days=3*i) for i in range(60)] if future else [])
+            for i,day in enumerate(span):
+                for ticker in ("A","B"):
+                    entry=pd.Timestamp(day)+pd.Timedelta(days=1)
+                    exit_=pd.Timestamp(day)+pd.Timedelta(days=30)
+                    ret=float(rng.normal(0,4))+(2.0 if ticker=="A" else -2.0)*float(np.sin(i/9))
+                    label="UP" if ret>.5 else "DOWN" if ret< -.5 else "SIDEWAYS"
+                    rows.append({"cohort":cohort,"ticker":ticker,"market":"KR",
+                        "signal_date":str(day.date()),"entry_date":str(entry.date()),
+                        "exit_date":str(exit_.date()),"label_available_date":str(exit_.date()),
+                        "horizon":20,"net_pct":ret,"label_vol":label,"label_0.3":label,"label_0.5":label,"label_1.0":label,
+                        "label_vol_band_pct":1.5,"volatility_unit_pct":1.0,
+                        "target_touch_theta_0.5":"TARGET_FIRST" if ret>0 else "STOP_FIRST",
+                        "ret20":float(np.sin(i/7))*3,"rsi":50+float(np.cos(i/5))*10})
+            if future:
+                for row in rows:
+                    if row["signal_date"]>="2026-01-02":row["label_vol"]="UP"
+            return rows
+        out={}
+        for cohort in ("KOSPI","KOSDAQ"):
+            rows=build(cohort)
+            dev=_backtest_model(rows,rows,"multinomial_logistic",20,"development")
+            # Adding labels that only mature after the holdout must not move any
+            # development-fitted parameter or the causal priors used there.
+            augmented=build(cohort,future=True)
+            other=_backtest_model(augmented,augmented,"multinomial_logistic",20,"development")
+            # Identical up to floating-point noise in the decay-weight scaling.
+            self.assertAlmostEqual(dev["temperature"]["temperature"],other["temperature"]["temperature"],places=6)
+            self.assertAlmostEqual(dev["metrics"]["decision"]["accuracy_pct"],
+                                   other["metrics"]["decision"]["accuracy_pct"],places=6)
+            metrics=dev["metrics"]
+            for key in ("decision","raw_argmax_decision","plain_argmax_decision","prior_divide_decision",
+                        "probability_dispersion","probability_skill"):
+                self.assertIn(key,metrics,cohort)
+            self.assertIn(metrics["decision"]["collapse_status"],
+                          ("DISTRIBUTED","ONE_CLASS_DOMINANT","ONE_CLASS_PINNED"))
+            for part in ("raw","calibrated"):
+                self.assertIn(part,metrics["probability_dispersion"])
+            holdout=_backtest_model(rows,rows,"multinomial_logistic",20,
+                "validation",temperature_info=dev["temperature"],payoffs=dev["class_payoffs_from_development"])
+            self.assertEqual(holdout["temperature"],dev["temperature"])
+            out[cohort]=dev["n"]
+        self.assertTrue(all(n>0 for n in out.values()))
 
 
 if __name__ == "__main__":
