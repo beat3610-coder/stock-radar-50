@@ -7,6 +7,7 @@ their fit cutoff. This remains retrospective research with survivor bias.
 """
 from nonlinear_direction import market_features,vectors,_fit,_predict,_stats,_causal_recalibration
 import numpy as np
+from ticker_probability import causal_ticker_shrink
 
 # This is a fixed protocol, not a winner tuned on 2025/2026 outcomes.
 FROZEN_CONFIG={"model":"extratrees","recent_mature_window":800,
@@ -69,20 +70,43 @@ def run_two_year_robustness(rows):
                     np.asarray([r[2] for r in period],dtype=int),p)["accuracy_pct"]})
         fixed=_diagnostic(y,fixed_probs)
         rolling=_diagnostic(y,rolling_probs)
+        # All retrospective outcomes enter this calibration only when matured.
+        # Exclude test rows from history to prevent accidental double counting.
+        history=[r for r in data if r[0]["signal_date"]<starts[0]]
+        ticker_probs=causal_ticker_shrink(
+            all_test,history,rolling_probs,blend=0.3,
+            prior_strength=80.0,min_ticker_count=25,
+            global_window=2500,ticker_window=180)
+        ticker_model=_diagnostic(y,ticker_probs)
         reports[year]={
             "status":"RESEARCH_ONLY",
             "paired_samples":len(y),
             "frozen_config":FROZEN_CONFIG,
-            "fixed":fixed,"rolling":rolling,"periods":periods,
+            "fixed":fixed,"rolling":rolling,
+            "ticker_shrunk":ticker_model,"periods":periods,
+            "ticker_accuracy_change_pp":round(ticker_model["accuracy_pct"]-rolling["accuracy_pct"],2),
+            "ticker_macro_f1_change_pp":round(ticker_model["macro_f1_pct"]-rolling["macro_f1_pct"],2),
+            "ticker_brier_change":round(ticker_model["brier"]-rolling["brier"],6),
             "accuracy_change_pp":round(rolling["accuracy_pct"]-fixed["accuracy_pct"],2),
             "macro_f1_change_pp":round(rolling["macro_f1_pct"]-fixed["macro_f1_pct"],2),
             "brier_change":round(rolling["brier"]-fixed["brier"],6),
             "rolling_better_brier":rolling["brier"]<fixed["brier"]}
     eligible=[v for v in reports.values() if v.get("status")=="RESEARCH_ONLY"]
+    # Model selection is research-only: require consistent probability and
+    # direction accuracy gains with no major macro-F1 regression in BOTH years.
+    ticker_eligible=(len(eligible)==2 and all(
+        v["ticker_brier_change"]<0 and
+        v["ticker_accuracy_change_pp"]>=0 and
+        v["ticker_macro_f1_change_pp"]>=-0.5 and
+        v["paired_samples"]>=1000
+        for v in eligible))
     return {"status":"RESEARCH_ONLY" if len(eligible)==2 else "INCOMPLETE",
             "independent_forward_test":False,
             "frozen_configuration":FROZEN_CONFIG,
             "calendar_windows":reports,
+            "ticker_brier_improved_both_years":len(eligible)==2 and all(v["ticker_brier_change"]<0 for v in eligible),
+            "ticker_research_gate_passed":ticker_eligible,
+            "live_approved":False,
             "two_years_probability_improved":len(eligible)==2 and all(
                 v["rolling_better_brier"] for v in eligible),
             "limitations":["Earlier periods were already inspected in ongoing research",
