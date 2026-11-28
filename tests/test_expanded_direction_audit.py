@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 
 from expanded_direction_audit import (
+    EXCESS_LABEL_FALLBACK_STATUS, LABEL_MODE_BY_COHORT, MIN_EXCESS_GROUP_N, _attach_label_returns,
+    _backtest_model, _label_mode, _label_net, _metrics_net_key,
     FEATURES, FLOW_FEATURES, MIN_DEVELOPMENT_IC, MODEL_KINDS, PRIOR_SHRINKAGE_WINDOW_DAYS,
     REFIT_MONTH, _apply_prior_mix, _beats_causal_prior_on_development, _causal_class_priors,
     _collect_extended_pool_flows, _comparison_fit_spec, _edge_label_status, _features,
@@ -415,6 +417,142 @@ class ExpandedDirectionAuditTests(unittest.TestCase):
         self.assertEqual(report["plain_argmax_decision"]["predicted_counts"]["UP"],30)
         self.assertIn(report["causal_probability_edge_status"],
                       ("PROBABILITY_SKILL_PRESENT_VS_CAUSAL_PRIOR","NO_DEMONSTRATED_EDGE_WORSE_THAN_CAUSAL_PRIOR"))
+
+
+def _synthetic_direction_rows(cohort,*,n_tickers=40,months=118,horizon=20,seed=5,start="2016-01-04"):
+    """Monthly cross-sections of synthetic rows shaped like _make_rows output."""
+    rng=np.random.default_rng(seed)
+    days=pd.bdate_range(start,periods=months*22)[::22]
+    rows=[]
+    for day in days:
+        exit_day=day+pd.Timedelta(days=horizon)
+        for t in range(n_tickers):
+            feat=float(rng.normal());net=1.5*feat+float(rng.normal())*2.0
+            row={"cohort":cohort,"ticker":f"{t:03d}","market":"KQ",
+                 "signal_date":day.date().isoformat(),
+                 "entry_date":(day+pd.Timedelta(days=1)).date().isoformat(),
+                 "exit_date":exit_day.date().isoformat(),
+                 "label_available_date":exit_day.date().isoformat(),
+                 "horizon":horizon,"net_pct":net,"volatility_unit_pct":1.5,
+                 "target_touch_theta_0.5":"TARGET_FIRST" if net>0 else "NEITHER",
+                 "ret5":feat,"ret20":2*feat}
+            for theta in (.3,.5,1.0):row[f"label_{theta}"]=direction_label(net,theta)
+            rows.append(row)
+    return rows
+
+
+class DirectionLabelModeTests(unittest.TestCase):
+    def test_cohort_label_modes_separate_kospi_and_kosdaq(self):
+        self.assertEqual(LABEL_MODE_BY_COHORT["KOSPI"],"absolute_return")
+        self.assertEqual(LABEL_MODE_BY_COHORT["KOSDAQ"],"excess_vs_cohort_mean")
+        self.assertEqual(_label_mode("KOSPI"),"absolute_return")
+        self.assertEqual(_label_mode("KOSDAQ"),"excess_vs_cohort_mean")
+        self.assertEqual(_label_mode("unknown-cohort"),"absolute_return")
+
+    def test_excess_label_is_the_same_date_cohort_mean_and_kospi_is_untouched(self):
+        rows=[{"cohort":"KOSDAQ","signal_date":"2025-01-06","horizon":20,"net_pct":v}
+              for v in (1.,2.,3.,4.,5.)]
+        rows+=[{"cohort":"KOSPI","signal_date":"2025-01-06","horizon":20,"net_pct":v}
+               for v in (1.,2.,3.)]
+        report=_attach_label_returns(rows,min_group_n=3)
+        self.assertEqual(report["KOSPI"]["mode"],"absolute_return")
+        self.assertEqual(report["KOSDAQ"]["mode"],"excess_vs_cohort_mean")
+        self.assertAlmostEqual(np.mean([r["net_label_pct"] for r in rows if r["cohort"]=="KOSDAQ"]),0.,places=9)
+        self.assertAlmostEqual(rows[0]["net_label_pct"],-2.0)
+        self.assertAlmostEqual(rows[0]["cohort_mean_net_pct"],3.0)
+        for row in rows:
+            if row["cohort"]=="KOSPI":
+                self.assertEqual(row["net_label_pct"],row["net_pct"])
+
+    def test_excess_basket_never_mixes_dates_horizons_or_cohorts(self):
+        def row(cohort,day,horizon,net,exit_date):
+            return {"cohort":cohort,"signal_date":day,"horizon":horizon,"net_pct":net,
+                    "label_available_date":exit_date}
+        rows=[row("KOSDAQ","2025-01-06",20,1.,"2025-02-04"),
+              row("KOSDAQ","2025-01-06",20,3.,"2025-02-04"),
+              row("KOSDAQ","2025-01-07",20,100.,"2025-02-05"),
+              row("KOSDAQ","2025-01-07",20,100.,"2025-02-05"),
+              row("KOSDAQ","2025-01-06",5,50.,"2025-01-14"),
+              row("KOSDAQ","2025-01-06",5,70.,"2025-01-14"),
+              row("KOSPI","2025-01-06",20,9.,"2025-02-04")]
+        _attach_label_returns(rows,min_group_n=2)
+        self.assertAlmostEqual(rows[0]["cohort_mean_net_pct"],2.0)
+        self.assertAlmostEqual(rows[2]["cohort_mean_net_pct"],100.0)
+        self.assertAlmostEqual(rows[4]["cohort_mean_net_pct"],60.0)
+        self.assertEqual(rows[6]["net_label_pct"],9.0)
+        # The basket mean is only knowable at the shared exit date of its members.
+        self.assertEqual(rows[0]["label_available_date"],rows[1]["label_available_date"])
+
+    def test_thin_basket_rows_get_no_excess_label_instead_of_a_substitute(self):
+        rows=[{"cohort":"KOSDAQ","signal_date":"2025-01-06","horizon":20,"net_pct":float(i)}
+              for i in range(MIN_EXCESS_GROUP_N-1)]
+        report=_attach_label_returns(rows)
+        self.assertTrue(all(not np.isfinite(r["net_label_pct"]) for r in rows))
+        self.assertEqual(report["KOSDAQ"]["rows_without_basket_n"],MIN_EXCESS_GROUP_N-1)
+        self.assertEqual(report["KOSDAQ"]["min_group_n"],MIN_EXCESS_GROUP_N)
+
+    def test_label_net_and_metric_key_default_to_the_raw_return(self):
+        self.assertEqual(_label_net({"net_pct":1.5}),1.5)
+        self.assertEqual(_label_net({"net_pct":1.5,"net_label_pct":-2.}),-2.)
+        self.assertEqual(_metrics_net_key([{"cohort":"KOSPI"}]),"net_pct")
+        self.assertEqual(_metrics_net_key([{"cohort":"KOSDAQ"}]),"net_label_pct")
+
+    def test_kosdaq_band_is_fitted_on_the_excess_return(self):
+        rows=[]
+        for i in range(1,101):
+            excess=float(i) if i%2 else -float(i)
+            rows.append({"cohort":"KOSDAQ","label_available_date":"2025-10-01",
+                         "volatility_unit_pct":1.0,"net_pct":50.0,"net_label_pct":excess})
+        report=_freeze_volatility_labels(rows)["KOSDAQ"]
+        self.assertEqual(report["label_mode"],"excess_vs_cohort_mean")
+        self.assertAlmostEqual(report["k"],float(np.quantile([abs(r["net_label_pct"]) for r in rows],.30)))
+        # The stock's own return is a flat +50% every time: an absolute label
+        # would call all of these UP and fit k=50, so the excess label must drive both.
+        self.assertNotAlmostEqual(report["k"],float(np.quantile([abs(r["net_pct"]) for r in rows],.30)))
+        self.assertEqual({r["label_vol"] for r in rows},{"DOWN","SIDEWAYS","UP"})
+        down=[r for r in rows if r["net_label_pct"]<0 and abs(r["net_label_pct"])>report["k"]]
+        self.assertTrue(down and all(r["label_vol"]=="DOWN" for r in down))
+
+    def test_thin_basket_rows_are_left_unlabelled_instead_of_substituted(self):
+        rows=[{"cohort":"KOSDAQ","label_available_date":"2025-10-01","volatility_unit_pct":1.0,
+               "net_pct":float(v),"net_label_pct":float(v if i<40 else "nan")}
+              for i,v in enumerate(range(-20,20))]
+        report=_freeze_volatility_labels(rows)["KOSDAQ"]
+        self.assertEqual(report["development_n"],40)
+        self.assertIsNotNone(report["k"])
+        labelled=[r for r in rows if "label_vol" in r]
+        self.assertEqual(len(labelled),40)
+        self.assertTrue(all(r["label_vol"] in ("DOWN","SIDEWAYS","UP") for r in labelled))
+
+    def test_absolute_cohort_results_are_identical_with_or_without_the_label_column(self):
+        base=_synthetic_direction_rows("KOSPI",months=118)
+        with_column=[dict(r) for r in base]
+        for row in with_column:row["net_label_pct"]=row["net_pct"]
+        _freeze_volatility_labels(base);_freeze_volatility_labels(with_column)
+        left=_backtest_model(base,base,"multinomial_logistic",20,"development")
+        right=_backtest_model(with_column,with_column,"multinomial_logistic",20,"development")
+        for key in ("n","accuracy_pct","multiclass_log_loss","mean_class_brier",
+                    "datewise_spearman_mean","top15_mean_net_pct"):
+            self.assertEqual(left["metrics"][key],right["metrics"][key])
+        self.assertEqual(left["temperature"]["temperature"],right["temperature"]["temperature"])
+        self.assertEqual(left["metrics"]["ranking_net_key"],"net_pct")
+
+    def test_excess_cohort_model_trains_and_reports_the_label_return(self):
+        rows=_synthetic_direction_rows("KOSDAQ",months=118)
+        _attach_label_returns(rows)
+        _freeze_volatility_labels(rows)
+        result=_backtest_model(rows,rows,"multinomial_logistic",20,"development")
+        self.assertGreater(result["n"],500)
+        self.assertEqual(result["metrics"]["ranking_net_key"],"net_label_pct")
+        self.assertIsNotNone(result["metrics"]["accuracy_pct"])
+        self.assertIn("causal_probability_edge_status",result["metrics"]["probability_skill"])
+        # The buy policy still measures real money, not the relative label.
+        grid=result["buy_policy_candidates"]
+        self.assertTrue(all(v["n"]>=0 for v in grid.values()))
+
+    def test_diagnostic_fallback_status_is_explicit(self):
+        self.assertIn("EXPLORATION",EXCESS_LABEL_FALLBACK_STATUS)
+        self.assertNotIn("DEVELOPMENT_EDGE_SELECTED",EXCESS_LABEL_FALLBACK_STATUS)
 
 
 if __name__ == "__main__":

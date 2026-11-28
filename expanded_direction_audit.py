@@ -51,6 +51,29 @@ MIN_PRIOR_ROWS=30
 DECISION_TAU_GRID=(0.,.05,.1,.15,.2,.25,.3,.35,.4,.45,.5,.55,.6,.65,.7,.75,.8,.85,.9,.95,1.,1.05,1.1,1.15,1.2)
 SIDEWAYS_TARGET_SHARE=.30
 MIN_DEVELOPMENT_IC=.01
+# Direction label mode per cohort. "absolute_return" keeps the existing label:
+# the stock's own net return after the existing cost against the frozen band.
+# "excess_vs_cohort_mean" labels the stock's net return minus the equal-weighted
+# net return of the same cohort on the same signal date and horizon, i.e. whether
+# it beat its own market rather than whether the market rose. The basket mean is
+# built from the same exit closes the member labels need, so it becomes knowable
+# exactly on each row's own label_available_date and never earlier. KOSPI keeps
+# the absolute label unchanged; only KOSDAQ switches.
+LABEL_MODES=("absolute_return","excess_vs_cohort_mean")
+LABEL_MODE_BY_COHORT={"KOSPI":"absolute_return","KOSDAQ":"excess_vs_cohort_mean",
+                      "US":"absolute_return","TIGER_ETF":"absolute_return"}
+DEFAULT_LABEL_MODE="absolute_return"
+# A basket mean needs a real cross-section. Groups smaller than this keep no
+# excess label (they are dropped from that cohort's modelling, never given a
+# substitute label).
+MIN_EXCESS_GROUP_N=10
+# Exploration safety net for the excess-return label: when no model clears the
+# full development selection rule, still report one development-selected model so
+# the new label can be measured. It is labelled as an exploration diagnostic, it
+# never claims edge, and it cannot turn into a buy policy (direction3 is
+# diagnostic-only; every buy decision comes from the legacy ladder).
+EXCESS_LABEL_DIAGNOSTIC_FALLBACK=True
+EXCESS_LABEL_FALLBACK_STATUS="DIAGNOSTIC_EXCESS_LABEL_EXPLORATION_NOT_A_SELECTION"
 SPREAD_CUTS=(.05,.10,.15); SIDEWAYS_MAX=(.25,.35,.45); EV_FLOORS=(0.0,.10,.20)
 BASE_FEATURES=("ret5","ret20","ret60","ret120","atr_pct","vol20_pct",
           "rsi","ma20_gap","ma60_gap","ma200_gap","turnover_ratio",
@@ -131,6 +154,84 @@ def korean_flow_targets(universe):
             targets.append({"ticker":code,"name":str(name),"cohort":cohort,"market":market})
             seen.add(code)
     return targets
+
+def _label_mode(cohort):
+    """Direction label mode for a cohort (see LABEL_MODE_BY_COHORT)."""
+    return LABEL_MODE_BY_COHORT.get(str(cohort),DEFAULT_LABEL_MODE)
+
+def _label_net(row):
+    """Net return that the direction label is defined on for this row.
+
+    Equals ``net_pct`` for absolute-return cohorts, so their labels, targets and
+    metrics stay bit-for-bit what they were before the excess-label option.
+    """
+    value=row.get("net_label_pct")
+    return float(row["net_pct"]) if value is None else float(value)
+
+def _attach_label_returns(rows,min_group_n=MIN_EXCESS_GROUP_N):
+    """Attach ``net_label_pct`` for every row and report the label mode used.
+
+    For ``excess_vs_cohort_mean`` cohorts the basket benchmark is the mean of
+    ``net_pct`` over rows that share cohort, signal date and horizon. Those rows
+    also share one exit date, so the benchmark uses only prices a live system
+    already observes when the member labels mature. Nothing earlier in the
+    history is touched and the existing transaction cost stays inside both the
+    row and the basket mean (it cancels in the difference).
+    """
+    finite=lambda row:bool(np.isfinite(float(row.get("net_pct",np.nan))))
+    groups=defaultdict(list)
+    for i,row in enumerate(rows):
+        if finite(row):groups[(row["cohort"],row["signal_date"],int(row["horizon"]))].append(i)
+    report={}
+    for cohort in sorted({row["cohort"] for row in rows}):
+        mode=_label_mode(cohort)
+        sizes=[];means=[];excluded=0;labelled=0
+        for (c,_day,_horizon),ix in groups.items():
+            if c!=cohort:continue
+            sizes.append(len(ix))
+            if mode!="excess_vs_cohort_mean":continue
+            values=np.asarray([float(rows[i]["net_pct"]) for i in ix],dtype=float)
+            if len(ix)<int(min_group_n):
+                for i in ix:rows[i]["net_label_pct"]=float("nan");excluded+=1
+                continue
+            mean=float(values.mean());means.append(mean)
+            for i in ix:
+                row=rows[i]
+                row["cohort_mean_net_pct"]=mean
+                row["cohort_excess_group_n"]=len(ix)
+                row["net_label_pct"]=float(row["net_pct"])-mean
+                labelled+=1
+        for row in rows:
+            if row["cohort"]!=cohort:continue
+            if mode!="excess_vs_cohort_mean" or "net_label_pct" not in row:
+                # Absolute cohorts (and rows outside any basket) keep the exact
+                # net return value, so their pipeline is unchanged.
+                row["net_label_pct"]=float(row["net_pct"])
+        entry={"mode":mode,"groups_n":len(sizes),
+               "group_size_median":float(np.median(sizes)) if sizes else None,
+               "group_size_p10":float(np.percentile(sizes,10)) if sizes else None,
+               "group_size_max":int(max(sizes)) if sizes else None,
+               "min_group_n":int(min_group_n),"rows_labelled_n":labelled,
+               "rows_without_basket_n":excluded}
+        if mode=="excess_vs_cohort_mean":
+            entry.update({"benchmark":"equal-weighted mean net return of the same cohort, signal date and horizon (same exit date)",
+                "definition":"net_label_pct = net_pct - cohort/signal-date/horizon basket mean net_pct; the existing transaction cost is inside both terms and cancels",
+                "label_available_date":"unchanged: the horizon exit close, identical to the basket members' own reveal date",
+                "basket_mean_p10_p50_p90_pct":(np.percentile(means,[10,50,90]).tolist() if means else None)})
+        report[cohort]=entry
+    return report
+
+def _metric_net(row,net_key):
+    """Return used by ranking metrics; falls back to the raw net return."""
+    value=row.get(net_key)
+    return float(row["net_pct"]) if value is None else float(value)
+
+def _metrics_net_key(rows):
+    """Ranking metric key: the label's own return when a cohort uses excess."""
+    for row in rows or []:
+        if _label_mode(row.get("cohort",""))=="excess_vs_cohort_mean":
+            return "net_label_pct"
+    return "net_pct"
 
 def _development_accuracy(development_result):
     """Three-way accuracy of the development-calibrated decision rule."""
@@ -470,22 +571,33 @@ def _freeze_volatility_labels(rows):
     """Choose a cohort-wide k using only labels mature before TRAIN_END."""
     result={}; names=("DOWN","SIDEWAYS","UP")
     for cohort in sorted({r["cohort"] for r in rows}):
+        mode=_label_mode(cohort)
         dev=[r for r in rows if r["cohort"]==cohort and r["label_available_date"]<TRAIN_END
-             and np.isfinite(r.get("volatility_unit_pct",np.nan)) and r["volatility_unit_pct"]>0]
-        z=np.asarray([abs(float(r["net_pct"]))/float(r["volatility_unit_pct"]) for r in dev])
+             and np.isfinite(r.get("volatility_unit_pct",np.nan)) and r["volatility_unit_pct"]>0
+             and np.isfinite(_label_net(r))]
+        z=np.asarray([abs(_label_net(r))/float(r["volatility_unit_pct"]) for r in dev])
         k=float(np.quantile(z,SIDEWAYS_TARGET_SHARE)) if len(z) else None
         labels=[]
         if k is not None:
             for row in rows:
                 if row["cohort"]!=cohort:continue
                 band=k*float(row.get("volatility_unit_pct",0.0))
-                row["label_vol"]=direction_label(row["net_pct"],band) if band>0 else "SIDEWAYS"
-                row["label_vol_band_pct"]=band
+                value=_label_net(row)
+                # A row whose basket was too thin carries no label return and is
+                # left unlabelled rather than given a substitute one; it is then
+                # dropped from that cohort's modelling.
+                if band>0 and np.isfinite(value):
+                    # The band thresholds the same return the cohort's label mode
+                    # defines, so a stock beat/missed its basket, not just the tape.
+                    row["label_vol"]=direction_label(value,band);row["label_vol_band_pct"]=band
             labels=[r["label_vol"] for r in dev]
         counts={name:labels.count(name) for name in names}
-        result[cohort]={"k":k,"development_n":len(dev),"development_class_counts":counts,
+        result[cohort]={"k":k,"label_mode":mode,"development_n":len(dev),"development_class_counts":counts,
           "development_class_share_pct":{n:round(100*counts[n]/len(dev),3) if dev else None for n in names},
-          "definition":"SIDEWAYS iff abs(net return after existing costs) <= k * signal-day 20d realized daily volatility * sqrt(h/20); UP/DOWN outside band",
+          "definition":("SIDEWAYS iff abs(net return after existing costs) <= k * signal-day 20d realized daily volatility * sqrt(h/20); UP/DOWN outside band"
+            if mode=="absolute_return" else
+            "SIDEWAYS iff abs(net return after existing costs minus the same cohort/signal-date/horizon basket mean net return) <= k * signal-day 20d realized daily volatility * sqrt(h/20); UP/DOWN outside band"),
+          "label_return":"net_pct" if mode=="absolute_return" else "net_pct - cohort basket mean net_pct",
           "fit_scope":"development labels available strictly before TRAIN_END; k frozen for validation/diagnostic"}
     return result
 
@@ -621,7 +733,7 @@ def _ece(y,p,klass):
             bins.append({"bin":f"{lo:.1f}-{hi:.1f}","n":int(mask.sum()),"confidence":conf,"observed":acc})
     return {"ece":ece,"bins":bins}
 
-def _metrics(rows,probs,theta=.5,label_key=None):
+def _metrics(rows,probs,theta=.5,label_key=None,net_key="net_pct"):
     names=("DOWN","SIDEWAYS","UP"); label_key=label_key or f"label_{theta}"; y=np.asarray([names.index(r[label_key]) for r in rows]); pred=probs.argmax(axis=1)
     cm=confusion_matrix(y,pred,labels=[0,1,2]);pr,re,fs,_=precision_recall_fscore_support(y,pred,labels=[0,1,2],zero_division=0)
     briers=[];eces={}
@@ -629,7 +741,7 @@ def _metrics(rows,probs,theta=.5,label_key=None):
         actual=(y==j).astype(float); briers.append(float(np.mean((probs[:,j]-actual)**2))); eces[name]=_ece(y,probs,j)
     class_counts=np.bincount(y,minlength=3);priors=class_counts/max(1,len(y))
     prior_entropy=float(-np.sum(priors[priors>0]*np.log(priors[priors>0])))
-    out={"n":len(rows),"label_key":label_key,"class_distribution":{names[j]:int(class_counts[j]) for j in range(3)},
+    out={"n":len(rows),"label_key":label_key,"ranking_net_key":net_key,"class_distribution":{names[j]:int(class_counts[j]) for j in range(3)},
       "accuracy_pct":100*accuracy_score(y,pred),"majority_class_baseline_accuracy_pct":100*float(class_counts.max()/len(y)) if len(y) else None,
       "balanced_accuracy_pct":100*balanced_accuracy_score(y,pred),
       "macro_f1_pct":100*f1_score(y,pred,average="macro",zero_division=0),"class_metrics":{},
@@ -650,13 +762,13 @@ def _metrics(rows,probs,theta=.5,label_key=None):
     daily_ic=[]
     for indexes in daily.values():
         if len(indexes)<3:continue
-        v=spearmanr(up_score[indexes],[rows[i]["net_pct"] for i in indexes]).statistic
+        v=spearmanr(up_score[indexes],[_metric_net(rows[i],net_key) for i in indexes]).statistic
         if np.isfinite(v):daily_ic.append(float(v))
     order=np.argsort(up_score,kind="mergesort");k=max(1,int(np.ceil(len(rows)*.15)));top=order[-k:]
     out["datewise_spearman_mean"]=float(np.mean(daily_ic)) if daily_ic else None
     out["datewise_spearman_n_days"]=len(daily_ic)
-    out["top15_n"]=len(top);out["top15_win_rate_pct"]=100*float(np.mean([rows[i]["net_pct"]>0 for i in top]))
-    out["top15_mean_net_pct"]=float(np.mean([rows[i]["net_pct"] for i in top]))
+    out["top15_n"]=len(top);out["top15_win_rate_pct"]=100*float(np.mean([_metric_net(rows[i],net_key)>0 for i in top]))
+    out["top15_mean_net_pct"]=float(np.mean([_metric_net(rows[i],net_key) for i in top]))
     return out
 
 def _trade_perf(selected,all_rows,probs,theta=.5):
@@ -784,11 +896,13 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
         Xpast=_features(past,active);Xeval=_features([eval_rows[i] for i in idx],active)
         if kind in ("band_regression","band_winsor","band_z"):
             model=_model(kind)
+            # Regression targets use the cohort's own label return (absolute net
+            # return, or net return minus its basket for an excess-label cohort).
             if kind=="band_z":
-                target=np.asarray([float(r["net_pct"])/_volatility_unit(r) for r in past])
+                target=np.asarray([_label_net(r)/_volatility_unit(r) for r in past])
                 bands=np.asarray([_band_z(eval_rows[i]) for i in idx])
             else:
-                target=np.asarray([float(r["net_pct"]) for r in past])
+                target=np.asarray([_label_net(r) for r in past])
                 bands=np.asarray([_band_pct(eval_rows[i]) for i in idx])
             model.fit(Xpast,target)
             p=model.predict_proba(Xeval,bands)
@@ -823,11 +937,14 @@ def _backtest_model(rows,train_rows,kind,horizon,period,temperature_info=None,pa
     decision_tau=float((temperature_info or {}).get("decision_tau",0.) or 0.)
     balanced_predictions=_prior_corrected_decisions(probs,priors,decision_tau)
     payoffs=payoffs or (_class_payoffs(eval_rows) if period=="development" else {"DOWN":-1.,"SIDEWAYS":0.,"UP":1.})
+    net_key=_metrics_net_key(eval_rows)
     theta_results={}
     for theta in THETAS:
+        # Fixed +/-theta% metrics stay on the absolute net return of each row so
+        # they keep their original meaning as an absolute-return reference.
         fixed=_metrics(eval_rows,probs,theta)
         theta_results[str(theta)]={"metrics":fixed}
-    vol_metrics=_metrics(eval_rows,probs,label_key="label_vol")
+    vol_metrics=_metrics(eval_rows,probs,label_key="label_vol",net_key=net_key)
     target_actual=np.asarray([int(r.get("target_touch_theta_0.5")=="TARGET_FIRST") for r in eval_rows],dtype=float)
     target_report={"n":len(eval_rows),"observed_target_first_pct":100*float(target_actual.mean()),
       "mean_predicted_probability_pct":100*float(target_probs.mean()),"brier":float(np.mean((target_probs-target_actual)**2))}
@@ -982,7 +1099,13 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
     _attach_context_features(rows,frames_by_cohort,macro_frames,flow_frames)
     for c in ("US","TIGER_ETF"):
         _attach_context_features(special_eval.get(c,[]),{c:frames_by_cohort.get(c,{})},macro_frames,flow_frames)
+    # Direction labels: KOSPI keeps its absolute net-return label; KOSDAQ is
+    # labelled on the excess return over its own same-date basket. Attaching it
+    # before the band is frozen keeps one band per cohort on one label return.
+    label_mode_report=_attach_label_returns(rows)
     volatility_k=_freeze_volatility_labels(rows+special_eval.get("US",[])+special_eval.get("TIGER_ETF",[]))
+    # Rows a thin basket left unlabelled take no part in fitting or evaluation.
+    rows=[r for r in rows if r.get("label_vol") in ("DOWN","SIDEWAYS","UP")]
     bycohort={c:[r for r in rows if r["cohort"]==c] for c in universe}
     equity_loaded=sum(1 for row in loaded if row.get("cohort") in universe)
     out={"universe_expansion":{"requested":sum(map(len,universe.values())),"loaded":equity_loaded,
@@ -1004,9 +1127,13 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
       "periods":{"development_end":TRAIN_END,"validation_end":VALID_END,"diagnostic_end":HOLDOUT_END}},
       "label_variants":{"entry":"t+1 open","exit":"t+h close","horizons":list(HORIZONS),
       "cost_pct":COST_PCT,"legacy_fixed_thresholds_pct":list(THETAS),"sensitivity_selected_horizon":None,
+      "label_mode_by_cohort":{c:_label_mode(c) for c in bycohort},
+      "excess_return_label":{c:label_mode_report[c] for c in label_mode_report
+        if label_mode_report[c].get("mode")=="excess_vs_cohort_mean"},
+      "absolute_return_cohorts":[c for c in bycohort if _label_mode(c)=="absolute_return"],
       "volatility_band":{"formula":"k_cohort * signal_day_realized_vol20_pct * sqrt(h/20)","target_development_sideways_share_pct":100*SIDEWAYS_TARGET_SHARE,
         "cohort_parameters":volatility_k}},
-      "direction3":{"label_definition":"net return after existing cost; volatility-scaled symmetric SIDEWAYS band; cohort k fitted using only outcomes available before TRAIN_END","cohort_k":volatility_k,"probability_calibration":{},"policy_results":{},
+      "direction3":{"label_definition":"net return after existing cost on the cohort's label return (KOSPI: the stock's own net return; KOSDAQ: net return minus the same signal-date/horizon equal-weighted cohort basket net return); volatility-scaled symmetric SIDEWAYS band; cohort k fitted using only outcomes available before TRAIN_END","cohort_k":volatility_k,"probability_calibration":{},"policy_results":{},
         "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC},
       "extended_pool_collection":extended_pool_collection,
       "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC,
@@ -1057,13 +1184,24 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
             # ranking proxy cannot displace a model that classifies better.
             eligible_choices=[x for x in choices if x[0]>0 and _beats_causal_prior_on_development(
                 development_cache[(x[1],x[2])])]
+        diagnostic_fallback=False
+        if not eligible_choices and EXCESS_LABEL_DIAGNOSTIC_FALLBACK and _label_mode(cohort)=="excess_vs_cohort_mean":
+            # Report the exploration label even when nothing clears the rule. The
+            # status below says so explicitly and no edge is claimed.
+            eligible_choices=[x for x in choices if x[0]>-1e8 and development_cache[(x[1],x[2])].get("n",0)>0]
+            diagnostic_fallback=True
         chosen=max(eligible_choices,default=(-1e9,None,None))
         chosen_ic=((development_cache[(chosen[1],chosen[2])].get("metrics") or {}).get("datewise_spearman_mean")
                    if chosen[1] is not None else None)
         cohort_report={"selected_model_development_only":chosen[1],"selected_horizon_development_only":chosen[2],
+          "label_mode":_label_mode(cohort),
+          "label_return_key":("net_label_pct" if _label_mode(cohort)=="excess_vs_cohort_mean" else "net_pct"),
+          "label_mode_detail":label_mode_report.get(cohort),
           "training_pool_scope":"available full ordinary-US equity cohort; SOXL is evaluation-only" if cohort=="US" else "63 audit cohort for selection; full cohort reported as separate training comparison",
           "selected_development_datewise_spearman":chosen_ic,
-          "model_selection_status":_edge_label_status(chosen[1] is not None,chosen_ic),
+          "model_selection_status":(_edge_label_status(chosen[1] is not None,chosen_ic)
+            if not diagnostic_fallback else EXCESS_LABEL_FALLBACK_STATUS),
+          "selected_by_full_development_rule":not diagnostic_fallback,
           "minimum_development_ic_for_edge_label":MIN_DEVELOPMENT_IC,
           "selected_model_horizon_development_score":chosen[0],"development_model_grid":{
             f"{model}_h{h}":{"datewise_spearman_mean":(v.get("metrics") or {}).get("datewise_spearman_mean"),
@@ -1088,6 +1226,7 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
             cohort_report["development_policy_grid"]=selection_grid
             cohort_report["selected_policy_thresholds"]={"policy":selected_policy,
               "calibration":selection_dev.get("temperature"),"class_payoffs":selection_payoffs,
+              "diagnostic_excess_label_fallback":bool(diagnostic_fallback),
               "selection_rule":"selected from the frozen 63-symbol development evaluation only; reused unchanged across training-universe and flow ablations"}
         cohort_report["fit_metadata_by_universe"]={}
         for fit_name in ("63_audit_symbols","available_full_universe"):
@@ -1190,7 +1329,10 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
         else:
             cohort_report["flow_ablation"]={"status":"NO_DEVELOPMENT_MODEL_SELECTED","same_model_comparison":False,
                 "full_universe_training":{"status":"NO_DEVELOPMENT_MODEL_SELECTED","same_model_comparison":False}}
-        cohort_report["policy_status"]=("SELECTED_ON_DEVELOPMENT_ONLY" if any(v for d in cohort_report.get("selected_buy_cut_by_development",{}).values() for v in d.values())
+        if diagnostic_fallback:
+            cohort_report["policy_status"]="DIAGNOSTIC_EXCESS_LABEL_EXPLORATION_NO_POLICY_CLAIM"
+        else:
+            cohort_report["policy_status"]=("SELECTED_ON_DEVELOPMENT_ONLY" if any(v for d in cohort_report.get("selected_buy_cut_by_development",{}).values() for v in d.values())
           else ("DEVELOPMENT_POLICY_SELECTED" if chosen[1] is not None and cohort_report.get("selected_policy_thresholds",{}).get("policy") else "NO_DEVELOPMENT_EDGE"))
         cohort_report["selected_model_policy_validation_diagnostic"]={name:cohort_report["universe_comparison"].get(name,{}) for name in ("63_audit_symbols","available_full_universe")}
         cover={}
@@ -1216,7 +1358,10 @@ def run_expanded_direction_audit(*,flow_frames=None,flow_source_coverage=None,ma
         for cohort,value in out["direction3"].items() if isinstance(value,dict) and "universe_comparison" in value}
     out["direction3"]["policy_results"]={cohort:{universe_name:periods for universe_name,periods in value.get("universe_comparison",{}).items()}
         for cohort,value in out["direction3"].items() if isinstance(value,dict) and "universe_comparison" in value}
-    out["direction3"]["label_definition_comparison"]={cohort:{"volatility_band":v,
+    out["direction3"]["label_definition_comparison"]={cohort:{"label_mode":_label_mode(cohort),"volatility_band":v,
+      "label_return":("net_pct - same signal-date/horizon equal-weight cohort basket mean net_pct"
+        if _label_mode(cohort)=="excess_vs_cohort_mean" else "net_pct"),
+      "label_mode_detail":label_mode_report.get(cohort),
       "fixed_pct_band_development_class_counts":{
         str(theta):{name:sum(r.get(f"label_{theta}")==name for r in bycohort.get(cohort,[]) if r["label_available_date"]<TRAIN_END)
                     for name in ("DOWN","SIDEWAYS","UP")} for theta in THETAS}}
