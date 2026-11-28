@@ -10,13 +10,17 @@ import pandas as pd
 from expanded_direction_audit import (
     DECISION_TAU_GRID, FEATURES, FLOW_FEATURES, MAX_REFERENCE_PRIOR_MIX, MIN_DEVELOPMENT_IC, MODEL_KINDS,
     PRIOR_HALF_LIFE_GRID, PRIOR_SHRINKAGE_WINDOW_DAYS, REFIT_MONTH, TEMPERATURE_LOG_BOUNDS,
-    _apply_prior_mix, _apply_temperature, _beats_causal_prior_on_development, _causal_class_priors, _class_prior,
+    REGIME_GATE_DRAWDOWN_GRID, REGIME_GATE_FEATURES, REGIME_GATE_INDEX_RET20_GRID,
+    REGIME_GATE_MA200_GAP_GRID, REGIME_GATE_MAX_MACRO_F1_DROP_PP, REGIME_GATE_MIN_ACCURACY_GAIN_PP,
+    REGIME_GATE_MIN_DEV_OVERRIDES, REGIME_GATE_STATES, REGIME_GATE_TARGETS,
+    _apply_prior_mix, _apply_regime_gate, _apply_temperature, _beats_causal_prior_on_development, _causal_class_priors, _class_prior,
     _collect_extended_pool_flows, _comparison_fit_spec, _decision_diversity, _edge_label_status, _features,
     _fit_calibration, _flow_ablation_metadata, _make_rows, _mandatory_market_items, _metrics,
     _prior_corrected_decisions, _prior_shift_decisions, _select_prior_half_life, _stance_dispersion,
     _trade_perf, direction_label, _freeze_volatility_labels,
     _fit_temperature, _band_z, _band_pct, _model, _training_rows_for, _selection_rows_for,
     _refit_anchor, _causal_prior_baseline, _probability_skill, BandRegressionModel,
+    _fit_regime_gate, _regime_off,
 )
 from providers import get_historical_investor_flows
 from universe import MANDATORY_KR, MANDATORY_US, AUDIT_63_BENCHMARK
@@ -584,6 +588,221 @@ class CalibrationDecisionFixTests(unittest.TestCase):
             self.assertEqual(holdout["temperature"],dev["temperature"])
             out[cohort]=dev["n"]
         self.assertTrue(all(n>0 for n in out.values()))
+
+
+class RegimeTrendGateTests(unittest.TestCase):
+    """The trend gate must be causal, development-fitted, and decision-only."""
+
+    @staticmethod
+    def _row(label="UP",gap=-8.,ret20=-5.,drawdown=None,**extra):
+        row={"label_vol":label,"signal_date":"2026-05-04",
+             "market_index_ma200_gap_pct":gap,"market_index_return_20d_pct":ret20}
+        if drawdown is not None:row["market_drawdown_120_pct"]=drawdown
+        row.update(extra)
+        return row
+
+    @staticmethod
+    def _params(target="DOWN"):
+        return {"mode":"trend_override","ma200_gap_max_pct":-3.,
+                "drawdown_120_min_pct":-8.,"index_return_20d_max_pct":-2.,
+                "target":target}
+
+    def test_gate_moves_only_up_decisions_and_only_inside_a_risk_off_trend(self):
+        params=self._params()
+        rows=[self._row("DOWN",-8.,-5.),          # below trend: UP -> DOWN
+              self._row("UP",5.,3.),              # above trend: kept
+              self._row("DOWN",-8.,None),        # no 20-day value: no state
+              self._row("DOWN",None,-5.),        # no 200-day value, no drawdown: no state
+              self._row("SIDEWAYS",-9.,-6.),      # not an UP decision: kept
+              self._row("SIDEWAYS",-1.,-1.)]      # above the fitted threshold: kept
+        probs=np.asarray([[.1,.2,.7]]*len(rows))
+        pred=np.asarray([2,2,2,2,1,2])
+        before=pred.copy()
+        gated,active,override=_apply_regime_gate(rows,probs,pred,params)
+        self.assertEqual(gated.tolist(),[0,2,2,2,1,2])
+        self.assertEqual(active.tolist(),[True,False,False,False,True,False])
+        self.assertEqual(override.tolist(),[True,False,False,False,False,False])
+        self.assertEqual(pred.tolist(),before.tolist(),"input decisions must not be mutated")
+        self.assertEqual(probs.tolist(),[[.1,.2,.7]]*6,"probabilities must not be touched")
+
+    def test_drawdown_clause_fires_when_the_index_is_above_its_200_day_line(self):
+        # Index still above its own 200-day mean but 12% off its 120-day high and
+        # falling over 20 days: that is exactly the failing breadth case.
+        params=self._params()
+        row=self._row("DOWN",3.,-3.,drawdown=-12.)
+        self.assertTrue(_regime_off(row,params))
+        self.assertFalse(_regime_off({**row,"market_drawdown_120_pct":-2.,
+                                     "market_index_ma200_gap_pct":3.},params))
+        # A weak 20-day return alone is not enough: the longer trend must break.
+        self.assertFalse(_regime_off({"market_index_return_20d_pct":-6.,
+            "market_index_ma200_gap_pct":8.,"market_drawdown_120_pct":-1.},params))
+
+    def test_gate_target_can_be_sideways_or_the_second_choice(self):
+        rows=[self._row("DOWN",-8.,-5.,drawdown=-10.)]
+        probs=np.asarray([[.2,.6,.2]])
+        pred=np.asarray([2])
+        for target,expected in (("DOWN",0),("SIDEWAYS",1),("SECOND_CHOICE",1)):
+            gated,_,_=_apply_regime_gate(rows,probs,pred,self._params(target))
+            self.assertEqual(int(gated[0]),expected,target)
+        # Down-leaning second choice picks DOWN.
+        gated,_,_=_apply_regime_gate(rows,np.asarray([[.6,.2,.2]]),pred,
+            self._params("SECOND_CHOICE"))
+        self.assertEqual(int(gated[0]),0)
+
+    def test_instrument_state_uses_the_instruments_own_trend(self):
+        params={**self._params(),"state":"instrument"}
+        weak={"label_vol":"UP","ma200_gap":-5.,"ret20":-4.}
+        self.assertTrue(_regime_off(weak,params))
+        self.assertFalse(_regime_off({**weak,"ma200_gap":5.},params))
+        self.assertFalse(_regime_off({**weak,"ret20":3.},params))
+        # A weak index alone is not an instrument-level trend break.
+        self.assertFalse(_regime_off({"market_index_return_20d_pct":-6.,
+            "market_index_ma200_gap_pct":-9.,"market_drawdown_120_pct":-12.},params))
+
+    def test_index_and_instrument_state_also_needs_the_instrument_below_its_200_day_mean(self):
+        params={**self._params(),"state":"index_and_instrument"}
+        base={"market_index_return_20d_pct":-4.,"market_index_ma200_gap_pct":-6.}
+        self.assertTrue(_regime_off({**base,"ma200_gap":-2.},params))
+        self.assertFalse(_regime_off({**base,"ma200_gap":2.},params))
+        self.assertFalse(_regime_off({**base},params))
+
+    def test_gate_off_leaves_every_decision_unchanged(self):
+        rows=[self._row("DOWN",-9.,-9.),self._row("UP",-9.,-9.)]
+        probs=np.asarray([[.1,.1,.8],[.8,.1,.1]])
+        pred=np.asarray([2,0])
+        gated,active,override=_apply_regime_gate(rows,probs,pred,{"mode":"none"})
+        self.assertEqual(gated.tolist(),[2,0])
+        self.assertFalse(active.any())
+        self.assertFalse(override.any())
+
+    def test_gate_state_never_reads_the_label_probabilities_or_other_rows(self):
+        params=self._params()
+        base=self._row("UP",-8.,-5.,drawdown=-4.)
+        for label in ("UP","DOWN","SIDEWAYS"):
+            self.assertTrue(_regime_off({**base,"label_vol":label},params),label)
+        # Unrelated future-looking or payoff fields cannot change the state.
+        self.assertEqual(_regime_off(base,params),
+            _regime_off({**base,"net_pct":99.,"label_available_date":"2027-01-01",
+                         "forward_return_pct":12.},params))
+        self.assertFalse(_regime_off(self._row("UP",float("nan"),-5.),params))
+        self.assertFalse(_regime_off({},params))
+
+    def test_gate_thresholds_are_fitted_on_development_rows_only(self):
+        rng=np.random.default_rng(11);rows=[];probs=[];pred=[]
+        for _ in range(2000):
+            gap=float(rng.uniform(-12.,8.));ret=float(rng.uniform(-8.,8.))
+            risk=gap<-2. and ret<-2.
+            rows.append({"label_vol":"DOWN" if risk else "UP","signal_date":"2024-03-04",
+                         "market_index_ma200_gap_pct":gap,"market_index_return_20d_pct":ret})
+            probs.append([.05,.05,.9]);pred.append(2)
+        fit=_fit_regime_gate(rows,np.asarray(probs),np.asarray(pred))
+        chosen=fit["chosen"]
+        self.assertEqual(chosen["mode"],"trend_override")
+        self.assertEqual(chosen["target"],"DOWN")
+        self.assertAlmostEqual(chosen["ma200_gap_max_pct"],-2.)
+        self.assertAlmostEqual(chosen["index_return_20d_max_pct"],-2.)
+        # Without a drawdown column only the 200-day clause can fire.
+        self.assertAlmostEqual(chosen["drawdown_120_min_pct"],REGIME_GATE_DRAWDOWN_GRID[0])
+        self.assertGreaterEqual(chosen["development_accuracy_gain_pp"],REGIME_GATE_MIN_ACCURACY_GAIN_PP)
+        self.assertGreaterEqual(chosen["development_overrides_n"],REGIME_GATE_MIN_DEV_OVERRIDES)
+        self.assertEqual(fit["selection"]["grid"]["state"],list(REGIME_GATE_STATES))
+        self.assertEqual(fit["selection"]["grid"]["ma200_gap_max_pct"],list(REGIME_GATE_MA200_GAP_GRID))
+        self.assertEqual(fit["selection"]["grid"]["index_return_20d_max_pct"],list(REGIME_GATE_INDEX_RET20_GRID))
+        self.assertEqual(fit["selection"]["grid"]["drawdown_120_min_pct"],list(REGIME_GATE_DRAWDOWN_GRID))
+        self.assertEqual(fit["selection"]["gate_features"],list(REGIME_GATE_FEATURES))
+        # Every reported candidate is a development-only evaluation.
+        self.assertTrue(fit["selection"]["candidates"])
+        self.assertTrue(all(c["overrides_n"]>0 for c in fit["selection"]["candidates"]))
+
+    def test_no_development_benefit_keeps_the_gate_off(self):
+        # A perfect development decision cannot be improved by overriding it, so
+        # no candidate can pass the gain guard and the gate must stay off.
+        rows=[{"label_vol":"UP","signal_date":"2024-03-04",
+               "market_index_ma200_gap_pct":-9.,"market_index_return_20d_pct":-6.}]*600
+        rows+=[{"label_vol":"DOWN","signal_date":"2024-03-04",
+                "market_index_ma200_gap_pct":6.,"market_index_return_20d_pct":4.}]*600
+        probs=np.asarray([[.05,.05,.9]]*600+[[.9,.05,.05]]*600)
+        pred=np.asarray([2]*600+[0]*600)
+        fit=_fit_regime_gate(rows,probs,pred)
+        self.assertEqual(fit["chosen"]["mode"],"none")
+        self.assertEqual(fit["selection"]["status"],"NO_DEVELOPMENT_GAIN")
+        gated,_,override=_apply_regime_gate(rows,probs,pred,fit["chosen"])
+        self.assertTrue(np.array_equal(gated,pred))
+        self.assertEqual(int(override.sum()),0)
+
+    def test_gate_pins_are_rejected_by_the_macro_f1_guard(self):
+        # Labels are UP 55% of the time and DOWN 45%; always-downgrade inside a
+        # risk-off day block would raise raw accuracy only by pinning everything.
+        rows=[];probs=[];pred=[]
+        for i in range(1000):
+            risk=i%10<5
+            label="UP" if i%20<11 else "DOWN"
+            rows.append({"label_vol":label,"signal_date":"2024-03-04",
+                         "market_index_ma200_gap_pct":(-9. if risk else 6.),
+                         "market_index_return_20d_pct":(-6. if risk else 4.)})
+            probs.append([.3,.2,.5]);pred.append(2)
+        fit=_fit_regime_gate(rows,np.asarray(probs),np.asarray(pred))
+        for candidate in fit["selection"]["candidates"]:
+            if candidate["distinct_classes"]<2:
+                self.assertNotEqual(fit["chosen"].get("target"),candidate["target"])
+        self.assertLessEqual(REGIME_GATE_MAX_MACRO_F1_DROP_PP,.5)
+
+    def test_development_gate_is_reused_unchanged_for_validation(self):
+        import warnings
+        from expanded_direction_audit import _backtest_model
+        warnings.simplefilter("ignore")
+        days=pd.bdate_range("2020-01-02",periods=1250)
+        def build(future=False):
+            rng=np.random.default_rng(31);rows=[]
+            span=list(days)+list(pd.bdate_range("2025-11-10","2026-03-05",freq="5D"))+\
+                ([pd.Timestamp("2026-02-02")+pd.Timedelta(days=3*i) for i in range(60)] if future else [])
+            for i,day in enumerate(span):
+                gap=float(9*np.sin(i/45.));ret20=float(5*np.cos(i/31.))
+                risk=gap<-2. and ret20<-1.
+                for ticker in ("A","B"):
+                    entry=pd.Timestamp(day)+pd.Timedelta(days=1)
+                    exit_=pd.Timestamp(day)+pd.Timedelta(days=30)
+                    ret=float(rng.normal(0,2.0))+(-3.2 if risk else .7)
+                    label="UP" if ret>.8 else "DOWN" if ret< -.8 else "SIDEWAYS"
+                    rows.append({"cohort":"KOSPI","ticker":ticker,"market":"KR",
+                        "signal_date":str(day.date()),"entry_date":str(entry.date()),
+                        "exit_date":str(exit_.date()),"label_available_date":str(exit_.date()),
+                        "horizon":20,"net_pct":ret,"label_vol":label,"label_0.3":label,
+                        "label_0.5":label,"label_1.0":label,"label_vol_band_pct":1.5,
+                        "volatility_unit_pct":1.0,
+                        "target_touch_theta_0.5":"TARGET_FIRST" if ret>0 else "STOP_FIRST",
+                        "ret20":float(np.sin(i/7))*3,"rsi":50+float(np.cos(i/5))*10,
+                        "market_index_ma200_gap_pct":gap,"market_index_return_20d_pct":ret20})
+            if future:
+                for row in rows:
+                    if row["signal_date"]>="2026-01-02":row["label_vol"]="UP"
+            return rows
+        rows=build()
+        dev=_backtest_model(rows,rows,"multinomial_logistic",20,"development",include_samples=True)
+        augmented=build(future=True)
+        other=_backtest_model(augmented,augmented,"multinomial_logistic",20,"development")
+        self.assertEqual(dev["temperature"]["regime_gate"],other["temperature"]["regime_gate"])
+        self.assertEqual(dev["temperature"]["regime_gate_selection"]["scope"],
+            "development OOF decisions only; validation and diagnostic never enter this fit")
+        gate=dev["temperature"]["regime_gate"]
+        self.assertIn(gate["mode"],("trend_override","none"))
+        for key in ("regime_gate","regime_gate_decision"):
+            self.assertIn(key,dev["metrics"])
+        self.assertEqual(dev["metrics"]["regime_gate"]["params"],gate)
+        self.assertEqual(dev["metrics"]["regime_gate_decision"]["n"],dev["n"])
+        summary=dev["gated_decision_summary"]
+        self.assertEqual(sum(summary["predicted_counts"].values()),dev["n"])
+        sample=dev["evaluation_samples"][0]
+        for key in ("gated_prediction","regime_gate_active","regime_gate_override",
+                    "market_index_ma200_gap_pct","market_index_return_20d_pct"):
+            self.assertIn(key,sample)
+        holdout=_backtest_model(rows,rows,"multinomial_logistic",20,"validation",
+            temperature_info=dev["temperature"],payoffs=dev["class_payoffs_from_development"],
+            include_samples=True)
+        self.assertEqual(holdout["temperature"]["regime_gate"],gate)
+        self.assertEqual(holdout["metrics"]["regime_gate"]["params"],gate)
+        self.assertEqual(holdout["metrics"]["regime_gate"]["scope"],
+            "fitted parameters reused unchanged from development")
 
 
 if __name__ == "__main__":

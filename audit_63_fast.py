@@ -288,6 +288,32 @@ def _earnings_policy_stage(legacy_rows,frames,requested,disclosure_stage,coverag
         "development_grid":grid,"periods":periods}
 
 
+def _three_way_decision_block(truth,pred,names=("UP","DOWN","SIDEWAYS")):
+    """Accuracy, class spread and confusion of one decision column."""
+    truth=np.asarray(list(truth));pred=np.asarray(list(pred));n=len(truth)
+    if not n:return {"evaluation_rows_n":0,"accuracy_pct":None,"collapse_status":"NO_ROWS"}
+    counts={name:int(np.sum(truth==name)) for name in names}
+    predicted={name:int(np.sum(pred==name)) for name in names}
+    confusion={t:{p:int(np.sum((truth==t)&(pred==p))) for p in names} for t in names}
+    class_metrics={}
+    for name in names:
+        correct=confusion[name][name]
+        precision=correct/predicted[name] if predicted[name] else 0.
+        recall=correct/counts[name] if counts[name] else 0.
+        f1=2*precision*recall/(precision+recall) if precision+recall else 0.
+        class_metrics[name]={"precision_pct":100*precision,"recall_pct":100*recall,
+            "f1_pct":100*f1,"actual":counts[name],"predicted":predicted[name],"correct":correct}
+    accuracy=float(np.mean(truth==pred));largest=100*max(predicted.values())/n
+    return {"evaluation_rows_n":n,"accuracy_pct":100*accuracy,
+        "accuracy_delta_vs_majority_pp":100*(accuracy-max(counts.values())/n),
+        "accuracy_standard_error_pp":100*float(np.sqrt(max(accuracy*(1-accuracy),0.)/n)),
+        "class_metrics":class_metrics,"predicted_counts":predicted,
+        "predicted_share_pct":{name:100*predicted[name]/n for name in names},
+        "largest_class_share_pct":largest,
+        "collapse_status":("ONE_CLASS_PINNED" if largest>=99 else "ONE_CLASS_DOMINANT" if largest>=90
+            else "DISTRIBUTED"),
+        "confusion_matrix":confusion}
+
 def _three_way_report(samples):
     """Summarize the exact selected direction3 probabilities without refitting."""
     names=("UP","DOWN","SIDEWAYS");usable=[]
@@ -308,7 +334,9 @@ def _three_way_report(samples):
         except (TypeError,ValueError):raw_values=None
         if raw_values is not None and (raw_values.shape!=(3,) or not np.isfinite(raw_values).all()):raw_values=None
         argmax=row.get("argmax_prediction")
-        usable.append((truth,pred,values,prior_values,argmax if argmax in names else None,raw_values))
+        gated=row.get("gated_prediction")
+        usable.append((truth,pred,values,prior_values,argmax if argmax in names else None,raw_values,
+                       gated if gated in names else None))
     n=len(usable);counts={name:sum(row[0]==name for row in usable) for name in names}
     predicted={name:sum(row[1]==name for row in usable) for name in names}
     confusion={truth:{pred:sum(row[0]==truth and row[1]==pred for row in usable) for pred in names} for truth in names}
@@ -350,6 +378,29 @@ def _three_way_report(samples):
         "decision_collapse_status":collapse,
         "mean_probabilities_pct":{name:100*float(probs[:,i].mean()) for i,name in enumerate(names)},
         "confusion_matrix":confusion}
+    # The regime/trend gate acts on the decision only. When the selected samples
+    # carry it, the headline accuracy and distribution are the gated decision and
+    # the ungated (probability + label-shift) numbers stay beside them, so the
+    # gate's own contribution is visible without touching Brier or probabilities.
+    gated_rows=[row[6] for row in usable]
+    if all(value is not None for value in gated_rows):
+        ungated_block=_three_way_decision_block(truth_all,np.asarray([row[1] for row in usable]),names)
+        gated_block=_three_way_decision_block(truth_all,np.asarray(gated_rows),names)
+        report["decision_rule"]=("regime trend gate on the label-shift decision "
+            "(signal-day cohort-index 20-day return, 200-day gap and 120-day drawdown, fitted on development only)")
+        report["ungated_decision"]=ungated_block
+        report["regime_gate_decision"]=gated_block
+        report.update({"accuracy_pct":gated_block["accuracy_pct"],
+            "accuracy_delta_vs_majority_pp":gated_block["accuracy_delta_vs_majority_pp"],
+            "accuracy_standard_error_pp":gated_block["accuracy_standard_error_pp"],
+            "class_metrics":gated_block["class_metrics"],
+            "predicted_share_pct":gated_block["predicted_share_pct"],
+            "largest_class_share_pct":gated_block["largest_class_share_pct"],
+            "decision_collapse_status":gated_block["collapse_status"],
+            "confusion_matrix":gated_block["confusion_matrix"],
+            "regime_gate_overrides_n":int(sum(1 for row in samples or [] if row.get("regime_gate_override"))),
+            "regime_gate_activated_n":int(sum(1 for row in samples or [] if row.get("regime_gate_active"))),
+            "accuracy_gate_minus_ungated_pp":gated_block["accuracy_pct"]-ungated_block["accuracy_pct"]})
     stance=probs[:,0]-probs[:,1]
     dispersion={"p_up_minus_p_down_p10_p50_p90":[float(np.percentile(stance,q)) for q in (10,50,90)],
         "stance_std":float(np.std(stance))}
