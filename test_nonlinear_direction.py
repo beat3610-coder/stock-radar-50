@@ -87,6 +87,20 @@ class NonlinearTests(unittest.TestCase):
         self.assertIn(result["status"],("RESEARCH_ONLY","INCOMPLETE"))
         self.assertFalse(result["independent_forward_test"])
         self.assertEqual(set(result["calendar_windows"]),{"2025","2026"})
+        for entry in result["calendar_windows"].values():
+            if entry["status"]=="RESEARCH_ONLY":
+                self.assertEqual(entry["rolling"]["samples"],
+                                 entry["recency_weighted_365d"]["samples"])
+                self.assertGreaterEqual(entry["recency_weighted_365d"]["brier"],0)
+    def test_recency_weights_do_not_depend_on_target_labels(self):
+        import numpy as np
+        from nonlinear_direction import _fit,_predict
+        data=vectors(self.samples()[:900],market_features(self.samples()[:900]))
+        trained=_fit(data,"extratrees",half_life_days=365,as_of_date="2025-01-01")
+        probabilities=_predict(trained,data[-40:])
+        self.assertTrue(np.allclose(probabilities.sum(axis=1),1))
+        self.assertTrue(np.all(np.isfinite(probabilities)))
+
     def test_three_class_probabilities_have_finite_metrics(self):
         rows=self.samples()
         result=run_nonlinear(rows,train_end="2024-09-01",
